@@ -1,6 +1,8 @@
 use bytes::Bytes;
 use lazy_static::lazy_static;
-use libsql::{Builder, Cipher, EncryptionConfig, Rows, Statement, Transaction, TransactionBehavior, Value};
+use libsql::{
+    Builder, Cipher, EncryptionConfig, Rows, Statement, Transaction, TransactionBehavior, Value,
+};
 use once_cell::sync::Lazy;
 use rustler::atoms;
 use rustler::types::atom::nil;
@@ -118,8 +120,8 @@ pub fn begin_transaction(conn_id: &str) -> NifResult<String> {
 pub fn begin_transaction_with_behavior(conn_id: &str, behavior: Atom) -> NifResult<String> {
     let conn_map = CONNECTION_REGISTRY.lock().unwrap();
     if let Some(conn) = conn_map.get(conn_id) {
-        let trx_behavior = decode_transaction_behavior(behavior)
-            .unwrap_or(TransactionBehavior::Deferred);
+        let trx_behavior =
+            decode_transaction_behavior(behavior).unwrap_or(TransactionBehavior::Deferred);
 
         let trx = TOKIO_RUNTIME
             .block_on(async {
@@ -312,7 +314,9 @@ fn connect(opts: Term, mode: Term) -> NifResult<String> {
         .get("auth_token")
         .and_then(|t| t.decode::<String>().ok());
     let dbname = map.get("database").and_then(|t| t.decode::<String>().ok());
-    let encryption_key = map.get("encryption_key").and_then(|t| t.decode::<String>().ok());
+    let encryption_key = map
+        .get("encryption_key")
+        .and_then(|t| t.decode::<String>().ok());
 
     let rt = tokio::runtime::Runtime::new()
         .map_err(|e| rustler::Error::Term(Box::new(format!("Tokio runtime err {}", e))))?;
@@ -434,7 +438,8 @@ fn query_args<'a>(
 
                     if let Some(modex) = decode_mode(mode) {
                         // if remote replica and a write query then sync
-                        if matches!(modex, Mode::RemoteReplica) && is_sync && syncx == enable_sync() {
+                        if matches!(modex, Mode::RemoteReplica) && is_sync && syncx == enable_sync()
+                        {
                             let _ = client.lock().unwrap().db.sync().await;
                         }
                     }
@@ -628,8 +633,9 @@ fn execute_batch<'a>(
         // Decode each statement with its arguments
         let mut batch_stmts: Vec<(String, Vec<Value>)> = Vec::new();
         for stmt_term in statements {
-            let (query, args): (String, Vec<Term>) = stmt_term.decode()
-                .map_err(|e| rustler::Error::Term(Box::new(format!("Failed to decode statement: {:?}", e))))?;
+            let (query, args): (String, Vec<Term>) = stmt_term.decode().map_err(|e| {
+                rustler::Error::Term(Box::new(format!("Failed to decode statement: {:?}", e)))
+            })?;
 
             let decoded_args: Vec<Value> = args
                 .into_iter()
@@ -661,14 +667,25 @@ fn execute_batch<'a>(
                         all_results.push(collected);
                     }
                     Err(e) => {
-                        return Err(rustler::Error::Term(Box::new(format!("Batch statement error: {}", e))));
+                        return Err(rustler::Error::Term(Box::new(format!(
+                            "Batch statement error: {}",
+                            e
+                        ))));
                     }
                 }
             }
 
             // Check if we need to sync
             let needs_sync = batch_stmts.iter().any(|(sql, _)| {
-                matches!(detect_query_type(sql), QueryType::Insert | QueryType::Update | QueryType::Delete | QueryType::Create | QueryType::Drop | QueryType::Alter)
+                matches!(
+                    detect_query_type(sql),
+                    QueryType::Insert
+                        | QueryType::Update
+                        | QueryType::Delete
+                        | QueryType::Create
+                        | QueryType::Drop
+                        | QueryType::Alter
+                )
             });
 
             if needs_sync {
@@ -704,8 +721,9 @@ fn execute_transactional_batch<'a>(
         // Decode each statement with its arguments
         let mut batch_stmts: Vec<(String, Vec<Value>)> = Vec::new();
         for stmt_term in statements {
-            let (query, args): (String, Vec<Term>) = stmt_term.decode()
-                .map_err(|e| rustler::Error::Term(Box::new(format!("Failed to decode statement: {:?}", e))))?;
+            let (query, args): (String, Vec<Term>) = stmt_term.decode().map_err(|e| {
+                rustler::Error::Term(Box::new(format!("Failed to decode statement: {:?}", e)))
+            })?;
 
             let decoded_args: Vec<Value> = args
                 .into_iter()
@@ -726,7 +744,9 @@ fn execute_transactional_batch<'a>(
                 .unwrap()
                 .transaction()
                 .await
-                .map_err(|e| rustler::Error::Term(Box::new(format!("Begin transaction failed: {}", e))))?;
+                .map_err(|e| {
+                    rustler::Error::Term(Box::new(format!("Begin transaction failed: {}", e)))
+                })?;
 
             let mut all_results: Vec<Term<'a>> = Vec::new();
 
@@ -742,7 +762,10 @@ fn execute_transactional_batch<'a>(
                     Err(e) => {
                         // Rollback on error
                         let _ = trx.rollback().await;
-                        return Err(rustler::Error::Term(Box::new(format!("Batch statement error: {}", e))));
+                        return Err(rustler::Error::Term(Box::new(format!(
+                            "Batch statement error: {}",
+                            e
+                        ))));
                     }
                 }
             }
@@ -754,7 +777,15 @@ fn execute_transactional_batch<'a>(
 
             // Sync if needed
             let needs_sync = batch_stmts.iter().any(|(sql, _)| {
-                matches!(detect_query_type(sql), QueryType::Insert | QueryType::Update | QueryType::Delete | QueryType::Create | QueryType::Drop | QueryType::Alter)
+                matches!(
+                    detect_query_type(sql),
+                    QueryType::Insert
+                        | QueryType::Update
+                        | QueryType::Delete
+                        | QueryType::Create
+                        | QueryType::Drop
+                        | QueryType::Alter
+                )
             });
 
             if needs_sync {
@@ -857,7 +888,7 @@ fn execute_prepared<'a>(
     mode: Atom,
     syncx: Atom,
     args: Vec<Term<'a>>,
-    sql_hint: &str,  // For detecting if we need sync
+    sql_hint: &str, // For detecting if we need sync
 ) -> NifResult<u64> {
     let conn_map = CONNECTION_REGISTRY.lock().unwrap();
     let mut stmt_registry = STMT_REGISTRY.lock().unwrap();
@@ -931,15 +962,8 @@ fn changes(conn_id: &str) -> NifResult<u64> {
     if let Some(client) = conn_map.get(conn_id) {
         let client = client.clone();
 
-        let result = TOKIO_RUNTIME.block_on(async {
-            client
-                .lock()
-                .unwrap()
-                .client
-                .lock()
-                .unwrap()
-                .changes()
-        });
+        let result = TOKIO_RUNTIME
+            .block_on(async { client.lock().unwrap().client.lock().unwrap().changes() });
 
         Ok(result)
     } else {
@@ -1040,9 +1064,7 @@ fn declare_cursor(conn_id: &str, sql: &str, args: Vec<Term>) -> NifResult<String
                 // Collect row values
                 let mut row_values = Vec::new();
                 for i in 0..columns.len() {
-                    let value = row
-                        .get(i as i32)
-                        .unwrap_or(Value::Null);
+                    let value = row.get(i as i32).unwrap_or(Value::Null);
                     row_values.push(value);
                 }
                 rows.push(row_values);
@@ -1058,7 +1080,10 @@ fn declare_cursor(conn_id: &str, sql: &str, args: Vec<Term>) -> NifResult<String
             position: 0,
         };
 
-        CURSOR_REGISTRY.lock().unwrap().insert(cursor_id.clone(), cursor_data);
+        CURSOR_REGISTRY
+            .lock()
+            .unwrap()
+            .insert(cursor_id.clone(), cursor_data);
 
         Ok(cursor_id)
     } else {
