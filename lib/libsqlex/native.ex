@@ -18,10 +18,16 @@ defmodule LibSqlEx.Native do
   def do_sync(_conn, _mode), do: :erlang.nif_error(:nif_not_loaded)
   def close(_id, _opt), do: :erlang.nif_error(:nif_not_loaded)
   def execute_batch(_conn, _mode, _sync, _statements), do: :erlang.nif_error(:nif_not_loaded)
-  def execute_transactional_batch(_conn, _mode, _sync, _statements), do: :erlang.nif_error(:nif_not_loaded)
+
+  def execute_transactional_batch(_conn, _mode, _sync, _statements),
+    do: :erlang.nif_error(:nif_not_loaded)
+
   def prepare_statement(_conn, _sql), do: :erlang.nif_error(:nif_not_loaded)
   def query_prepared(_conn, _stmt_id, _mode, _sync, _args), do: :erlang.nif_error(:nif_not_loaded)
-  def execute_prepared(_conn, _stmt_id, _mode, _sync, _args, _sql_hint), do: :erlang.nif_error(:nif_not_loaded)
+
+  def execute_prepared(_conn, _stmt_id, _mode, _sync, _args, _sql_hint),
+    do: :erlang.nif_error(:nif_not_loaded)
+
   def last_insert_rowid(_conn), do: :erlang.nif_error(:nif_not_loaded)
   def changes(_conn), do: :erlang.nif_error(:nif_not_loaded)
   def total_changes(_conn), do: :erlang.nif_error(:nif_not_loaded)
@@ -167,7 +173,12 @@ defmodule LibSqlEx.Native do
       {:ok, stmt_id} = LibSqlEx.Native.prepare(state, "INSERT INTO users (name) VALUES (?)")
       {:ok, rows_affected} = LibSqlEx.Native.execute_stmt(state, stmt_id, "INSERT INTO users (name) VALUES (?)", ["Alice"])
   """
-  def execute_stmt(%LibSqlEx.State{conn_id: conn_id, mode: mode, sync: syncx} = _state, stmt_id, sql, args) do
+  def execute_stmt(
+        %LibSqlEx.State{conn_id: conn_id, mode: mode, sync: syncx} = _state,
+        stmt_id,
+        sql,
+        args
+      ) do
     case execute_prepared(conn_id, stmt_id, mode, syncx, args, sql) do
       num_rows when is_integer(num_rows) ->
         {:ok, num_rows}
@@ -190,7 +201,11 @@ defmodule LibSqlEx.Native do
       {:ok, stmt_id} = LibSqlEx.Native.prepare(state, "SELECT * FROM users WHERE id = ?")
       {:ok, result} = LibSqlEx.Native.query_stmt(state, stmt_id, [42])
   """
-  def query_stmt(%LibSqlEx.State{conn_id: conn_id, mode: mode, sync: syncx} = _state, stmt_id, args) do
+  def query_stmt(
+        %LibSqlEx.State{conn_id: conn_id, mode: mode, sync: syncx} = _state,
+        stmt_id,
+        args
+      ) do
     case query_prepared(conn_id, stmt_id, mode, syncx, args) do
       %{"columns" => columns, "rows" => rows, "num_rows" => num_rows} ->
         result = %LibSqlEx.Result{
@@ -199,6 +214,7 @@ defmodule LibSqlEx.Native do
           rows: rows,
           num_rows: num_rows
         }
+
         {:ok, result}
 
       {:error, reason} ->
@@ -346,19 +362,22 @@ defmodule LibSqlEx.Native do
     case execute_batch(conn_id, mode, syncx, statements) do
       results when is_list(results) ->
         # Convert each result to LibSqlEx.Result struct
-        parsed_results = Enum.map(results, fn result ->
-          case result do
-            %{"columns" => columns, "rows" => rows, "num_rows" => num_rows} ->
-              %LibSqlEx.Result{
-                command: :batch,
-                columns: columns,
-                rows: rows,
-                num_rows: num_rows
-              }
-            _ ->
-              %LibSqlEx.Result{command: :batch}
-          end
-        end)
+        parsed_results =
+          Enum.map(results, fn result ->
+            case result do
+              %{"columns" => columns, "rows" => rows, "num_rows" => num_rows} ->
+                %LibSqlEx.Result{
+                  command: :batch,
+                  columns: columns,
+                  rows: rows,
+                  num_rows: num_rows
+                }
+
+              _ ->
+                %LibSqlEx.Result{command: :batch}
+            end
+          end)
+
         {:ok, parsed_results}
 
       {:error, message} ->
@@ -382,23 +401,29 @@ defmodule LibSqlEx.Native do
       ]
       {:ok, results} = LibSqlEx.Native.batch_transactional(state, statements)
   """
-  def batch_transactional(%LibSqlEx.State{conn_id: conn_id, mode: mode, sync: syncx} = _state, statements) do
+  def batch_transactional(
+        %LibSqlEx.State{conn_id: conn_id, mode: mode, sync: syncx} = _state,
+        statements
+      ) do
     case execute_transactional_batch(conn_id, mode, syncx, statements) do
       results when is_list(results) ->
         # Convert each result to LibSqlEx.Result struct
-        parsed_results = Enum.map(results, fn result ->
-          case result do
-            %{"columns" => columns, "rows" => rows, "num_rows" => num_rows} ->
-              %LibSqlEx.Result{
-                command: :batch,
-                columns: columns,
-                rows: rows,
-                num_rows: num_rows
-              }
-            _ ->
-              %LibSqlEx.Result{command: :batch}
-          end
-        end)
+        parsed_results =
+          Enum.map(results, fn result ->
+            case result do
+              %{"columns" => columns, "rows" => rows, "num_rows" => num_rows} ->
+                %LibSqlEx.Result{
+                  command: :batch,
+                  columns: columns,
+                  rows: rows,
+                  num_rows: num_rows
+                }
+
+              _ ->
+                %LibSqlEx.Result{command: :batch}
+            end
+          end)
+
         {:ok, parsed_results}
 
       {:error, message} ->

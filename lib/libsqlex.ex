@@ -61,7 +61,7 @@ defmodule LibSqlEx do
   @impl true
   @doc """
   Executes an SQL query, delegating to transactional or non-transactional logic
-  depending on the connection state. 
+  depending on the connection state.
   """
   def handle_execute(
         query,
@@ -196,7 +196,12 @@ defmodule LibSqlEx do
   end
 
   @impl true
-  def handle_declare(%LibSqlEx.Query{statement: statement} = query, params, _opts, %LibSqlEx.State{conn_id: conn_id} = state) do
+  def handle_declare(
+        %LibSqlEx.Query{statement: statement} = query,
+        params,
+        _opts,
+        %LibSqlEx.State{conn_id: conn_id} = state
+      ) do
     case LibSqlEx.Native.declare_cursor(conn_id, statement, params) do
       cursor_id when is_binary(cursor_id) ->
         cursor = %{ref: cursor_id}
