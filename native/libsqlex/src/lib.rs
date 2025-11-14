@@ -1138,29 +1138,4 @@ fn fetch_cursor<'a>(env: Env<'a>, cursor_id: &str, max_rows: usize) -> NifResult
     Ok(result.encode(env))
 }
 
-rustler::init!(
-    "Elixir.LibSqlEx.Native",
-    [
-        ping,
-        connect,
-        query_args,
-        begin_transaction,
-        begin_transaction_with_behavior,
-        execute_with_transaction,
-        handle_status_transaction,
-        commit_or_rollback_transaction,
-        do_sync,
-        close,
-        execute_batch,
-        execute_transactional_batch,
-        prepare_statement,
-        query_prepared,
-        execute_prepared,
-        last_insert_rowid,
-        changes,
-        total_changes,
-        is_autocommit,
-        declare_cursor,
-        fetch_cursor
-    ]
-);
+rustler::init!("Elixir.LibSqlEx.Native");
