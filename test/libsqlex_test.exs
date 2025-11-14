@@ -163,6 +163,7 @@ defmodule LibSqlExTest do
       statement:
         "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, email TEXT)"
     }
+
     {:ok, _, _, state} = LibSqlEx.handle_execute(create_table, [], [], state)
 
     insert_query = %LibSqlEx.Query{
@@ -197,6 +198,7 @@ defmodule LibSqlExTest do
       statement:
         "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, email TEXT)"
     }
+
     {:ok, _, _, state} = LibSqlEx.handle_execute(create_table, [], [], state)
 
     {:ok, _, new_state} = LibSqlEx.handle_begin([], state)
