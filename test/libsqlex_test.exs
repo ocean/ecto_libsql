@@ -264,11 +264,12 @@ defmodule LibSqlExTest do
 
       {:ok, remote_state} = LibSqlEx.connect(remote_only)
 
-    query_select = "SELECT * FROM users WHERE email = ? LIMIT 1"
-    select_execute = LibSqlEx.handle_execute(query_select, ["nosync@gmail.com"], [], remote_state)
+      query_select = "SELECT * FROM users WHERE email = ? LIMIT 1"
+      select_execute = LibSqlEx.handle_execute(query_select, ["nosync@gmail.com"], [], remote_state)
 
-    assert {:ok, _, %LibSqlEx.Result{command: :select, columns: [], rows: [], num_rows: 0}, _} =
-             select_execute
+      assert {:ok, _, %LibSqlEx.Result{command: :select, columns: [], rows: [], num_rows: 0}, _} =
+               select_execute
+    end
   end
 
   test "manual sync", _state do
