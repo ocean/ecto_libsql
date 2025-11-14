@@ -130,9 +130,16 @@ defmodule LibSqlExTest do
     assert result.rows == [["alice@new.com"]]
   end
 
-  # doesn't support multiple statement
+  # libSQL supports multiple statements in one execution
   test "multiple statements in one execution", state do
     {:ok, state} = LibSqlEx.connect(state[:opts])
+
+    # Create table first
+    create_table = %LibSqlEx.Query{
+      statement:
+        "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, email TEXT)"
+    }
+    {:ok, _, _, state} = LibSqlEx.handle_execute(create_table, [], [], state)
 
     query = %LibSqlEx.Query{
       statement: """
@@ -141,7 +148,8 @@ defmodule LibSqlExTest do
       """
     }
 
-    assert {:error, _, _, _} = LibSqlEx.handle_execute(query, [], [], state)
+    # libSQL now supports multiple statements, so this should succeed
+    assert {:ok, _, _, _} = LibSqlEx.handle_execute(query, [], [], state)
   end
 
   test "select with parameter", state do
@@ -247,12 +255,14 @@ defmodule LibSqlExTest do
 
     assert {:ok, _, _, _} = res_execute
 
-    remote_only = [
-      uri: System.get_env("LIBSQL_URI"),
-      auth_token: System.get_env("LIBSQL_TOKEN")
-    ]
+    # Skip remote connection test if env vars are not set
+    if System.get_env("LIBSQL_URI") && System.get_env("LIBSQL_TOKEN") do
+      remote_only = [
+        uri: System.get_env("LIBSQL_URI"),
+        auth_token: System.get_env("LIBSQL_TOKEN")
+      ]
 
-    {:ok, remote_state} = LibSqlEx.connect(remote_only)
+      {:ok, remote_state} = LibSqlEx.connect(remote_only)
 
     query_select = "SELECT * FROM users WHERE email = ? LIMIT 1"
     select_execute = LibSqlEx.handle_execute(query_select, ["nosync@gmail.com"], [], remote_state)
