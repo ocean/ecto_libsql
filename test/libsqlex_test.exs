@@ -139,6 +139,7 @@ defmodule LibSqlExTest do
       statement:
         "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, email TEXT)"
     }
+
     {:ok, _, _, state} = LibSqlEx.handle_execute(create_table, [], [], state)
 
     query = %LibSqlEx.Query{
@@ -265,7 +266,9 @@ defmodule LibSqlExTest do
       {:ok, remote_state} = LibSqlEx.connect(remote_only)
 
       query_select = "SELECT * FROM users WHERE email = ? LIMIT 1"
-      select_execute = LibSqlEx.handle_execute(query_select, ["nosync@gmail.com"], [], remote_state)
+
+      select_execute =
+        LibSqlEx.handle_execute(query_select, ["nosync@gmail.com"], [], remote_state)
 
       assert {:ok, _, %LibSqlEx.Result{command: :select, columns: [], rows: [], num_rows: 0}, _} =
                select_execute
