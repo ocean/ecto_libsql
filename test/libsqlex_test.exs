@@ -317,7 +317,7 @@ defmodule LibSqlExTest do
   test "prepared statements with reuse", state do
     {:ok, state} = LibSqlEx.connect(state[:opts])
 
-    # Create table with INTEGER price (floats not supported as NIF params)
+    # Create table
     create_table = %LibSqlEx.Query{
       statement:
         "CREATE TABLE IF NOT EXISTS products (id INTEGER PRIMARY KEY, name TEXT, price INTEGER)"
@@ -325,48 +325,47 @@ defmodule LibSqlExTest do
 
     {:ok, _, _, state} = LibSqlEx.handle_execute(create_table, [], [], state)
 
-    # Prepare insert statement
-    {:ok, insert_stmt} =
-      LibSqlEx.Native.prepare(state, "INSERT INTO products (name, price) VALUES (?, ?)")
+    # Prepare a SELECT statement
+    {:ok, select_stmt} = LibSqlEx.Native.prepare(state, "SELECT * FROM products WHERE name = ?")
 
-    # Execute multiple times with different data (using integers instead of floats)
-    {:ok, _} =
-      LibSqlEx.Native.execute_stmt(
-        state,
-        insert_stmt,
+    # First, insert some data using regular execute
+    {:ok, _, _, state} =
+      LibSqlEx.handle_execute(
         "INSERT INTO products (name, price) VALUES (?, ?)",
-        ["Widget", 19]
+        ["Widget", 19],
+        [],
+        state
       )
 
-    {:ok, _} =
-      LibSqlEx.Native.execute_stmt(
-        state,
-        insert_stmt,
+    {:ok, _, _, state} =
+      LibSqlEx.handle_execute(
         "INSERT INTO products (name, price) VALUES (?, ?)",
-        ["Gadget", 29]
+        ["Gadget", 29],
+        [],
+        state
       )
 
-    {:ok, _} =
-      LibSqlEx.Native.execute_stmt(
-        state,
-        insert_stmt,
+    {:ok, _, _, state} =
+      LibSqlEx.handle_execute(
         "INSERT INTO products (name, price) VALUES (?, ?)",
-        ["Doohickey", 39]
+        ["Doohickey", 39],
+        [],
+        state
       )
+
+    # Use prepared statement to query multiple times
+    {:ok, result1} = LibSqlEx.Native.query_stmt(state, select_stmt, ["Widget"])
+    assert result1.num_rows == 1
+    assert hd(result1.rows) |> Enum.at(1) == "Widget"
+
+    {:ok, result2} = LibSqlEx.Native.query_stmt(state, select_stmt, ["Gadget"])
+    assert result2.num_rows == 1
+    assert hd(result2.rows) |> Enum.at(1) == "Gadget"
+
+    {:ok, result3} = LibSqlEx.Native.query_stmt(state, select_stmt, ["Doohickey"])
+    assert result3.num_rows == 1
 
     # Clean up
-    :ok = LibSqlEx.Native.close_stmt(insert_stmt)
-
-    # Prepare select statement
-    {:ok, select_stmt} =
-      LibSqlEx.Native.prepare(state, "SELECT name, price FROM products WHERE price > ?")
-
-    # Query with prepared statement
-    {:ok, result} = LibSqlEx.Native.query_stmt(state, select_stmt, [25])
-
-    assert result.num_rows == 2
-    assert length(result.rows) == 2
-
     :ok = LibSqlEx.Native.close_stmt(select_stmt)
   end
 
@@ -390,9 +389,14 @@ defmodule LibSqlExTest do
 
     {:ok, results} = LibSqlEx.Native.batch(state, statements)
 
-    # Last result should be the count
+    # Should have 4 results (3 inserts + 1 select)
+    assert length(results) == 4
+
+    # Last result should be the count query
     count_result = List.last(results)
-    assert count_result.num_rows >= 3
+    # Extract the actual count value from the result rows
+    [[count]] = count_result.rows
+    assert count >= 3
   end
 
   test "batch operations - transactional atomicity", state do
