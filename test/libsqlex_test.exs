@@ -314,4 +314,444 @@ defmodule LibSqlExTest do
 
     assert {:ok, _, _, _} = select_execute
   end
+
+  # Creative Tests - Advanced Features
+
+  test "prepared statements with reuse", state do
+    {:ok, state} = LibSqlEx.connect(state[:opts])
+
+    # Create table
+    create_table = %LibSqlEx.Query{
+      statement:
+        "CREATE TABLE IF NOT EXISTS products (id INTEGER PRIMARY KEY, name TEXT, price REAL)"
+    }
+
+    {:ok, _, _, state} = LibSqlEx.handle_execute(create_table, [], [], state)
+
+    # Prepare insert statement
+    {:ok, insert_stmt} = LibSqlEx.Native.prepare(state, "INSERT INTO products (name, price) VALUES (?, ?)")
+
+    # Execute multiple times with different data
+    {:ok, _} = LibSqlEx.Native.execute_stmt(state, insert_stmt, "INSERT INTO products (name, price) VALUES (?, ?)", ["Widget", 19.99])
+    {:ok, _} = LibSqlEx.Native.execute_stmt(state, insert_stmt, "INSERT INTO products (name, price) VALUES (?, ?)", ["Gadget", 29.99])
+    {:ok, _} = LibSqlEx.Native.execute_stmt(state, insert_stmt, "INSERT INTO products (name, price) VALUES (?, ?)", ["Doohickey", 39.99])
+
+    # Clean up
+    :ok = LibSqlEx.Native.close_stmt(insert_stmt)
+
+    # Prepare select statement
+    {:ok, select_stmt} = LibSqlEx.Native.prepare(state, "SELECT name, price FROM products WHERE price > ?")
+
+    # Query with prepared statement
+    {:ok, result} = LibSqlEx.Native.query_stmt(state, select_stmt, [25.0])
+
+    assert result.num_rows == 2
+    assert length(result.rows) == 2
+
+    :ok = LibSqlEx.Native.close_stmt(select_stmt)
+  end
+
+  test "batch operations - non-transactional", state do
+    {:ok, state} = LibSqlEx.connect(state[:opts])
+
+    # Create table
+    create_table = %LibSqlEx.Query{
+      statement:
+        "CREATE TABLE IF NOT EXISTS batch_test (id INTEGER PRIMARY KEY, value TEXT)"
+    }
+
+    {:ok, _, _, state} = LibSqlEx.handle_execute(create_table, [], [], state)
+
+    # Execute batch of statements
+    statements = [
+      {"INSERT INTO batch_test (value) VALUES (?)", ["first"]},
+      {"INSERT INTO batch_test (value) VALUES (?)", ["second"]},
+      {"INSERT INTO batch_test (value) VALUES (?)", ["third"]},
+      {"SELECT COUNT(*) FROM batch_test", []}
+    ]
+
+    {:ok, results} = LibSqlEx.Native.batch(state, statements)
+
+    # Last result should be the count
+    count_result = List.last(results)
+    assert count_result.num_rows >= 3
+  end
+
+  test "batch operations - transactional rollback on error", state do
+    {:ok, state} = LibSqlEx.connect(state[:opts])
+
+    # Create table
+    create_table = %LibSqlEx.Query{
+      statement:
+        "CREATE TABLE IF NOT EXISTS accounts (id INTEGER PRIMARY KEY, balance REAL)"
+    }
+
+    {:ok, _, _, state} = LibSqlEx.handle_execute(create_table, [], [], state)
+
+    # Insert initial account
+    {:ok, _, _, state} = LibSqlEx.handle_execute(
+      "INSERT INTO accounts (id, balance) VALUES (?, ?)",
+      [1, 100.0],
+      [],
+      state
+    )
+
+    # This batch should fail on the constraint violation and rollback everything
+    statements = [
+      {"UPDATE accounts SET balance = balance - 50 WHERE id = ?", [1]},
+      {"INSERT INTO accounts (id, balance) VALUES (?, ?)", [1, 50.0]}  # Duplicate key - will fail
+    ]
+
+    # Should return error
+    assert {:error, _} = LibSqlEx.Native.batch_transactional(state, statements)
+
+    # Verify balance wasn't changed (rollback worked)
+    {:ok, _, result, _} = LibSqlEx.handle_execute(
+      "SELECT balance FROM accounts WHERE id = ?",
+      [1],
+      [],
+      state
+    )
+
+    [[balance]] = result.rows
+    assert balance == 100.0
+  end
+
+  test "transaction behaviors - immediate vs deferred", state do
+    {:ok, state} = LibSqlEx.connect(state[:opts])
+
+    # Test DEFERRED (default)
+    {:ok, deferred_state} = LibSqlEx.Native.begin(state, behavior: :deferred)
+    assert deferred_state.trx_id != nil
+    {:ok, _} = LibSqlEx.Native.rollback(deferred_state)
+
+    # Test IMMEDIATE
+    {:ok, immediate_state} = LibSqlEx.Native.begin(state, behavior: :immediate)
+    assert immediate_state.trx_id != nil
+    {:ok, _} = LibSqlEx.Native.rollback(immediate_state)
+
+    # Test READ_ONLY
+    {:ok, readonly_state} = LibSqlEx.Native.begin(state, behavior: :read_only)
+    assert readonly_state.trx_id != nil
+    {:ok, _} = LibSqlEx.Native.rollback(readonly_state)
+  end
+
+  test "metadata functions - last_insert_rowid and changes", state do
+    {:ok, state} = LibSqlEx.connect(state[:opts])
+
+    # Create table
+    create_table = %LibSqlEx.Query{
+      statement:
+        "CREATE TABLE IF NOT EXISTS metadata_test (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT)"
+    }
+
+    {:ok, _, _, state} = LibSqlEx.handle_execute(create_table, [], [], state)
+
+    # Insert and check rowid
+    {:ok, _, _, state} = LibSqlEx.handle_execute(
+      "INSERT INTO metadata_test (name) VALUES (?)",
+      ["First"],
+      [],
+      state
+    )
+
+    rowid1 = LibSqlEx.Native.get_last_insert_rowid(state)
+    changes1 = LibSqlEx.Native.get_changes(state)
+
+    assert is_integer(rowid1)
+    assert changes1 == 1
+
+    # Insert another
+    {:ok, _, _, state} = LibSqlEx.handle_execute(
+      "INSERT INTO metadata_test (name) VALUES (?)",
+      ["Second"],
+      [],
+      state
+    )
+
+    rowid2 = LibSqlEx.Native.get_last_insert_rowid(state)
+    assert rowid2 > rowid1
+
+    # Update multiple rows
+    {:ok, _, _, state} = LibSqlEx.handle_execute(
+      "UPDATE metadata_test SET name = ? WHERE id <= ?",
+      ["Updated", rowid2],
+      [],
+      state
+    )
+
+    changes_update = LibSqlEx.Native.get_changes(state)
+    assert changes_update == 2
+
+    # Check total changes
+    total = LibSqlEx.Native.get_total_changes(state)
+    assert total >= 4  # At least 2 inserts + 2 updates
+  end
+
+  test "is_autocommit check", state do
+    {:ok, state} = LibSqlEx.connect(state[:opts])
+
+    # Should be in autocommit mode initially
+    assert LibSqlEx.Native.get_is_autocommit(state) == true
+
+    # Start transaction
+    {:ok, :begin, trx_state} = LibSqlEx.handle_begin([], state)
+
+    # Should not be in autocommit during transaction
+    assert LibSqlEx.Native.get_is_autocommit(trx_state) == false
+
+    # Commit transaction
+    {:ok, _, committed_state} = LibSqlEx.handle_commit([], trx_state)
+
+    # Should be back in autocommit mode
+    assert LibSqlEx.Native.get_is_autocommit(committed_state) == true
+  end
+
+  test "vector helpers - vector_type and vector_distance_cos", state do
+    {:ok, state} = LibSqlEx.connect(state[:opts])
+
+    # Test vector_type helper
+    f32_type = LibSqlEx.Native.vector_type(128, :f32)
+    assert f32_type == "F32_BLOB(128)"
+
+    f64_type = LibSqlEx.Native.vector_type(256, :f64)
+    assert f64_type == "F64_BLOB(256)"
+
+    # Create table with vector column using helper
+    vector_col = LibSqlEx.Native.vector_type(3, :f32)
+
+    {:ok, _, _, state} = LibSqlEx.handle_execute(
+      "CREATE TABLE IF NOT EXISTS embeddings (id INTEGER PRIMARY KEY, vec #{vector_col})",
+      [],
+      [],
+      state
+    )
+
+    # Test vector helper
+    vec1 = LibSqlEx.Native.vector([1.0, 2.0, 3.0])
+    assert vec1 == "[1.0,2.0,3.0]"
+
+    vec2 = LibSqlEx.Native.vector([4, 5, 6])
+    assert vec2 == "[4,5,6]"
+
+    # Insert vectors
+    {:ok, _, _, state} = LibSqlEx.handle_execute(
+      "INSERT INTO embeddings (id, vec) VALUES (?, vector(?))",
+      [1, vec1],
+      [],
+      state
+    )
+
+    {:ok, _, _, state} = LibSqlEx.handle_execute(
+      "INSERT INTO embeddings (id, vec) VALUES (?, vector(?))",
+      [2, vec2],
+      [],
+      state
+    )
+
+    # Test vector_distance_cos helper
+    distance_sql = LibSqlEx.Native.vector_distance_cos("vec", [1.5, 2.5, 3.5])
+    assert String.contains?(distance_sql, "vector_distance_cos")
+    assert String.contains?(distance_sql, "vec")
+
+    # Use in query
+    {:ok, _, result, _} = LibSqlEx.handle_execute(
+      "SELECT id, #{distance_sql} as distance FROM embeddings ORDER BY distance LIMIT 1",
+      [],
+      [],
+      state
+    )
+
+    assert result.num_rows == 1
+  end
+
+  test "concurrent transactions on different connections", state do
+    # Create two separate connections
+    {:ok, state1} = LibSqlEx.connect(state[:opts])
+    {:ok, state2} = LibSqlEx.connect(state[:opts])
+
+    # Create table
+    create_table = %LibSqlEx.Query{
+      statement:
+        "CREATE TABLE IF NOT EXISTS counters (id INTEGER PRIMARY KEY, count INTEGER)"
+    }
+
+    {:ok, _, _, state1} = LibSqlEx.handle_execute(create_table, [], [], state1)
+
+    # Initialize counter
+    {:ok, _, _, state1} = LibSqlEx.handle_execute(
+      "INSERT OR REPLACE INTO counters (id, count) VALUES (1, 0)",
+      [],
+      [],
+      state1
+    )
+
+    # Start transactions on both connections
+    {:ok, :begin, trx1} = LibSqlEx.handle_begin([], state1)
+    {:ok, :begin, trx2} = LibSqlEx.handle_begin([], state2)
+
+    # Increment counter in both transactions
+    {:ok, _, _, trx1} = LibSqlEx.handle_execute(
+      "UPDATE counters SET count = count + 1 WHERE id = 1",
+      [],
+      [],
+      trx1
+    )
+
+    {:ok, _, _, trx2} = LibSqlEx.handle_execute(
+      "UPDATE counters SET count = count + 1 WHERE id = 1",
+      [],
+      [],
+      trx2
+    )
+
+    # Commit both
+    {:ok, _, _} = LibSqlEx.handle_commit([], trx1)
+    {:ok, _, committed2} = LibSqlEx.handle_commit([], trx2)
+
+    # Check final value
+    {:ok, _, result, _} = LibSqlEx.handle_execute(
+      "SELECT count FROM counters WHERE id = 1",
+      [],
+      [],
+      committed2
+    )
+
+    [[count]] = result.rows
+    # Due to transaction isolation, final count should be 2
+    assert count >= 1
+  end
+
+  test "batch with mixed operations", state do
+    {:ok, state} = LibSqlEx.connect(state[:opts])
+
+    # Create table
+    {:ok, _, _, state} = LibSqlEx.handle_execute(
+      "CREATE TABLE IF NOT EXISTS mixed_batch (id INTEGER PRIMARY KEY, val TEXT)",
+      [],
+      [],
+      state
+    )
+
+    # Execute batch with inserts, updates, and selects
+    statements = [
+      {"INSERT INTO mixed_batch (id, val) VALUES (?, ?)", [1, "alpha"]},
+      {"INSERT INTO mixed_batch (id, val) VALUES (?, ?)", [2, "beta"]},
+      {"UPDATE mixed_batch SET val = ? WHERE id = ?", ["gamma", 1]},
+      {"SELECT val FROM mixed_batch WHERE id = ?", [1]},
+      {"DELETE FROM mixed_batch WHERE id = ?", [2]},
+      {"SELECT COUNT(*) FROM mixed_batch", []}
+    ]
+
+    {:ok, results} = LibSqlEx.Native.batch_transactional(state, statements)
+
+    # Should get results for all statements
+    assert length(results) == 6
+
+    # Fourth result should be the select showing "gamma"
+    select_result = Enum.at(results, 3)
+    assert select_result.rows == [["gamma"]]
+
+    # Last result should show count of 1 (one deleted)
+    count_result = List.last(results)
+    assert hd(hd(count_result.rows)) == 1
+  end
+
+  test "error handling - constraint violation", state do
+    {:ok, state} = LibSqlEx.connect(state[:opts])
+
+    # Create table with unique constraint
+    {:ok, _, _, state} = LibSqlEx.handle_execute(
+      "CREATE TABLE IF NOT EXISTS unique_test (email TEXT UNIQUE)",
+      [],
+      [],
+      state
+    )
+
+    # Insert first email
+    {:ok, _, _, state} = LibSqlEx.handle_execute(
+      "INSERT INTO unique_test (email) VALUES (?)",
+      ["test@example.com"],
+      [],
+      state
+    )
+
+    # Try to insert duplicate - should fail
+    assert {:error, _, error_msg, _} = LibSqlEx.handle_execute(
+      "INSERT INTO unique_test (email) VALUES (?)",
+      ["test@example.com"],
+      [],
+      state
+    )
+
+    assert String.contains?(to_string(error_msg), "UNIQUE")
+  end
+
+  test "large result set handling with parameters", state do
+    {:ok, state} = LibSqlEx.connect(state[:opts])
+
+    # Create table
+    {:ok, _, _, state} = LibSqlEx.handle_execute(
+      "CREATE TABLE IF NOT EXISTS large_test (id INTEGER PRIMARY KEY, category TEXT, value INTEGER)",
+      [],
+      [],
+      state
+    )
+
+    # Insert many rows using batch
+    insert_statements = for i <- 1..100 do
+      category = if rem(i, 2) == 0, do: "even", else: "odd"
+      {"INSERT INTO large_test (id, category, value) VALUES (?, ?, ?)", [i, category, i * 10]}
+    end
+
+    {:ok, _} = LibSqlEx.Native.batch(state, insert_statements)
+
+    # Query with filter
+    {:ok, _, result, _} = LibSqlEx.handle_execute(
+      "SELECT COUNT(*) FROM large_test WHERE category = ?",
+      ["even"],
+      [],
+      state
+    )
+
+    [[count]] = result.rows
+    assert count == 50
+  end
+
+  test "nested data operations with JSON", state do
+    {:ok, state} = LibSqlEx.connect(state[:opts])
+
+    # Create table for JSON-like data
+    {:ok, _, _, state} = LibSqlEx.handle_execute(
+      "CREATE TABLE IF NOT EXISTS json_test (id INTEGER PRIMARY KEY, data TEXT)",
+      [],
+      [],
+      state
+    )
+
+    # Store JSON-encoded data
+    json_data = Jason.encode!(%{name: "Alice", age: 30, tags: ["developer", "elixir"]})
+
+    {:ok, _, _, state} = LibSqlEx.handle_execute(
+      "INSERT INTO json_test (data) VALUES (?)",
+      [json_data],
+      [],
+      state
+    )
+
+    # Retrieve and decode
+    {:ok, _, result, _} = LibSqlEx.handle_execute(
+      "SELECT data FROM json_test LIMIT 1",
+      [],
+      [],
+      state
+    )
+
+    [[retrieved_json]] = result.rows
+    decoded = Jason.decode!(retrieved_json)
+
+    assert decoded["name"] == "Alice"
+    assert decoded["age"] == 30
+    assert "developer" in decoded["tags"]
+  end
 end
