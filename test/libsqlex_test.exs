@@ -314,22 +314,22 @@ defmodule LibSqlExTest do
 
   # Creative Tests - Advanced Features
 
-  test "prepared statements - basic functionality", state do
+  test "prepared statements with parameter binding", state do
     {:ok, state} = LibSqlEx.connect(state[:opts])
 
-    # Create table
+    # Create table with REAL for floats
     create_table = %LibSqlEx.Query{
       statement:
-        "CREATE TABLE IF NOT EXISTS products (id INTEGER PRIMARY KEY, name TEXT, price INTEGER)"
+        "CREATE TABLE IF NOT EXISTS products (id INTEGER PRIMARY KEY, name TEXT, price REAL)"
     }
 
     {:ok, _, _, state} = LibSqlEx.handle_execute(create_table, [], [], state)
 
-    # Insert some data
+    # Insert data using floats (now supported!)
     {:ok, _, _, state} =
       LibSqlEx.handle_execute(
         "INSERT INTO products (name, price) VALUES (?, ?)",
-        ["Widget", 19],
+        ["Widget", 19.99],
         [],
         state
       )
@@ -337,21 +337,39 @@ defmodule LibSqlExTest do
     {:ok, _, _, state} =
       LibSqlEx.handle_execute(
         "INSERT INTO products (name, price) VALUES (?, ?)",
-        ["Gadget", 29],
+        ["Gadget", 29.50],
         [],
         state
       )
 
-    # Test that we can prepare and query a statement
-    {:ok, select_stmt} = LibSqlEx.Native.prepare(state, "SELECT COUNT(*) FROM products")
+    {:ok, _, _, state} =
+      LibSqlEx.handle_execute(
+        "INSERT INTO products (name, price) VALUES (?, ?)",
+        ["Doohickey", 39.75],
+        [],
+        state
+      )
 
-    # Use prepared statement
-    {:ok, result} = LibSqlEx.Native.query_stmt(state, select_stmt, [])
-    assert result.num_rows == 1
-    [[count]] = result.rows
-    assert count == 2
+    # Test prepared statement with parameter binding
+    {:ok, select_stmt} = LibSqlEx.Native.prepare(state, "SELECT * FROM products WHERE name = ?")
 
-    # Clean up - verify close works
+    # Query with different parameters - testing parameter binding works
+    {:ok, result1} = LibSqlEx.Native.query_stmt(state, select_stmt, ["Widget"])
+    assert result1.num_rows == 1
+    [[_id, name1, price1]] = result1.rows
+    assert name1 == "Widget"
+    assert price1 == 19.99
+
+    {:ok, result2} = LibSqlEx.Native.query_stmt(state, select_stmt, ["Gadget"])
+    assert result2.num_rows == 1
+    [[_id, name2, price2]] = result2.rows
+    assert name2 == "Gadget"
+    assert price2 == 29.50
+
+    {:ok, result3} = LibSqlEx.Native.query_stmt(state, select_stmt, ["Doohickey"])
+    assert result3.num_rows == 1
+
+    # Clean up
     assert :ok = LibSqlEx.Native.close_stmt(select_stmt)
   end
 
@@ -385,30 +403,30 @@ defmodule LibSqlExTest do
     assert count >= 3
   end
 
-  test "batch operations - transactional atomicity", state do
+  test "batch operations - transactional atomicity with floats", state do
     {:ok, state} = LibSqlEx.connect(state[:opts])
 
-    # Create table with INTEGER balance (floats not supported as NIF params)
+    # Create table with REAL balance (floats now supported!)
     create_table = %LibSqlEx.Query{
-      statement: "CREATE TABLE IF NOT EXISTS accounts (id INTEGER PRIMARY KEY, balance INTEGER)"
+      statement: "CREATE TABLE IF NOT EXISTS accounts (id INTEGER PRIMARY KEY, balance REAL)"
     }
 
     {:ok, _, _, state} = LibSqlEx.handle_execute(create_table, [], [], state)
 
-    # Insert initial account
+    # Insert initial account with float
     {:ok, _, _, state} =
       LibSqlEx.handle_execute(
         "INSERT INTO accounts (id, balance) VALUES (?, ?)",
-        [1, 100],
+        [1, 100.50],
         [],
         state
       )
 
     # This batch should fail on the constraint violation and rollback everything
     statements = [
-      {"UPDATE accounts SET balance = balance - 50 WHERE id = ?", [1]},
+      {"UPDATE accounts SET balance = balance - 25.25 WHERE id = ?", [1]},
       # Duplicate key - will fail
-      {"INSERT INTO accounts (id, balance) VALUES (?, ?)", [1, 50]}
+      {"INSERT INTO accounts (id, balance) VALUES (?, ?)", [1, 50.00]}
     ]
 
     # Should return error
@@ -424,7 +442,7 @@ defmodule LibSqlExTest do
       )
 
     [[balance]] = result.rows
-    assert balance == 100
+    assert balance == 100.50
   end
 
   test "transaction behaviors - deferred and read_only", state do

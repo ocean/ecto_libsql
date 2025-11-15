@@ -495,6 +495,8 @@ fn ping(conn_id: String) -> NifResult<bool> {
 pub fn decode_term_to_value(term: Term) -> Result<Value, String> {
     if let Ok(v) = term.decode::<i64>() {
         Ok(Value::Integer(v))
+    } else if let Ok(v) = term.decode::<f64>() {
+        Ok(Value::Real(v))
     } else if let Ok(v) = term.decode::<bool>() {
         Ok(Value::Integer(if v { 1 } else { 0 }))
     } else if let Ok(v) = term.decode::<String>() {
@@ -883,6 +885,7 @@ fn query_prepared<'a>(
 
 #[rustler::nif(schedule = "DirtyIo")]
 fn execute_prepared<'a>(
+    _env: Env<'a>,
     conn_id: &str,
     stmt_id: &str,
     mode: Atom,
