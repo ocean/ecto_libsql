@@ -884,8 +884,9 @@ fn query_prepared<'a>(
 }
 
 #[rustler::nif(schedule = "DirtyIo")]
+#[allow(unused_variables)]
 fn execute_prepared<'a>(
-    _env: Env<'a>,
+    env: Env<'a>,
     conn_id: &str,
     stmt_id: &str,
     mode: Atom,
