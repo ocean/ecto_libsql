@@ -11,9 +11,11 @@ LibSqlEx is an unofficial Elixir database adapter built on top of Rust NIFs, pro
 - ✅ **Metadata Methods**: Access last_insert_rowid, changes, and total_changes
 - ✅ **Auto/Manual Sync**: Automatic or manual synchronization for replicas
 - ✅ **Parameterized Queries**: Safe parameter binding
-- ✅ **libSQL 0.9.27**: Latest libSQL Rust crate
-
-⚠️ **Limitations**: Currently does not support cursor operations (fetch, declare, deallocate) or native vector search API. 
+- ✅ **Cursor Support**: Stream large result sets with DBConnection cursors
+- ✅ **Vector Search**: Built-in vector similarity search with helper functions
+- ✅ **Encryption**: AES-256-CBC encryption for local databases and replicas
+- ✅ **WebSocket Support**: Use WebSocket (wss://) or HTTP (https://) protocols
+- ✅ **libSQL 0.9.27**: Latest libSQL Rust crate with encryption feature 
 
 ## Installation
 
@@ -23,7 +25,7 @@ by adding `libsqlex` to your list of dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:libsqlex, "~> 0.1.1"}
+    {:libsqlex, "~> 0.2.0"}
   ]
 end
 ```
@@ -142,6 +144,91 @@ total = LibSqlEx.Native.get_total_changes(state)
 autocommit? = LibSqlEx.Native.get_is_autocommit(state)
 ```
 
+### Cursor Support
+
+For streaming large result sets without loading everything into memory:
+
+```elixir
+{:ok, conn} = DBConnection.start_link(LibSqlEx, opts)
+
+# Use stream to paginate through large datasets
+DBConnection.stream(conn, %LibSqlEx.Query{statement: "SELECT * FROM large_table"}, [])
+|> Stream.each(fn result ->
+  IO.puts("Got #{result.num_rows} rows")
+end)
+|> Stream.run()
+```
+
+The cursor automatically fetches rows in chunks (default 500 rows per fetch).
+
+### Vector Search
+
+Built-in support for vector similarity search:
+
+```elixir
+# Create table with vector column
+vector_col = LibSqlEx.Native.vector_type(3)  # 3-dimensional vectors
+sql = "CREATE TABLE items (id INT, embedding #{vector_col})"
+LibSqlEx.handle_execute(sql, [], [], state)
+
+# Insert vectors
+vec = LibSqlEx.Native.vector([1.0, 2.0, 3.0])
+sql = "INSERT INTO items (id, embedding) VALUES (?, vector(?))"
+LibSqlEx.handle_execute(sql, [1, vec], [], state)
+
+# Search by similarity (cosine distance)
+query_vec = [1.5, 2.1, 2.9]
+distance_sql = LibSqlEx.Native.vector_distance_cos("embedding", query_vec)
+sql = "SELECT * FROM items ORDER BY #{distance_sql} LIMIT 10"
+{:ok, results, _} = LibSqlEx.handle_execute(sql, [], [], state)
+```
+
+### Encryption
+
+Encrypt local databases and replicas with AES-256-CBC:
+
+```elixir
+# Local encrypted database
+opts = [
+  database: "encrypted.db",
+  encryption_key: "your-secret-key-at-least-32-chars-long"
+]
+{:ok, state} = LibSqlEx.connect(opts)
+
+# Encrypted remote replica
+opts = [
+  uri: "libsql://your-database.turso.io",
+  auth_token: "your-token",
+  database: "encrypted_replica.db",
+  encryption_key: "your-secret-key-at-least-32-chars-long",
+  sync: true
+]
+{:ok, state} = LibSqlEx.connect(opts)
+```
+
+**Security Note**: Store encryption keys securely (environment variables, secret management systems). The local database file will be encrypted at rest.
+
+### WebSocket Protocol
+
+Use WebSocket for lower latency and multiplexing by changing the URI scheme:
+
+```elixir
+# HTTP (default)
+opts = [
+  uri: "https://your-database.turso.io",
+  auth_token: "your-token"
+]
+
+# WebSocket (lower latency, multiplexing)
+opts = [
+  uri: "wss://your-database.turso.io",
+  auth_token: "your-token"
+]
+{:ok, state} = LibSqlEx.connect(opts)
+```
+
+libSQL automatically selects the protocol based on the URI scheme (https:// vs wss://)
+
 ## Local Opts
 ```elixir
     opts = [
@@ -219,7 +306,10 @@ opts = [
 2. **Use Batch Operations** to reduce roundtrips for bulk operations
 3. **Use Remote Replica Mode** for read-heavy workloads (microsecond latency)
 4. **Use IMMEDIATE transactions** for write-heavy workloads to reduce lock contention
-5. **Disable auto-sync** and sync manually for better control in high-write scenarios
+5. **Use WebSocket (wss://)** for lower latency and better multiplexing than HTTP
+6. **Use Cursors** for large result sets to avoid loading everything into memory
+7. **Disable auto-sync** and sync manually for better control in high-write scenarios
+8. **Use Encryption** for sensitive data without performance penalty
 
 ## Documentation
 

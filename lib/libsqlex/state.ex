@@ -9,21 +9,20 @@ defmodule LibSqlEx.State do
   ]
 
   def detect_mode(opts) do
-    has_uri = Keyword.has_key?(opts, :uri)
-    has_token = Keyword.has_key?(opts, :auth_token)
-    has_db = Keyword.has_key?(opts, :database)
-    has_sync = Keyword.has_key?(opts, :sync)
+    uri = Keyword.get(opts, :uri)
+    token = Keyword.get(opts, :auth_token)
+    db = Keyword.get(opts, :database)
+    sync = Keyword.get(opts, :sync)
 
     cond do
-      has_uri and has_token and has_db and has_sync -> :remote_replica
-      has_uri and has_token -> :remote
-      has_db -> :local
+      uri != nil and token != nil and db != nil and sync != nil -> :remote_replica
+      uri != nil and token != nil -> :remote
+      db != nil -> :local
       true -> :unknown
     end
   end
 
   def detect_sync(opts) do
-    IO.inspect(opts)
     has_sync = Keyword.has_key?(opts, :sync)
 
     case has_sync do

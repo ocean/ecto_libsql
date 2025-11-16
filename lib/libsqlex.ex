@@ -61,7 +61,7 @@ defmodule LibSqlEx do
   @impl true
   @doc """
   Executes an SQL query, delegating to transactional or non-transactional logic
-  depending on the connection state. 
+  depending on the connection state.
   """
   def handle_execute(
         query,
@@ -158,17 +158,57 @@ defmodule LibSqlEx do
   end
 
   @impl true
-  def handle_fetch(_query, _cursor, _opts, state) do
-    {:error, %ArgumentError{message: "Currently does't support fetch "}, state}
+  def handle_fetch(%LibSqlEx.Query{} = _query, cursor, opts, %LibSqlEx.State{} = state) do
+    max_rows = Keyword.get(opts, :max_rows, 500)
+
+    case LibSqlEx.Native.fetch_cursor(cursor.ref, max_rows) do
+      {columns, rows, _count} when is_list(rows) ->
+        result = %LibSqlEx.Result{
+          command: :select,
+          columns: columns,
+          rows: rows,
+          num_rows: length(rows)
+        }
+
+        if length(rows) == 0 do
+          # No more rows, deallocate cursor
+          :ok = LibSqlEx.Native.close(cursor.ref, :cursor_id)
+          {:deallocated, result, state}
+        else
+          {:cont, result, state}
+        end
+
+      {:error, reason} ->
+        {:error, reason, state}
+    end
   end
 
   @impl true
-  def handle_deallocate(_query, _cursor, _opts, state) do
-    {:error, %ArgumentError{message: "Currently does't support deallocate "}, state}
+  def handle_deallocate(_query, cursor, _opts, state) do
+    case LibSqlEx.Native.close(cursor.ref, :cursor_id) do
+      :ok ->
+        {:ok, %LibSqlEx.Result{}, state}
+
+      {:error, _reason} ->
+        # Cursor might already be deallocated, that's ok
+        {:ok, %LibSqlEx.Result{}, state}
+    end
   end
 
   @impl true
-  def handle_declare(_query, _params, _opts, state) do
-    {:error, %ArgumentError{message: "Currently does't support declare "}, state}
+  def handle_declare(
+        %LibSqlEx.Query{statement: statement} = query,
+        params,
+        _opts,
+        %LibSqlEx.State{conn_id: conn_id} = state
+      ) do
+    case LibSqlEx.Native.declare_cursor(conn_id, statement, params) do
+      cursor_id when is_binary(cursor_id) ->
+        cursor = %{ref: cursor_id}
+        {:ok, query, cursor, state}
+
+      {:error, reason} ->
+        {:error, reason, state}
+    end
   end
 end

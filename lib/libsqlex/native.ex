@@ -18,14 +18,22 @@ defmodule LibSqlEx.Native do
   def do_sync(_conn, _mode), do: :erlang.nif_error(:nif_not_loaded)
   def close(_id, _opt), do: :erlang.nif_error(:nif_not_loaded)
   def execute_batch(_conn, _mode, _sync, _statements), do: :erlang.nif_error(:nif_not_loaded)
-  def execute_transactional_batch(_conn, _mode, _sync, _statements), do: :erlang.nif_error(:nif_not_loaded)
+
+  def execute_transactional_batch(_conn, _mode, _sync, _statements),
+    do: :erlang.nif_error(:nif_not_loaded)
+
   def prepare_statement(_conn, _sql), do: :erlang.nif_error(:nif_not_loaded)
   def query_prepared(_conn, _stmt_id, _mode, _sync, _args), do: :erlang.nif_error(:nif_not_loaded)
-  def execute_prepared(_conn, _stmt_id, _mode, _sync, _args, _sql_hint), do: :erlang.nif_error(:nif_not_loaded)
+
+  def execute_prepared(_conn, _stmt_id, _mode, _sync, _args, _sql_hint),
+    do: :erlang.nif_error(:nif_not_loaded)
+
   def last_insert_rowid(_conn), do: :erlang.nif_error(:nif_not_loaded)
   def changes(_conn), do: :erlang.nif_error(:nif_not_loaded)
   def total_changes(_conn), do: :erlang.nif_error(:nif_not_loaded)
   def is_autocommit(_conn), do: :erlang.nif_error(:nif_not_loaded)
+  def declare_cursor(_conn, _sql, _args), do: :erlang.nif_error(:nif_not_loaded)
+  def fetch_cursor(_cursor_id, _max_rows), do: :erlang.nif_error(:nif_not_loaded)
 
   # helper
 
@@ -165,7 +173,12 @@ defmodule LibSqlEx.Native do
       {:ok, stmt_id} = LibSqlEx.Native.prepare(state, "INSERT INTO users (name) VALUES (?)")
       {:ok, rows_affected} = LibSqlEx.Native.execute_stmt(state, stmt_id, "INSERT INTO users (name) VALUES (?)", ["Alice"])
   """
-  def execute_stmt(%LibSqlEx.State{conn_id: conn_id, mode: mode, sync: syncx} = _state, stmt_id, sql, args) do
+  def execute_stmt(
+        %LibSqlEx.State{conn_id: conn_id, mode: mode, sync: syncx} = _state,
+        stmt_id,
+        sql,
+        args
+      ) do
     case execute_prepared(conn_id, stmt_id, mode, syncx, args, sql) do
       num_rows when is_integer(num_rows) ->
         {:ok, num_rows}
@@ -188,7 +201,11 @@ defmodule LibSqlEx.Native do
       {:ok, stmt_id} = LibSqlEx.Native.prepare(state, "SELECT * FROM users WHERE id = ?")
       {:ok, result} = LibSqlEx.Native.query_stmt(state, stmt_id, [42])
   """
-  def query_stmt(%LibSqlEx.State{conn_id: conn_id, mode: mode, sync: syncx} = _state, stmt_id, args) do
+  def query_stmt(
+        %LibSqlEx.State{conn_id: conn_id, mode: mode, sync: syncx} = _state,
+        stmt_id,
+        args
+      ) do
     case query_prepared(conn_id, stmt_id, mode, syncx, args) do
       %{"columns" => columns, "rows" => rows, "num_rows" => num_rows} ->
         result = %LibSqlEx.Result{
@@ -197,6 +214,7 @@ defmodule LibSqlEx.Native do
           rows: rows,
           num_rows: num_rows
         }
+
         {:ok, result}
 
       {:error, reason} ->
@@ -274,6 +292,57 @@ defmodule LibSqlEx.Native do
   end
 
   @doc """
+  Create a vector from a list of numbers for use in vector columns.
+
+  ## Parameters
+    - values: List of numbers (integers or floats)
+
+  ## Example
+      # Create a 3-dimensional vector
+      vec = LibSqlEx.Native.vector([1.0, 2.0, 3.0])
+      # Use in query: "INSERT INTO items (embedding) VALUES (?)"
+  """
+  def vector(values) when is_list(values) do
+    "[#{Enum.join(values, ",")}]"
+  end
+
+  @doc """
+  Helper to create a vector column definition for CREATE TABLE.
+
+  ## Parameters
+    - dimensions: Number of dimensions
+    - type: :f32 (float32) or :f64 (float64), defaults to :f32
+
+  ## Example
+      column_def = LibSqlEx.Native.vector_type(3)  # "F32_BLOB(3)"
+      # Use in: "CREATE TABLE items (embedding \#{column_def})"
+  """
+  def vector_type(dimensions, type \\ :f32) when is_integer(dimensions) and dimensions > 0 do
+    case type do
+      :f32 -> "F32_BLOB(#{dimensions})"
+      :f64 -> "F64_BLOB(#{dimensions})"
+      _ -> raise ArgumentError, "type must be :f32 or :f64"
+    end
+  end
+
+  @doc """
+  Generate SQL for cosine distance vector similarity search.
+
+  ## Parameters
+    - column: Name of the vector column
+    - vector: The query vector (list of numbers or vector string)
+
+  ## Example
+      distance_sql = LibSqlEx.Native.vector_distance_cos("embedding", [1.0, 2.0, 3.0])
+      # Returns: "vector_distance_cos(embedding, '[1.0,2.0,3.0]')"
+      # Use in: "SELECT * FROM items ORDER BY \#{distance_sql} LIMIT 10"
+  """
+  def vector_distance_cos(column, vector) when is_binary(column) do
+    vec_str = if is_list(vector), do: vector(vector), else: vector
+    "vector_distance_cos(#{column}, '#{vec_str}')"
+  end
+
+  @doc """
   Execute a batch of SQL statements. Each statement is executed independently.
   Returns a list of results for each statement.
 
@@ -293,19 +362,22 @@ defmodule LibSqlEx.Native do
     case execute_batch(conn_id, mode, syncx, statements) do
       results when is_list(results) ->
         # Convert each result to LibSqlEx.Result struct
-        parsed_results = Enum.map(results, fn result ->
-          case result do
-            %{"columns" => columns, "rows" => rows, "num_rows" => num_rows} ->
-              %LibSqlEx.Result{
-                command: :batch,
-                columns: columns,
-                rows: rows,
-                num_rows: num_rows
-              }
-            _ ->
-              %LibSqlEx.Result{command: :batch}
-          end
-        end)
+        parsed_results =
+          Enum.map(results, fn result ->
+            case result do
+              %{"columns" => columns, "rows" => rows, "num_rows" => num_rows} ->
+                %LibSqlEx.Result{
+                  command: :batch,
+                  columns: columns,
+                  rows: rows,
+                  num_rows: num_rows
+                }
+
+              _ ->
+                %LibSqlEx.Result{command: :batch}
+            end
+          end)
+
         {:ok, parsed_results}
 
       {:error, message} ->
@@ -329,23 +401,29 @@ defmodule LibSqlEx.Native do
       ]
       {:ok, results} = LibSqlEx.Native.batch_transactional(state, statements)
   """
-  def batch_transactional(%LibSqlEx.State{conn_id: conn_id, mode: mode, sync: syncx} = _state, statements) do
+  def batch_transactional(
+        %LibSqlEx.State{conn_id: conn_id, mode: mode, sync: syncx} = _state,
+        statements
+      ) do
     case execute_transactional_batch(conn_id, mode, syncx, statements) do
       results when is_list(results) ->
         # Convert each result to LibSqlEx.Result struct
-        parsed_results = Enum.map(results, fn result ->
-          case result do
-            %{"columns" => columns, "rows" => rows, "num_rows" => num_rows} ->
-              %LibSqlEx.Result{
-                command: :batch,
-                columns: columns,
-                rows: rows,
-                num_rows: num_rows
-              }
-            _ ->
-              %LibSqlEx.Result{command: :batch}
-          end
-        end)
+        parsed_results =
+          Enum.map(results, fn result ->
+            case result do
+              %{"columns" => columns, "rows" => rows, "num_rows" => num_rows} ->
+                %LibSqlEx.Result{
+                  command: :batch,
+                  columns: columns,
+                  rows: rows,
+                  num_rows: num_rows
+                }
+
+              _ ->
+                %LibSqlEx.Result{command: :batch}
+            end
+          end)
+
         {:ok, parsed_results}
 
       {:error, message} ->
