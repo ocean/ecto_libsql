@@ -41,7 +41,7 @@ defmodule Ecto.Adapters.LibSqlEx.ConnectionTest do
 
       [sql] = Connection.execute_ddl({:create, table, columns})
 
-      assert sql =~ ~s(PRIMARY KEY ("user_id", "role_id"))
+      assert sql =~ ~s[PRIMARY KEY ("user_id", "role_id")]
     end
 
     test "creates table with NOT NULL constraint" do
@@ -124,7 +124,7 @@ defmodule Ecto.Adapters.LibSqlEx.ConnectionTest do
 
       [sql] = Connection.execute_ddl({:create, index})
 
-      assert sql == ~s(CREATE INDEX "users_email_index" ON "users" ("email"))
+      assert sql == ~s[CREATE INDEX "users_email_index" ON "users" ("email")]
     end
 
     test "creates unique index" do
@@ -180,7 +180,7 @@ defmodule Ecto.Adapters.LibSqlEx.ConnectionTest do
 
       [sql] = Connection.execute_ddl({:create, index})
 
-      assert sql =~ ~s(("name", "email"))
+      assert sql =~ ~s[("name", "email")]
     end
 
     test "drops index" do
