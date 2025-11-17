@@ -42,13 +42,14 @@ defmodule Ecto.Adapters.LibSqlEx do
 
   @behaviour Ecto.Adapter.Storage
   @behaviour Ecto.Adapter.Structure
+  @behaviour Ecto.Adapter.Migration
 
   ## Adapter Configuration
 
   @impl Ecto.Adapter
   defmacro __before_compile__(_env), do: :ok
 
-  @impl Ecto.Adapter.SQL
+  @doc false
   def connection, do: Ecto.Adapters.LibSqlEx.Connection
 
   ## Storage API
@@ -130,7 +131,7 @@ defmodule Ecto.Adapters.LibSqlEx do
   @impl Ecto.Adapter.Structure
   def structure_load(default, config) do
     path = config[:dump_path] || Path.join(default, "structure.sql")
-    database = Keyword.fetch!(config, :database)
+    _database = Keyword.fetch!(config, :database)
 
     case File.read(path) do
       {:ok, sql} ->
@@ -143,6 +144,24 @@ defmodule Ecto.Adapters.LibSqlEx do
       {:error, reason} ->
         {:error, reason}
     end
+  end
+
+  @impl Ecto.Adapter.Structure
+  def dump_cmd(_args, _opts, config) do
+    database = Keyword.fetch!(config, :database)
+    path = config[:dump_path] || "structure.sql"
+    {:ok, ["sqlite3", database, ".schema"], [path]}
+  end
+
+  ## Migration API
+
+  @impl Ecto.Adapter.Migration
+  def supports_ddl_transaction?, do: true
+
+  @impl Ecto.Adapter.Migration
+  def lock_for_migrations(_meta, _opts, fun) do
+    # SQLite uses database-level locking, so we just execute the function
+    fun.()
   end
 
   ## Connection Helpers
