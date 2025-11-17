@@ -14,6 +14,15 @@ Welcome to LibSqlEx! This guide provides comprehensive documentation, API refere
   - [Cursor Streaming](#cursor-streaming)
   - [Vector Search](#vector-search)
   - [Encryption](#encryption)
+- [Ecto Integration](#ecto-integration)
+  - [Quick Start with Ecto](#quick-start-with-ecto)
+  - [Schemas and Changesets](#schemas-and-changesets)
+  - [Migrations](#migrations)
+  - [Queries](#basic-queries)
+  - [Associations](#associations-and-preloading)
+  - [Transactions](#transactions)
+  - [Phoenix Integration](#phoenix-integration)
+  - [Production Deployment](#production-deployment-with-turso)
 - [API Reference](#api-reference)
 - [Real-World Examples](#real-world-examples)
 - [Performance Guide](#performance-guide)
@@ -836,6 +845,601 @@ end
 
 # Usage
 {:ok, state} = LibSqlEx.connect(MyApp.DatabaseConfig.connection_opts())
+```
+
+---
+
+## Ecto Integration
+
+LibSqlEx provides a full Ecto adapter, making it seamless to use with Phoenix and Ecto-based applications. This enables you to use all Ecto features including schemas, migrations, queries, and associations.
+
+### Quick Start with Ecto
+
+#### 1. Installation
+
+Add both `libsqlex` and `ecto_sql` to your dependencies:
+
+```elixir
+def deps do
+  [
+    {:libsqlex, "~> 0.3.0"},
+    {:ecto_sql, "~> 3.11"}
+  ]
+end
+```
+
+#### 2. Configure Your Repository
+
+```elixir
+# config/config.exs
+
+# Local database (development)
+config :my_app, MyApp.Repo,
+  adapter: Ecto.Adapters.LibSqlEx,
+  database: "my_app_dev.db",
+  pool_size: 5
+
+# Remote Turso (cloud-only)
+config :my_app, MyApp.Repo,
+  adapter: Ecto.Adapters.LibSqlEx,
+  uri: "libsql://your-database.turso.io",
+  auth_token: System.get_env("TURSO_AUTH_TOKEN")
+
+# Remote Replica (RECOMMENDED for production)
+config :my_app, MyApp.Repo,
+  adapter: Ecto.Adapters.LibSqlEx,
+  database: "replica.db",
+  uri: "libsql://your-database.turso.io",
+  auth_token: System.get_env("TURSO_AUTH_TOKEN"),
+  sync: true,
+  pool_size: 10
+```
+
+#### 3. Define Your Repo
+
+```elixir
+defmodule MyApp.Repo do
+  use Ecto.Repo,
+    otp_app: :my_app,
+    adapter: Ecto.Adapters.LibSqlEx
+end
+```
+
+### Schemas and Changesets
+
+Define your data models using Ecto schemas:
+
+```elixir
+defmodule MyApp.User do
+  use Ecto.Schema
+  import Ecto.Changeset
+
+  schema "users" do
+    field :name, :string
+    field :email, :string
+    field :age, :integer
+    field :active, :boolean, default: true
+    field :bio, :text
+
+    has_many :posts, MyApp.Post
+
+    timestamps()
+  end
+
+  def changeset(user, attrs) do
+    user
+    |> cast(attrs, [:name, :email, :age, :active, :bio])
+    |> validate_required([:name, :email])
+    |> validate_format(:email, ~r/@/)
+    |> unique_constraint(:email)
+  end
+end
+
+defmodule MyApp.Post do
+  use Ecto.Schema
+  import Ecto.Changeset
+
+  schema "posts" do
+    field :title, :string
+    field :body, :text
+    field :published, :boolean, default: false
+    field :view_count, :integer, default: 0
+
+    belongs_to :user, MyApp.User
+
+    timestamps()
+  end
+
+  def changeset(post, attrs) do
+    post
+    |> cast(attrs, [:title, :body, :published, :user_id])
+    |> validate_required([:title, :body])
+    |> foreign_key_constraint(:user_id)
+  end
+end
+```
+
+### Migrations
+
+Create database migrations just like with PostgreSQL or MySQL:
+
+```elixir
+# priv/repo/migrations/20240101000000_create_users.exs
+defmodule MyApp.Repo.Migrations.CreateUsers do
+  use Ecto.Migration
+
+  def change do
+    create table(:users) do
+      add :name, :string, null: false
+      add :email, :string, null: false
+      add :age, :integer
+      add :active, :boolean, default: true
+      add :bio, :text
+
+      timestamps()
+    end
+
+    create unique_index(:users, [:email])
+    create index(:users, [:active])
+  end
+end
+
+# priv/repo/migrations/20240101000001_create_posts.exs
+defmodule MyApp.Repo.Migrations.CreatePosts do
+  use Ecto.Migration
+
+  def change do
+    create table(:posts) do
+      add :title, :string, null: false
+      add :body, :text
+      add :published, :boolean, default: false
+      add :view_count, :integer, default: 0
+      add :user_id, references(:users, on_delete: :delete_all)
+
+      timestamps()
+    end
+
+    create index(:posts, [:user_id])
+    create index(:posts, [:published])
+  end
+end
+```
+
+Run migrations:
+
+```bash
+mix ecto.create    # Create the database
+mix ecto.migrate   # Run migrations
+mix ecto.rollback  # Rollback last migration
+```
+
+### Basic Queries
+
+#### Insert
+
+```elixir
+# Using changesets (recommended)
+{:ok, user} =
+  %MyApp.User{}
+  |> MyApp.User.changeset(%{
+    name: "Alice",
+    email: "alice@example.com",
+    age: 30
+  })
+  |> MyApp.Repo.insert()
+
+# Direct insert
+{:ok, user} = MyApp.Repo.insert(%MyApp.User{
+  name: "Bob",
+  email: "bob@example.com"
+})
+```
+
+#### Read
+
+```elixir
+# Get by ID
+user = MyApp.Repo.get(MyApp.User, 1)
+
+# Get by field
+user = MyApp.Repo.get_by(MyApp.User, email: "alice@example.com")
+
+# Get all
+users = MyApp.Repo.all(MyApp.User)
+
+# Get one or nil
+user = MyApp.Repo.one(MyApp.User)
+```
+
+#### Update
+
+```elixir
+user = MyApp.Repo.get(MyApp.User, 1)
+
+{:ok, updated_user} =
+  user
+  |> MyApp.User.changeset(%{age: 31})
+  |> MyApp.Repo.update()
+
+# Or using Ecto.Changeset.change/2
+{:ok, updated} =
+  user
+  |> Ecto.Changeset.change(age: 32)
+  |> MyApp.Repo.update()
+```
+
+#### Delete
+
+```elixir
+user = MyApp.Repo.get(MyApp.User, 1)
+{:ok, deleted_user} = MyApp.Repo.delete(user)
+```
+
+### Advanced Queries
+
+```elixir
+import Ecto.Query
+
+# Filter and order
+adults =
+  MyApp.User
+  |> where([u], u.age >= 18)
+  |> order_by([u], desc: u.inserted_at)
+  |> MyApp.Repo.all()
+
+# Select specific fields
+names =
+  MyApp.User
+  |> select([u], u.name)
+  |> MyApp.Repo.all()
+
+# Count
+count =
+  MyApp.User
+  |> where([u], u.active == true)
+  |> MyApp.Repo.aggregate(:count)
+
+# Average
+avg_age =
+  MyApp.User
+  |> MyApp.Repo.aggregate(:avg, :age)
+
+# With LIKE
+results =
+  MyApp.User
+  |> where([u], like(u.name, ^"%Alice%"))
+  |> MyApp.Repo.all()
+
+# Limit and offset
+page_1 =
+  MyApp.User
+  |> limit(10)
+  |> offset(0)
+  |> MyApp.Repo.all()
+
+# Join with posts
+users_with_posts =
+  MyApp.User
+  |> join(:inner, [u], p in assoc(u, :posts))
+  |> where([u, p], p.published == true)
+  |> select([u, p], {u.name, p.title})
+  |> MyApp.Repo.all()
+
+# Group by
+post_counts =
+  MyApp.Post
+  |> group_by([p], p.user_id)
+  |> select([p], {p.user_id, count(p.id)})
+  |> MyApp.Repo.all()
+```
+
+### Associations and Preloading
+
+```elixir
+# Preload posts for a user
+user =
+  MyApp.User
+  |> MyApp.Repo.get(1)
+  |> MyApp.Repo.preload(:posts)
+
+IO.inspect(user.posts)  # List of posts
+
+# Preload with query
+user =
+  MyApp.User
+  |> MyApp.Repo.get(1)
+  |> MyApp.Repo.preload(posts: from(p in MyApp.Post, where: p.published == true))
+
+# Build association
+user = MyApp.Repo.get(MyApp.User, 1)
+
+{:ok, post} =
+  user
+  |> Ecto.build_assoc(:posts)
+  |> MyApp.Post.changeset(%{title: "New Post", body: "Content"})
+  |> MyApp.Repo.insert()
+
+# Multiple associations
+user =
+  MyApp.User
+  |> MyApp.Repo.get(1)
+  |> MyApp.Repo.preload([:posts, :comments])
+```
+
+### Transactions
+
+```elixir
+# Successful transaction
+{:ok, %{user: user, post: post}} =
+  MyApp.Repo.transaction(fn ->
+    {:ok, user} =
+      %MyApp.User{}
+      |> MyApp.User.changeset(%{name: "Alice", email: "alice@example.com"})
+      |> MyApp.Repo.insert()
+
+    {:ok, post} =
+      user
+      |> Ecto.build_assoc(:posts)
+      |> MyApp.Post.changeset(%{title: "First Post", body: "Hello!"})
+      |> MyApp.Repo.insert()
+
+    %{user: user, post: post}
+  end)
+
+# Transaction with rollback
+MyApp.Repo.transaction(fn ->
+  user = MyApp.Repo.insert!(%MyApp.User{name: "Bob", email: "bob@example.com"})
+
+  if some_condition do
+    MyApp.Repo.rollback(:custom_reason)
+  end
+
+  user
+end)
+```
+
+### Batch Operations
+
+```elixir
+# Insert many records at once
+users_data = [
+  %{name: "User 1", email: "user1@example.com", inserted_at: NaiveDateTime.utc_now(), updated_at: NaiveDateTime.utc_now()},
+  %{name: "User 2", email: "user2@example.com", inserted_at: NaiveDateTime.utc_now(), updated_at: NaiveDateTime.utc_now()},
+  %{name: "User 3", email: "user3@example.com", inserted_at: NaiveDateTime.utc_now(), updated_at: NaiveDateTime.utc_now()}
+]
+
+{3, nil} = MyApp.Repo.insert_all(MyApp.User, users_data)
+
+# Update many records
+{count, _} =
+  MyApp.User
+  |> where([u], u.age < 18)
+  |> MyApp.Repo.update_all(set: [active: false])
+
+# Increment view count
+{1, _} =
+  MyApp.Post
+  |> where([p], p.id == ^post_id)
+  |> MyApp.Repo.update_all(inc: [view_count: 1])
+
+# Delete many records
+{count, _} =
+  MyApp.User
+  |> where([u], u.active == false)
+  |> MyApp.Repo.delete_all()
+```
+
+### Streaming Large Datasets
+
+```elixir
+# Stream must be inside a transaction
+MyApp.Repo.transaction(fn ->
+  MyApp.User
+  |> MyApp.Repo.stream()
+  |> Stream.filter(fn user -> user.active end)
+  |> Stream.each(fn user ->
+    # Process each user
+    IO.puts("Processing #{user.name}")
+  end)
+  |> Stream.run()
+end)
+
+# Stream with custom chunk size
+MyApp.Repo.transaction(fn ->
+  MyApp.User
+  |> MyApp.Repo.stream(max_rows: 100)
+  |> Enum.to_list()
+end)
+```
+
+### Phoenix Integration
+
+LibSqlEx works seamlessly with Phoenix:
+
+#### 1. Add to a new Phoenix project
+
+```bash
+mix phx.new my_app --database libsqlex
+```
+
+#### 2. Or update existing Phoenix project
+
+```elixir
+# config/dev.exs
+config :my_app, MyApp.Repo,
+  adapter: Ecto.Adapters.LibSqlEx,
+  database: "my_app_dev.db",
+  pool_size: 5,
+  stacktrace: true,
+  show_sensitive_data_on_connection_error: true
+
+# config/prod.exs (Remote Replica Mode)
+config :my_app, MyApp.Repo,
+  adapter: Ecto.Adapters.LibSqlEx,
+  database: "prod_replica.db",
+  uri: System.get_env("TURSO_URL"),
+  auth_token: System.get_env("TURSO_AUTH_TOKEN"),
+  sync: true,
+  pool_size: 10
+```
+
+#### 3. Use in Phoenix contexts
+
+```elixir
+defmodule MyApp.Accounts do
+  import Ecto.Query
+  alias MyApp.{Repo, User}
+
+  def list_users do
+    Repo.all(User)
+  end
+
+  def get_user!(id), do: Repo.get!(User, id)
+
+  def create_user(attrs \\ %{}) do
+    %User{}
+    |> User.changeset(attrs)
+    |> Repo.insert()
+  end
+
+  def update_user(%User{} = user, attrs) do
+    user
+    |> User.changeset(attrs)
+    |> Repo.update()
+  end
+
+  def delete_user(%User{} = user) do
+    Repo.delete(user)
+  end
+end
+```
+
+#### 4. Use in Phoenix controllers
+
+```elixir
+defmodule MyAppWeb.UserController do
+  use MyAppWeb, :controller
+  alias MyApp.Accounts
+
+  def index(conn, _params) do
+    users = Accounts.list_users()
+    render(conn, :index, users: users)
+  end
+
+  def show(conn, %{"id" => id}) do
+    user = Accounts.get_user!(id)
+    render(conn, :show, user: user)
+  end
+
+  def create(conn, %{"user" => user_params}) do
+    case Accounts.create_user(user_params) do
+      {:ok, user} ->
+        conn
+        |> put_status(:created)
+        |> render(:show, user: user)
+
+      {:error, changeset} ->
+        conn
+        |> put_status(:unprocessable_entity)
+        |> render(:error, changeset: changeset)
+    end
+  end
+end
+```
+
+### Production Deployment with Turso
+
+For production apps, use Turso's remote replica mode for the best performance:
+
+```elixir
+# config/runtime.exs
+if config_env() == :prod do
+  config :my_app, MyApp.Repo,
+    adapter: Ecto.Adapters.LibSqlEx,
+    database: "prod_replica.db",
+    uri: System.get_env("TURSO_URL") || raise("TURSO_URL not set"),
+    auth_token: System.get_env("TURSO_AUTH_TOKEN") || raise("TURSO_AUTH_TOKEN not set"),
+    sync: true,
+    pool_size: String.to_integer(System.get_env("POOL_SIZE") || "10")
+end
+```
+
+**Setup Turso:**
+
+```bash
+# Install Turso CLI
+curl -sSfL https://get.tur.so/install.sh | bash
+
+# Create database
+turso db create my-app-prod
+
+# Get connection details
+turso db show my-app-prod --url
+turso db tokens create my-app-prod
+
+# Set environment variables
+export TURSO_URL="libsql://my-app-prod-....turso.io"
+export TURSO_AUTH_TOKEN="eyJ..."
+```
+
+**Benefits:**
+- 🚀 **Microsecond read latency** (local SQLite file)
+- ☁️ **Automatic cloud sync** to Turso
+- 🌍 **Global distribution** via Turso edge
+- 💪 **Offline capability** - works without network
+
+### Type Mappings
+
+Ecto types map to SQLite types as follows:
+
+| Ecto Type | SQLite Type | Notes |
+|-----------|-------------|-------|
+| `:id` / `:integer` | `INTEGER` | ✅ Works perfectly |
+| `:string` | `TEXT` | ✅ Works perfectly |
+| `:binary_id` / `:uuid` | `TEXT` | ✅ Stored as text, works with Ecto.UUID |
+| `:binary` | `BLOB` | ✅ Works perfectly |
+| `:boolean` | `INTEGER` | ✅ 0 = false, 1 = true |
+| `:float` | `REAL` | ✅ Works perfectly |
+| `:decimal` | `DECIMAL` | ✅ Works perfectly |
+| `:text` | `TEXT` | ✅ Works perfectly |
+| `:date` | `DATE` | ✅ Stored as ISO8601 |
+| `:time` | `TIME` | ✅ Stored as ISO8601 |
+| `:naive_datetime` | `DATETIME` | ✅ Stored as ISO8601 |
+| `:utc_datetime` | `DATETIME` | ✅ Stored as ISO8601 |
+| `:map` / `:json` | `TEXT` | ✅ Stored as JSON |
+| `{:array, _}` | ❌ Not supported | Use JSON or separate tables |
+
+### Ecto Migration Notes
+
+Most Ecto migrations work perfectly. SQLite limitations:
+
+```elixir
+# ✅ SUPPORTED
+create table(:users)
+alter table(:users) do: add :field, :type
+drop table(:users)
+create index(:users, [:email])
+rename table(:old), to: table(:new)
+rename table(:users), :old_field, to: :new_field
+
+# ❌ NOT SUPPORTED
+alter table(:users) do: modify :field, :new_type  # Can't change column type
+alter table(:users) do: remove :field  # Can't drop column (SQLite < 3.35.0)
+
+# Workaround: Recreate table
+defmodule MyApp.Repo.Migrations.ChangeUserAge do
+  use Ecto.Migration
+
+  def up do
+    create table(:users_new) do
+      # Define new schema
+    end
+
+    execute "INSERT INTO users_new SELECT * FROM users"
+    drop table(:users)
+    rename table(:users_new), to: table(:users)
+  end
+end
 ```
 
 ---
