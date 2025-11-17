@@ -312,7 +312,7 @@ defmodule Ecto.Adapters.LibSqlEx.Connection do
     {join, wheres} = using_join(query, :update_all, "FROM", sources)
     where = where(%{query | wheres: wheres}, sources)
 
-    ["UPDATE #{quote_table(from)} AS #{name}", "SET", fields, join, where]
+    ["UPDATE ", from, " AS ", name, " SET ", fields, join, where]
   end
 
   @impl true
@@ -323,7 +323,7 @@ defmodule Ecto.Adapters.LibSqlEx.Connection do
     {join, wheres} = using_join(query, :delete_all, "USING", sources)
     where = where(%{query | wheres: wheres}, sources)
 
-    ["DELETE FROM #{quote_table(from)} AS #{name}", join, where]
+    ["DELETE FROM ", from, " AS ", name, join, where]
   end
 
   @impl true
@@ -364,7 +364,7 @@ defmodule Ecto.Adapters.LibSqlEx.Connection do
   end
 
   @impl true
-  def explain_query(conn, query, params, opts) do
+  def explain_query(conn, query, _params, opts) do
     {query, params, _opts} = all(query)
     query = "EXPLAIN QUERY PLAN " <> query
     execute(conn, query, params, opts)
@@ -419,7 +419,7 @@ defmodule Ecto.Adapters.LibSqlEx.Connection do
     end
   end
 
-  defp from(%{from: %{source: source}} = query, sources) do
+  defp from(%{from: %{source: _source}} = query, sources) do
     {from, name} = get_source(query, sources, 0)
     [from, " AS ", name]
   end
@@ -458,7 +458,7 @@ defmodule Ecto.Adapters.LibSqlEx.Connection do
     [
       ?\s
       | intersperse_map(joins, ?\s, fn
-          %Ecto.Query.JoinExpr{on: %{expr: expr}, qual: qual, ix: ix, source: source} ->
+          %Ecto.Query.JoinExpr{on: %{expr: expr}, qual: qual, ix: ix, source: _source} ->
             {join, name} = get_source(query, sources, ix)
             [join_qual(qual), join, " AS ", name, " ON ", expr(expr, sources, query)]
         end)
@@ -548,7 +548,7 @@ defmodule Ecto.Adapters.LibSqlEx.Connection do
     [" OFFSET ", expr(expr, sources, query)]
   end
 
-  defp lock(query, _sources), do: []
+  defp lock(_query, _sources), do: []
 
   defp boolean(_name, [], _sources, _query), do: []
 
@@ -573,14 +573,14 @@ defmodule Ecto.Adapters.LibSqlEx.Connection do
     [?(, expr(expr, sources, query), ?)]
   end
 
-  defp expr(expr, _sources, _query) do
+  defp expr(_expr, _sources, _query) do
     # Simplified expression handling - full implementation would handle all Ecto.Query expression types
     "?"
   end
 
   defp combination(%{combinations: []}), do: []
 
-  defp combination(%{combinations: combinations}) do
+  defp combination(%{combinations: _combinations}) do
     []
   end
 
@@ -604,7 +604,7 @@ defmodule Ecto.Adapters.LibSqlEx.Connection do
 
   defp using_join(%{joins: []}, _kind, _prefix, _sources), do: {[], []}
 
-  defp using_join(%{joins: joins} = query, kind, prefix, sources) do
+  defp using_join(%{joins: _joins} = query, _kind, _prefix, _sources) do
     {[], query.wheres}
   end
 
