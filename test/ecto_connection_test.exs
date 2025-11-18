@@ -274,7 +274,8 @@ defmodule Ecto.Adapters.LibSqlEx.ConnectionTest do
       error = %{message: "UNIQUE constraint failed: users.email"}
       constraints = Connection.to_constraints(error, [])
 
-      assert [unique: :email] = constraints
+      # Returns string constraint names to match Ecto changeset format
+      assert [unique: "email"] = constraints
     end
 
     test "converts FOREIGN KEY constraint errors" do
@@ -288,7 +289,8 @@ defmodule Ecto.Adapters.LibSqlEx.ConnectionTest do
       error = %{message: "CHECK constraint failed: positive_age"}
       constraints = Connection.to_constraints(error, [])
 
-      assert [check: :positive_age] = constraints
+      # Returns string constraint names to match Ecto changeset format
+      assert [check: "positive_age"] = constraints
     end
 
     test "returns empty list for non-constraint errors" do

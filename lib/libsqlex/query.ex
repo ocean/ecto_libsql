@@ -10,4 +10,10 @@ defmodule LibSqlEx.Query do
 
     def decode(_query, result, _opts), do: result
   end
+
+  defimpl String.Chars do
+    def to_string(%LibSqlEx.Query{statement: statement}) do
+      statement
+    end
+  end
 end

@@ -171,6 +171,33 @@ pub fn execute_with_transaction<'a>(
 }
 
 #[rustler::nif(schedule = "DirtyIo")]
+pub fn query_with_trx_args<'a>(
+    env: Env<'a>,
+    trx_id: &str,
+    query: &str,
+    args: Vec<Term<'a>>,
+) -> NifResult<Term<'a>> {
+    let mut txn_registry = TXN_REGISTRY.lock().unwrap();
+
+    let trx = txn_registry
+        .get_mut(trx_id)
+        .ok_or_else(|| rustler::Error::Term(Box::new("Transaction not found")))?;
+    let decoded_args: Vec<Value> = args
+        .into_iter()
+        .map(|t| decode_term_to_value(t))
+        .collect::<Result<_, _>>()
+        .map_err(|e| rustler::Error::Term(Box::new(e)))?;
+
+    TOKIO_RUNTIME
+        .block_on(async {
+            let res_rows = trx.query(&query, decoded_args).await
+                .map_err(|e| rustler::Error::Term(Box::new(format!("Query failed: {}", e))))?;
+
+            collect_rows(env, res_rows).await
+        })
+}
+
+#[rustler::nif(schedule = "DirtyIo")]
 pub fn handle_status_transaction(trx_id: &str) -> NifResult<rustler::Atom> {
     let trx_registy = TXN_REGISTRY.lock().unwrap();
     let trx = trx_registy.get(trx_id);
@@ -405,7 +432,7 @@ fn query_args<'a>(
     syncx: Atom,
     query: &str,
     args: Vec<Term<'a>>,
-) -> Result<NifResult<Term<'a>>, rustler::Error> {
+) -> NifResult<Term<'a>> {
     let conn_map = CONNECTION_REGISTRY.lock().unwrap();
 
     let is_sync = !matches!(detect_query_type(query), QueryType::Select);
@@ -418,7 +445,7 @@ fn query_args<'a>(
 
         let params = params.map_err(|e| rustler::Error::Term(Box::new(e)))?;
 
-        let result = TOKIO_RUNTIME.block_on(async {
+        TOKIO_RUNTIME.block_on(async {
             let res = client
                 .lock()
                 .unwrap()
@@ -430,9 +457,7 @@ fn query_args<'a>(
 
             match res {
                 Ok(res_rows) => {
-                    let res = collect_rows(env, res_rows)
-                        .await
-                        .map_err(|e| rustler::Error::Term(Box::new(format!("{:?}", e))));
+                    let result = collect_rows(env, res_rows).await?;
 
                     if let Some(modex) = decode_mode(mode) {
                         // if remote replica and a write query then sync
@@ -442,14 +467,12 @@ fn query_args<'a>(
                         }
                     }
 
-                    return Ok(res);
+                    Ok(result)
                 }
 
                 Err(e) => Err(rustler::Error::Term(Box::new(e.to_string()))),
             }
-        });
-
-        return result;
+        })
     } else {
         println!("query args Connection ID not found: {}", conn_id);
         Err(rustler::Error::Term(Box::new("Invalid connection ID")))

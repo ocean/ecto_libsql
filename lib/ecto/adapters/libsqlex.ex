@@ -51,16 +51,21 @@ defmodule Ecto.Adapters.LibSqlEx do
   @doc false
   def connection, do: Ecto.Adapters.LibSqlEx.Connection
 
+  @impl Ecto.Adapter.Schema
+  def autogenerate(:id), do: nil
+  def autogenerate(:binary_id), do: Ecto.UUID.bingenerate()
+  def autogenerate(:embed_id), do: Ecto.UUID.generate()
+
   ## Storage API
 
   @impl Ecto.Adapter.Storage
   def storage_up(opts) do
-    database = Keyword.fetch!(opts, :database)
-
     # For remote-only mode (no local database), storage is managed by Turso
     if Keyword.has_key?(opts, :uri) && !Keyword.has_key?(opts, :database) do
       {:error, :already_up}
     else
+      database = Keyword.fetch!(opts, :database)
+
       # For local or replica mode, create the database file
       case File.exists?(database) do
         true ->
@@ -172,6 +177,7 @@ defmodule Ecto.Adapters.LibSqlEx do
   def loaders(:naive_datetime, type), do: [&datetime_decode/1, type]
   def loaders(:date, type), do: [&date_decode/1, type]
   def loaders(:time, type), do: [&time_decode/1, type]
+  def loaders(:decimal, type), do: [&decimal_decode/1, type]
   def loaders(_primitive, type), do: [type]
 
   defp bool_decode(0), do: {:ok, false}
@@ -205,6 +211,23 @@ defmodule Ecto.Adapters.LibSqlEx do
 
   defp time_decode(value), do: {:ok, value}
 
+  defp decimal_decode(value) when is_binary(value) do
+    case Decimal.parse(value) do
+      {decimal, ""} -> {:ok, decimal}
+      _ -> :error
+    end
+  end
+
+  defp decimal_decode(value) when is_integer(value) do
+    {:ok, Decimal.new(value)}
+  end
+
+  defp decimal_decode(value) when is_float(value) do
+    {:ok, Decimal.from_float(value)}
+  end
+
+  defp decimal_decode(value), do: {:ok, value}
+
   @doc false
   def dumpers(:binary, type), do: [type, &blob_encode/1]
   def dumpers(:binary_id, type), do: [type, Ecto.UUID]
@@ -213,6 +236,7 @@ defmodule Ecto.Adapters.LibSqlEx do
   def dumpers(:naive_datetime, type), do: [type, &datetime_encode/1]
   def dumpers(:date, type), do: [type, &date_encode/1]
   def dumpers(:time, type), do: [type, &time_encode/1]
+  def dumpers(:decimal, type), do: [type, &decimal_encode/1]
   def dumpers(_primitive, type), do: [type]
 
   defp blob_encode(value), do: {:ok, {:blob, value}}
@@ -229,5 +253,9 @@ defmodule Ecto.Adapters.LibSqlEx do
 
   defp time_encode(%Time{} = time) do
     {:ok, Time.to_iso8601(time)}
+  end
+
+  defp decimal_encode(%Decimal{} = decimal) do
+    {:ok, Decimal.to_string(decimal)}
   end
 end

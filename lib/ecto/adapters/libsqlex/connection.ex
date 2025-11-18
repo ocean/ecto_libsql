@@ -30,6 +30,10 @@ defmodule Ecto.Adapters.LibSqlEx.Connection do
     end
   end
 
+  def execute(conn, sql, params, opts) when is_list(sql) do
+    execute(conn, IO.iodata_to_binary(sql), params, opts)
+  end
+
   def execute(conn, %{} = query, params, opts) do
     case DBConnection.execute(conn, query, params, opts) do
       {:ok, _query, result} -> {:ok, result}
@@ -44,27 +48,35 @@ defmodule Ecto.Adapters.LibSqlEx.Connection do
 
   @impl true
   def to_constraints(%{message: message}, _opts) do
-    case message do
-      "UNIQUE constraint failed: " <> _ ->
+    cond do
+      String.contains?(message, "UNIQUE constraint failed") ->
         [unique: extract_constraint_name(message)]
 
-      "FOREIGN KEY constraint failed" ->
+      String.contains?(message, "FOREIGN KEY constraint failed") ->
         [foreign_key: :unknown]
 
-      "CHECK constraint failed: " <> _ ->
+      String.contains?(message, "CHECK constraint failed") ->
         [check: extract_constraint_name(message)]
 
-      _ ->
+      String.contains?(message, "NOT NULL constraint failed") ->
+        # NOT NULL is treated as a check constraint in Ecto
+        [check: extract_constraint_name(message)]
+
+      true ->
         []
     end
   end
 
   defp extract_constraint_name(message) do
     # Extract constraint name from SQLite error messages
-    # Format: "UNIQUE constraint failed: users.email" -> :email
+    # Formats:
+    #   "SQLite failure: `UNIQUE constraint failed: users.email`" -> "email"
+    #   "UNIQUE constraint failed: users.email" -> "email"
+    #   "NOT NULL constraint failed: users.name" -> "name"
+    # Note: Return as string, not atom, because Ecto changesets use string constraint names
     case Regex.run(~r/constraint failed: (?:\w+\.)?(\w+)/, message) do
-      [_, name] -> String.to_atom(name)
-      _ -> :unknown
+      [_, name] -> name
+      _ -> "unknown"
     end
   end
 
@@ -328,40 +340,57 @@ defmodule Ecto.Adapters.LibSqlEx.Connection do
   end
 
   @impl true
-  def insert(prefix, table, _header, rows, _on_conflict, returning, _placeholders) do
+  def insert(prefix, table, header, rows, _on_conflict, returning, _placeholders) do
+    fields = intersperse_map(header, ?,, &quote_name/1)
+
     values =
       if rows == [] do
         [" DEFAULT VALUES"]
       else
-        [" (", intersperse_map(rows, ?,, &quote_value/1), ")"]
+        [" VALUES ", encode_values(rows)]
       end
 
-    ["INSERT INTO ", quote_table(prefix, table), values | returning(returning)]
+    ["INSERT INTO ", quote_table(prefix, table), " (", fields, ")", values | returning(returning)]
+  end
+
+  defp encode_values(rows) do
+    rows
+    |> Enum.map(fn row ->
+      ["(", intersperse_map(row, ?,, fn _ -> "?" end), ")"]
+    end)
+    |> Enum.intersperse(", ")
   end
 
   @impl true
-  def update(prefix, table, fields, filters, _returning) do
+  def update(prefix, table, fields, filters, returning) do
     {fields, count} =
       intersperse_reduce(fields, ", ", 1, fn field, acc ->
-        {[quote_name(field), " = ?#{acc}"], acc + 1}
+        {[quote_name(field), " = ?"], acc + 1}
       end)
 
     {filters, _count} =
-      intersperse_reduce(filters, " AND ", count, fn field, acc ->
-        {[quote_name(field), " = ?#{acc}"], acc + 1}
+      intersperse_reduce(filters, " AND ", count, fn {field, _value}, acc ->
+        {[quote_name(field), " = ?"], acc + 1}
       end)
 
-    ["UPDATE ", quote_table(prefix, table), " SET ", fields, " WHERE ", filters]
+    [
+      "UPDATE ",
+      quote_table(prefix, table),
+      " SET ",
+      fields,
+      " WHERE ",
+      filters | returning(returning)
+    ]
   end
 
   @impl true
-  def delete(prefix, table, filters, _returning) do
+  def delete(prefix, table, filters, returning) do
     {filters, _} =
-      intersperse_reduce(filters, " AND ", 1, fn field, acc ->
-        {[quote_name(field), " = ?#{acc}"], acc + 1}
+      intersperse_reduce(filters, " AND ", 1, fn {field, _value}, acc ->
+        {[quote_name(field), " = ?"], acc + 1}
       end)
 
-    ["DELETE FROM ", quote_table(prefix, table), " WHERE ", filters]
+    ["DELETE FROM ", quote_table(prefix, table), " WHERE ", filters | returning(returning)]
   end
 
   @impl true
@@ -430,19 +459,24 @@ defmodule Ecto.Adapters.LibSqlEx.Connection do
     {source, [?s, Integer.to_string(ix)]}
   end
 
+  defp quote_qualified_name(_source, _sources, ix) do
+    [?s, Integer.to_string(ix)]
+  end
+
   defp select(%{select: select} = query, sources) do
-    ["SELECT ", select_fields(select, sources, query)]
+    ["SELECT ", select_fields(select, sources, query), ?\s]
   end
 
   defp select_fields(%{fields: fields}, sources, query) do
     intersperse_map(fields, ", ", fn
       {:&, _, [idx]} ->
-        {_source, schema} = elem(sources, idx)
+        {source, schema} = elem(sources, idx)
+        qualifier = quote_qualified_name(source, sources, idx)
 
         if schema do
-          Enum.map_join(schema.__schema__(:fields), ", ", &[quote_name(&1)])
+          Enum.map_join(schema.__schema__(:fields), ", ", &[qualifier, ?., quote_name(&1)])
         else
-          "*"
+          [qualifier, ?., ?*]
         end
 
       {key, _value} when is_atom(key) ->
@@ -522,7 +556,7 @@ defmodule Ecto.Adapters.LibSqlEx.Connection do
   defp order_by(%{order_bys: order_bys} = query, sources) do
     [
       " ORDER BY "
-      | intersperse_map(order_bys, ", ", fn %Ecto.Query.QueryExpr{expr: expr} ->
+      | intersperse_map(order_bys, ", ", fn %{expr: expr} ->
           intersperse_map(expr, ", ", &order_by_expr(&1, sources, query))
         end)
     ]
@@ -574,8 +608,153 @@ defmodule Ecto.Adapters.LibSqlEx.Connection do
     [?(, expr(expr, sources, query), ?)]
   end
 
+  # Parameter placeholder
+  defp expr({:^, [], [_ix]}, _sources, _query) do
+    ~c"?"
+  end
+
+  # Qualified field reference: s0.field
+  defp expr({{:., _, [{:&, _, [idx]}, field]}, _, []}, sources, _query)
+       when is_atom(field) or is_binary(field) do
+    {_, name} = get_source(nil, sources, idx)
+    [name, ?. | quote_name(field)]
+  end
+
+  # Table reference: &0 -> s0
+  defp expr({:&, _, [idx]}, sources, _query) do
+    {_, name} = get_source(nil, sources, idx)
+    name
+  end
+
+  # Literals
+  defp expr({:constant, _, [literal]}, _sources, _query) when is_binary(literal) do
+    [?', escape_string(literal), ?']
+  end
+
+  defp expr({:constant, _, [literal]}, _sources, _query) when is_number(literal) do
+    to_string(literal)
+  end
+
+  defp expr({:constant, _, [true]}, _sources, _query), do: "1"
+  defp expr({:constant, _, [false]}, _sources, _query), do: "0"
+  defp expr({:constant, _, [nil]}, _sources, _query), do: "NULL"
+
+  # Boolean operations
+  defp expr({:is_nil, _, [arg]}, sources, query) do
+    [expr(arg, sources, query) | " IS NULL"]
+  end
+
+  defp expr({:not, _, [arg]}, sources, query) do
+    ["NOT (", expr(arg, sources, query), ?)]
+  end
+
+  # Comparison operations
+  defp expr({:==, _, [left, right]}, sources, query) do
+    [expr(left, sources, query), " = ", expr(right, sources, query)]
+  end
+
+  defp expr({:!=, _, [left, right]}, sources, query) do
+    [expr(left, sources, query), " != ", expr(right, sources, query)]
+  end
+
+  defp expr({:<, _, [left, right]}, sources, query) do
+    [expr(left, sources, query), " < ", expr(right, sources, query)]
+  end
+
+  defp expr({:>, _, [left, right]}, sources, query) do
+    [expr(left, sources, query), " > ", expr(right, sources, query)]
+  end
+
+  defp expr({:<=, _, [left, right]}, sources, query) do
+    [expr(left, sources, query), " <= ", expr(right, sources, query)]
+  end
+
+  defp expr({:>=, _, [left, right]}, sources, query) do
+    [expr(left, sources, query), " >= ", expr(right, sources, query)]
+  end
+
+  # Boolean logic
+  defp expr({:and, _, [left, right]}, sources, query) do
+    [?(, expr(left, sources, query), " AND ", expr(right, sources, query), ?)]
+  end
+
+  defp expr({:or, _, [left, right]}, sources, query) do
+    [?(, expr(left, sources, query), " OR ", expr(right, sources, query), ?)]
+  end
+
+  # IN clause
+  defp expr({:in, _, [left, right]}, sources, query) when is_list(right) do
+    args = Enum.map_intersperse(right, ?,, &expr(&1, sources, query))
+    [expr(left, sources, query), " IN (", args, ?)]
+  end
+
+  defp expr({:in, _, [left, {:^, _, [_, length]}]}, sources, query) do
+    args = Enum.intersperse(List.duplicate(??, length), ?,)
+    [expr(left, sources, query), " IN (", args, ?)]
+  end
+
+  # LIKE
+  defp expr({:like, _, [left, right]}, sources, query) do
+    [expr(left, sources, query), " LIKE ", expr(right, sources, query)]
+  end
+
+  # Count
+  defp expr({:count, _, []}, _sources, _query), do: "count(*)"
+
+  defp expr({:count, _, [arg]}, sources, query) do
+    ["count(", expr(arg, sources, query), ?)]
+  end
+
+  # Aggregate functions
+  defp expr({:sum, _, [arg]}, sources, query) do
+    ["sum(", expr(arg, sources, query), ?)]
+  end
+
+  defp expr({:avg, _, [arg]}, sources, query) do
+    ["avg(", expr(arg, sources, query), ?)]
+  end
+
+  defp expr({:min, _, [arg]}, sources, query) do
+    ["min(", expr(arg, sources, query), ?)]
+  end
+
+  defp expr({:max, _, [arg]}, sources, query) do
+    ["max(", expr(arg, sources, query), ?)]
+  end
+
+  # Fragment for raw SQL
+  defp expr({:fragment, _, parts}, sources, query) do
+    Enum.map(parts, fn
+      {:raw, part} -> part
+      {:expr, e} -> expr(e, sources, query)
+    end)
+  end
+
+  # Selected as (for query aliases)
+  defp expr({:selected_as, _, [name]}, _sources, _query) do
+    quote_name(name)
+  end
+
+  # Type casting
+  defp expr({:type, _, [arg, _type]}, sources, query) do
+    expr(arg, sources, query)
+  end
+
+  # Literal values (numbers, strings, etc.)
+  defp expr(literal, _sources, _query) when is_number(literal) do
+    to_string(literal)
+  end
+
+  defp expr(literal, _sources, _query) when is_binary(literal) do
+    [?', escape_string(literal), ?']
+  end
+
+  defp expr(true, _sources, _query), do: "1"
+  defp expr(false, _sources, _query), do: "0"
+  defp expr(nil, _sources, _query), do: "NULL"
+
+  # Default fallback for unsupported expressions
   defp expr(_expr, _sources, _query) do
-    # Simplified expression handling - full implementation would handle all Ecto.Query expression types
     "?"
   end
 
@@ -603,14 +782,17 @@ defmodule Ecto.Adapters.LibSqlEx.Connection do
     [quote_name(key), " = ", quote_name(key), " + ", expr(value, sources, query)]
   end
 
-  defp using_join(%{joins: []}, _kind, _prefix, _sources), do: {[], []}
+  defp using_join(%{joins: []} = query, _kind, _prefix, _sources), do: {[], query.wheres}
 
   defp using_join(%{joins: _joins} = query, _kind, _prefix, _sources) do
     {[], query.wheres}
   end
 
   defp returning([]), do: []
-  defp returning(_returning), do: []
+
+  defp returning(returning) do
+    [" RETURNING " | intersperse_map(returning, ?,, &quote_name/1)]
+  end
 
   defp intersperse_map(list, separator, mapper) do
     intersperse_map(list, separator, mapper, [])
@@ -644,17 +826,5 @@ defmodule Ecto.Adapters.LibSqlEx.Connection do
 
   defp intersperse_reduce([], _separator, count, [], _reducer) do
     {[], count}
-  end
-
-  defp quote_value(nil), do: "NULL"
-  defp quote_value(true), do: "1"
-  defp quote_value(false), do: "0"
-
-  defp quote_value(value) when is_binary(value) do
-    [?', escape_string(value), ?']
-  end
-
-  defp quote_value(value) when is_integer(value) or is_float(value) do
-    to_string(value)
   end
 end

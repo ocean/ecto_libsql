@@ -10,6 +10,7 @@ defmodule LibSqlEx.Native do
   def begin_transaction(_conn), do: :erlang.nif_error(:nif_not_loaded)
   def begin_transaction_with_behavior(_conn, _behavior), do: :erlang.nif_error(:nif_not_loaded)
   def execute_with_transaction(_trx_id, _query, _args), do: :erlang.nif_error(:nif_not_loaded)
+  def query_with_trx_args(_trx_id, _query, _args), do: :erlang.nif_error(:nif_not_loaded)
   def handle_status_transaction(_trx_id), do: :erlang.nif_error(:nif_not_loaded)
 
   def commit_or_rollback_transaction(_trx, _conn, _mode, _sync, _param),
@@ -63,17 +64,40 @@ defmodule LibSqlEx.Native do
         "rows" => rows,
         "num_rows" => num_rows
       } ->
+        command = detect_command(statement)
+
+        # For INSERT/UPDATE/DELETE, get the actual affected row count from changes()
+        # This is especially important for INSERT without RETURNING and batch operations
+        actual_num_rows =
+          if command in [:insert, :update, :delete] do
+            case changes(conn_id) do
+              n when is_integer(n) -> n
+              _ -> num_rows
+            end
+          else
+            num_rows
+          end
+
+        # For UPDATE/DELETE without RETURNING, columns and rows will be empty
+        # Set them to nil to match Ecto's expectations
+        {columns, rows} =
+          if command in [:update, :delete] and columns == [] and rows == [] do
+            {nil, nil}
+          else
+            {columns, rows}
+          end
+
         result = %LibSqlEx.Result{
-          command: detect_command(statement),
+          command: command,
           columns: columns,
           rows: rows,
-          num_rows: num_rows
+          num_rows: actual_num_rows
         }
 
         {:ok, query, result, state}
 
       {:error, message} ->
-        {:error, query, message, state}
+        {:error, %LibSqlEx.Error{message: message}, state}
     end
   end
 
@@ -82,18 +106,43 @@ defmodule LibSqlEx.Native do
         %LibSqlEx.Query{statement: statement} = query,
         args
       ) do
-    # nif NifResult<u64>
-    case execute_with_transaction(trx_id, statement, args) do
-      num_rows when is_integer(num_rows) ->
-        result = %LibSqlEx.Result{
-          command: detect_command(statement),
-          num_rows: num_rows
-        }
+    # Check if statement has RETURNING clause - if so, use query instead of execute
+    has_returning = String.contains?(String.upcase(statement), "RETURNING")
 
-        {:ok, query, result, state}
+    if has_returning do
+      # Use query_with_trx_args for statements with RETURNING
+      case query_with_trx_args(trx_id, statement, args) do
+        %{
+          "columns" => columns,
+          "rows" => rows,
+          "num_rows" => num_rows
+        } ->
+          result = %LibSqlEx.Result{
+            command: detect_command(statement),
+            columns: columns,
+            rows: rows,
+            num_rows: num_rows
+          }
 
-      {:error, message} ->
-        {:error, query, message, state}
+          {:ok, query, result, state}
+
+        {:error, message} ->
+          {:error, %LibSqlEx.Error{message: message}, state}
+      end
+    else
+      # Use execute for statements without RETURNING
+      case execute_with_transaction(trx_id, statement, args) do
+        num_rows when is_integer(num_rows) ->
+          result = %LibSqlEx.Result{
+            command: detect_command(statement),
+            num_rows: num_rows
+          }
+
+          {:ok, query, result, state}
+
+        {:error, message} ->
+          {:error, %LibSqlEx.Error{message: message}, state}
+      end
     end
   end
 

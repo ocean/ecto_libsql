@@ -1,0 +1,16 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mix compile:*)",
+      "Bash(mix test:*)",
+      "Bash(mix format:*)",
+      "Bash(sqlite3:*)",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "Bash(mix clean:*)",
+      "Bash(iex -S mix:*)"
+    ],
+    "deny": [],
+    "ask": []
+  }
+}

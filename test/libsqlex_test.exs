@@ -3,13 +3,28 @@ defmodule LibSqlExTest do
   doctest LibSqlEx
 
   setup_all do
+    # Clean up any existing test database from previous runs
+    File.rm("bar.db")
+
+    :ok
+  end
+
+  setup do
+    # Create a unique database file for each test to ensure isolation
+    test_db = "test_#{:erlang.unique_integer([:positive])}.db"
+
     opts = [
       uri: System.get_env("LIBSQL_URI"),
       auth_token: System.get_env("LIBSQL_TOKEN"),
-      database: "bar.db",
+      database: test_db,
       # sync is optional
       sync: true
     ]
+
+    # Clean up database file after test completes
+    on_exit(fn ->
+      File.rm(test_db)
+    end)
 
     {:ok, opts: opts}
   end
@@ -98,13 +113,19 @@ defmodule LibSqlExTest do
 
     query = %LibSqlEx.Query{statement: "SELECT * FROM not_existing_table"}
 
-    assert {:error, _, _, _} = LibSqlEx.handle_execute(query, [], [], state)
+    assert {:error, %LibSqlEx.Error{}, _} = LibSqlEx.handle_execute(query, [], [], state)
   end
 
-  # passed
-  @tag :skip
   test "insert and update user", state do
     {:ok, state} = LibSqlEx.connect(state[:opts])
+
+    # Create table first
+    create_table = %LibSqlEx.Query{
+      statement:
+        "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, email TEXT)"
+    }
+
+    {:ok, _, _, state} = LibSqlEx.handle_execute(create_table, [], [], state)
 
     insert_query = %LibSqlEx.Query{
       statement: "INSERT INTO users (name, email) VALUES (?1, ?2)"
