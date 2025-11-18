@@ -1,6 +1,6 @@
-# LibSqlEx - Comprehensive Developer Guide
+# EctoLibSql - Comprehensive Developer Guide
 
-Welcome to LibSqlEx! This guide provides comprehensive documentation, API reference, and practical examples for building applications with libSQL/Turso in Elixir.
+Welcome to EctoLibSql! This guide provides comprehensive documentation, API reference, and practical examples for building applications with libSQL/Turso in Elixir.
 
 ## Table of Contents
 
@@ -30,7 +30,7 @@ Add to your `mix.exs`:
 ```elixir
 def deps do
   [
-    {:libsqlex, "~> 0.2.0"}
+    {:ecto_libsql, "~> 0.2.0"}
   ]
 end
 ```
@@ -39,10 +39,10 @@ end
 
 ```elixir
 # Connect to a local database
-{:ok, state} = LibSqlEx.connect(database: "myapp.db")
+{:ok, state} = EctoLibSql.connect(database: "myapp.db")
 
 # Create a table
-{:ok, _, _, state} = LibSqlEx.handle_execute(
+{:ok, _, _, state} = EctoLibSql.handle_execute(
   "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, email TEXT)",
   [],
   [],
@@ -50,7 +50,7 @@ end
 )
 
 # Insert data
-{:ok, _, _, state} = LibSqlEx.handle_execute(
+{:ok, _, _, state} = EctoLibSql.handle_execute(
   "INSERT INTO users (name, email) VALUES (?, ?)",
   ["Alice", "alice@example.com"],
   [],
@@ -58,7 +58,7 @@ end
 )
 
 # Query data
-{:ok, _query, result, _state} = LibSqlEx.handle_execute(
+{:ok, _query, result, _state} = EctoLibSql.handle_execute(
   "SELECT * FROM users WHERE name = ?",
   ["Alice"],
   [],
@@ -66,7 +66,7 @@ end
 )
 
 IO.inspect(result)
-# %LibSqlEx.Result{
+# %EctoLibSql.Result{
 #   columns: ["id", "name", "email"],
 #   rows: [[1, "Alice", "alice@example.com"]],
 #   num_rows: 1
@@ -77,7 +77,7 @@ IO.inspect(result)
 
 ## Connection Management
 
-LibSqlEx supports three connection modes, each optimized for different use cases.
+EctoLibSql supports three connection modes, each optimized for different use cases.
 
 ### Local Mode
 
@@ -85,7 +85,7 @@ Perfect for embedded databases, development, and single-instance applications.
 
 ```elixir
 opts = [database: "local.db"]
-{:ok, state} = LibSqlEx.connect(opts)
+{:ok, state} = EctoLibSql.connect(opts)
 ```
 
 **Use cases:**
@@ -103,7 +103,7 @@ opts = [
   uri: "libsql://my-database.turso.io",
   auth_token: System.get_env("TURSO_AUTH_TOKEN")
 ]
-{:ok, state} = LibSqlEx.connect(opts)
+{:ok, state} = EctoLibSql.connect(opts)
 ```
 
 **Use cases:**
@@ -123,7 +123,7 @@ opts = [
   database: "replica.db",
   sync: true  # Auto-sync on writes
 ]
-{:ok, state} = LibSqlEx.connect(opts)
+{:ok, state} = EctoLibSql.connect(opts)
 ```
 
 **Use cases:**
@@ -159,7 +159,7 @@ opts = [
   database: "secure.db",
   encryption_key: "your-32-char-encryption-key-here"
 ]
-{:ok, state} = LibSqlEx.connect(opts)
+{:ok, state} = EctoLibSql.connect(opts)
 ```
 
 **Security notes:**
@@ -176,7 +176,7 @@ opts = [
 
 ```elixir
 # Single insert
-{:ok, _, result, state} = LibSqlEx.handle_execute(
+{:ok, _, result, state} = EctoLibSql.handle_execute(
   "INSERT INTO users (name, email) VALUES (?, ?)",
   ["Bob", "bob@example.com"],
   [],
@@ -184,11 +184,11 @@ opts = [
 )
 
 # Get the inserted row ID
-rowid = LibSqlEx.Native.get_last_insert_rowid(state)
+rowid = EctoLibSql.Native.get_last_insert_rowid(state)
 IO.puts("Inserted row ID: #{rowid}")
 
 # Check how many rows were affected
-changes = LibSqlEx.Native.get_changes(state)
+changes = EctoLibSql.Native.get_changes(state)
 IO.puts("Rows affected: #{changes}")
 ```
 
@@ -196,7 +196,7 @@ IO.puts("Rows affected: #{changes}")
 
 ```elixir
 # Simple select
-{:ok, _, result, state} = LibSqlEx.handle_execute(
+{:ok, _, result, state} = EctoLibSql.handle_execute(
   "SELECT * FROM users",
   [],
   [],
@@ -208,7 +208,7 @@ Enum.each(result.rows, fn [id, name, email] ->
 end)
 
 # Parameterized select
-{:ok, _, result, state} = LibSqlEx.handle_execute(
+{:ok, _, result, state} = EctoLibSql.handle_execute(
   "SELECT name, email FROM users WHERE id = ?",
   [1],
   [],
@@ -219,28 +219,28 @@ end)
 ### UPDATE
 
 ```elixir
-{:ok, _, result, state} = LibSqlEx.handle_execute(
+{:ok, _, result, state} = EctoLibSql.handle_execute(
   "UPDATE users SET email = ? WHERE name = ?",
   ["newemail@example.com", "Alice"],
   [],
   state
 )
 
-changes = LibSqlEx.Native.get_changes(state)
+changes = EctoLibSql.Native.get_changes(state)
 IO.puts("Updated #{changes} rows")
 ```
 
 ### DELETE
 
 ```elixir
-{:ok, _, result, state} = LibSqlEx.handle_execute(
+{:ok, _, result, state} = EctoLibSql.handle_execute(
   "DELETE FROM users WHERE id = ?",
   [1],
   [],
   state
 )
 
-changes = LibSqlEx.Native.get_changes(state)
+changes = EctoLibSql.Native.get_changes(state)
 IO.puts("Deleted #{changes} rows")
 ```
 
@@ -254,17 +254,17 @@ IO.puts("Deleted #{changes} rows")
 
 ```elixir
 # Begin transaction
-{:ok, :begin, state} = LibSqlEx.handle_begin([], state)
+{:ok, :begin, state} = EctoLibSql.handle_begin([], state)
 
 # Execute operations
-{:ok, _, _, state} = LibSqlEx.handle_execute(
+{:ok, _, _, state} = EctoLibSql.handle_execute(
   "INSERT INTO users (name) VALUES (?)",
   ["Charlie"],
   [],
   state
 )
 
-{:ok, _, _, state} = LibSqlEx.handle_execute(
+{:ok, _, _, state} = EctoLibSql.handle_execute(
   "UPDATE accounts SET balance = balance - 100 WHERE user = ?",
   ["Charlie"],
   [],
@@ -272,15 +272,15 @@ IO.puts("Deleted #{changes} rows")
 )
 
 # Commit
-{:ok, _, state} = LibSqlEx.handle_commit([], state)
+{:ok, _, state} = EctoLibSql.handle_commit([], state)
 ```
 
 #### Transaction Rollback
 
 ```elixir
-{:ok, :begin, state} = LibSqlEx.handle_begin([], state)
+{:ok, :begin, state} = EctoLibSql.handle_begin([], state)
 
-{:ok, _, _, state} = LibSqlEx.handle_execute(
+{:ok, _, _, state} = EctoLibSql.handle_execute(
   "INSERT INTO users (name) VALUES (?)",
   ["Invalid User"],
   [],
@@ -288,7 +288,7 @@ IO.puts("Deleted #{changes} rows")
 )
 
 # Something went wrong, rollback
-{:ok, _, state} = LibSqlEx.handle_rollback([], state)
+{:ok, _, state} = EctoLibSql.handle_rollback([], state)
 ```
 
 #### Transaction Behaviors
@@ -297,16 +297,16 @@ Control locking and concurrency with transaction behaviors:
 
 ```elixir
 # DEFERRED (default) - locks acquired on first write
-{:ok, state} = LibSqlEx.Native.begin(state, behavior: :deferred)
+{:ok, state} = EctoLibSql.Native.begin(state, behavior: :deferred)
 
 # IMMEDIATE - acquires write lock immediately
-{:ok, state} = LibSqlEx.Native.begin(state, behavior: :immediate)
+{:ok, state} = EctoLibSql.Native.begin(state, behavior: :immediate)
 
 # EXCLUSIVE - exclusive lock, blocks all other connections
-{:ok, state} = LibSqlEx.Native.begin(state, behavior: :exclusive)
+{:ok, state} = EctoLibSql.Native.begin(state, behavior: :exclusive)
 
 # READ_ONLY - read-only transaction (no locks)
-{:ok, state} = LibSqlEx.Native.begin(state, behavior: :read_only)
+{:ok, state} = EctoLibSql.Native.begin(state, behavior: :read_only)
 ```
 
 **When to use each behavior:**
@@ -321,20 +321,20 @@ Control locking and concurrency with transaction behaviors:
 ```elixir
 defmodule MyApp.Transfer do
   def transfer_funds(from_user, to_user, amount, state) do
-    with {:ok, :begin, state} <- LibSqlEx.handle_begin([], state),
+    with {:ok, :begin, state} <- EctoLibSql.handle_begin([], state),
          {:ok, _, _, state} <- debit_account(from_user, amount, state),
          {:ok, _, _, state} <- credit_account(to_user, amount, state),
-         {:ok, _, state} <- LibSqlEx.handle_commit([], state) do
+         {:ok, _, state} <- EctoLibSql.handle_commit([], state) do
       {:ok, state}
     else
       {:error, reason, state} ->
-        LibSqlEx.handle_rollback([], state)
+        EctoLibSql.handle_rollback([], state)
         {:error, reason}
     end
   end
 
   defp debit_account(user, amount, state) do
-    LibSqlEx.handle_execute(
+    EctoLibSql.handle_execute(
       "UPDATE accounts SET balance = balance - ? WHERE user = ? AND balance >= ?",
       [amount, user, amount],
       [],
@@ -343,7 +343,7 @@ defmodule MyApp.Transfer do
   end
 
   defp credit_account(user, amount, state) do
-    LibSqlEx.handle_execute(
+    EctoLibSql.handle_execute(
       "UPDATE accounts SET balance = balance + ? WHERE user = ?",
       [amount, user],
       [],
@@ -361,31 +361,31 @@ Prepared statements offer better performance for repeated queries and prevent SQ
 
 ```elixir
 # Prepare the statement
-{:ok, stmt_id} = LibSqlEx.Native.prepare(
+{:ok, stmt_id} = EctoLibSql.Native.prepare(
   state,
   "SELECT * FROM users WHERE email = ?"
 )
 
 # Execute multiple times with different parameters
-{:ok, result1} = LibSqlEx.Native.query_stmt(state, stmt_id, ["alice@example.com"])
-{:ok, result2} = LibSqlEx.Native.query_stmt(state, stmt_id, ["bob@example.com"])
-{:ok, result3} = LibSqlEx.Native.query_stmt(state, stmt_id, ["charlie@example.com"])
+{:ok, result1} = EctoLibSql.Native.query_stmt(state, stmt_id, ["alice@example.com"])
+{:ok, result2} = EctoLibSql.Native.query_stmt(state, stmt_id, ["bob@example.com"])
+{:ok, result3} = EctoLibSql.Native.query_stmt(state, stmt_id, ["charlie@example.com"])
 
 # Clean up when done
-:ok = LibSqlEx.Native.close_stmt(stmt_id)
+:ok = EctoLibSql.Native.close_stmt(stmt_id)
 ```
 
 #### Prepared INSERT/UPDATE/DELETE
 
 ```elixir
 # Prepare an INSERT statement
-{:ok, stmt_id} = LibSqlEx.Native.prepare(
+{:ok, stmt_id} = EctoLibSql.Native.prepare(
   state,
   "INSERT INTO users (name, email) VALUES (?, ?)"
 )
 
 # Execute multiple inserts
-{:ok, rows} = LibSqlEx.Native.execute_stmt(
+{:ok, rows} = EctoLibSql.Native.execute_stmt(
   state,
   stmt_id,
   "INSERT INTO users (name, email) VALUES (?, ?)",
@@ -393,14 +393,14 @@ Prepared statements offer better performance for repeated queries and prevent SQ
 )
 IO.puts("Inserted #{rows} rows")
 
-{:ok, rows} = LibSqlEx.Native.execute_stmt(
+{:ok, rows} = EctoLibSql.Native.execute_stmt(
   state,
   stmt_id,
   "INSERT INTO users (name, email) VALUES (?, ?)",
   ["User 2", "user2@example.com"]
 )
 
-:ok = LibSqlEx.Native.close_stmt(stmt_id)
+:ok = EctoLibSql.Native.close_stmt(stmt_id)
 ```
 
 #### Prepared Statement Best Practices
@@ -409,17 +409,17 @@ IO.puts("Inserted #{rows} rows")
 defmodule MyApp.UserRepository do
   def setup(state) do
     # Prepare commonly used statements at startup
-    {:ok, find_by_email} = LibSqlEx.Native.prepare(
+    {:ok, find_by_email} = EctoLibSql.Native.prepare(
       state,
       "SELECT * FROM users WHERE email = ?"
     )
 
-    {:ok, insert_user} = LibSqlEx.Native.prepare(
+    {:ok, insert_user} = EctoLibSql.Native.prepare(
       state,
       "INSERT INTO users (name, email) VALUES (?, ?)"
     )
 
-    {:ok, update_user} = LibSqlEx.Native.prepare(
+    {:ok, update_user} = EctoLibSql.Native.prepare(
       state,
       "UPDATE users SET name = ?, email = ? WHERE id = ?"
     )
@@ -433,11 +433,11 @@ defmodule MyApp.UserRepository do
   end
 
   def find_by_email(repo, email) do
-    LibSqlEx.Native.query_stmt(repo.state, repo.find_by_email, [email])
+    EctoLibSql.Native.query_stmt(repo.state, repo.find_by_email, [email])
   end
 
   def insert(repo, name, email) do
-    LibSqlEx.Native.execute_stmt(
+    EctoLibSql.Native.execute_stmt(
       repo.state,
       repo.insert_user,
       "INSERT INTO users (name, email) VALUES (?, ?)",
@@ -446,9 +446,9 @@ defmodule MyApp.UserRepository do
   end
 
   def cleanup(repo) do
-    LibSqlEx.Native.close_stmt(repo.find_by_email)
-    LibSqlEx.Native.close_stmt(repo.insert_user)
-    LibSqlEx.Native.close_stmt(repo.update_user)
+    EctoLibSql.Native.close_stmt(repo.find_by_email)
+    EctoLibSql.Native.close_stmt(repo.insert_user)
+    EctoLibSql.Native.close_stmt(repo.update_user)
   end
 end
 ```
@@ -469,7 +469,7 @@ statements = [
   {"SELECT COUNT(*) FROM users", []}
 ]
 
-{:ok, results} = LibSqlEx.Native.batch(state, statements)
+{:ok, results} = EctoLibSql.Native.batch(state, statements)
 
 Enum.each(results, fn result ->
   IO.inspect(result)
@@ -488,7 +488,7 @@ statements = [
    ["Alice", "Bob", 100]}
 ]
 
-{:ok, results} = LibSqlEx.Native.batch_transactional(state, statements)
+{:ok, results} = EctoLibSql.Native.batch_transactional(state, statements)
 ```
 
 #### Bulk Insert Example
@@ -505,7 +505,7 @@ defmodule MyApp.BulkImporter do
       end)
       |> Enum.to_list()
 
-    case LibSqlEx.Native.batch_transactional(state, statements) do
+    case EctoLibSql.Native.batch_transactional(state, statements) do
       {:ok, results} ->
         IO.puts("Imported #{length(results)} users")
         {:ok, length(results)}
@@ -526,18 +526,18 @@ For large result sets, use cursors to stream data without loading everything int
 
 ```elixir
 # Start a DBConnection
-{:ok, conn} = DBConnection.start_link(LibSqlEx, database: "myapp.db")
+{:ok, conn} = DBConnection.start_link(EctoLibSql, database: "myapp.db")
 
 # Create a stream
 stream = DBConnection.stream(
   conn,
-  %LibSqlEx.Query{statement: "SELECT * FROM large_table"},
+  %EctoLibSql.Query{statement: "SELECT * FROM large_table"},
   []
 )
 
 # Process in chunks
 stream
-|> Enum.each(fn %LibSqlEx.Result{rows: rows, num_rows: count} ->
+|> Enum.each(fn %EctoLibSql.Result{rows: rows, num_rows: count} ->
   IO.puts("Processing batch of #{count} rows")
   Enum.each(rows, &process_row/1)
 end)
@@ -549,7 +549,7 @@ end)
 # Fetch 100 rows at a time instead of default 500
 stream = DBConnection.stream(
   conn,
-  %LibSqlEx.Query{statement: "SELECT * FROM large_table"},
+  %EctoLibSql.Query{statement: "SELECT * FROM large_table"},
   [],
   max_rows: 100
 )
@@ -573,11 +573,11 @@ defmodule MyApp.Exporter do
 
     DBConnection.stream(
       conn,
-      %LibSqlEx.Query{statement: "SELECT * FROM users"},
+      %EctoLibSql.Query{statement: "SELECT * FROM users"},
       [],
       max_rows: 1000
     )
-    |> Stream.flat_map(fn %LibSqlEx.Result{rows: rows} -> rows end)
+    |> Stream.flat_map(fn %EctoLibSql.Result{rows: rows} -> rows end)
     |> Stream.map(fn [id, name, email] ->
       Jason.encode!(%{id: id, name: name, email: email})
     end)
@@ -591,15 +591,15 @@ end
 
 ### Vector Search
 
-LibSqlEx includes built-in support for vector similarity search, perfect for AI/ML applications.
+EctoLibSql includes built-in support for vector similarity search, perfect for AI/ML applications.
 
 #### Creating Vector Tables
 
 ```elixir
 # Create a table with a 1536-dimensional vector column (OpenAI embeddings)
-vector_col = LibSqlEx.Native.vector_type(1536, :f32)
+vector_col = EctoLibSql.Native.vector_type(1536, :f32)
 
-{:ok, _, _, state} = LibSqlEx.handle_execute(
+{:ok, _, _, state} = EctoLibSql.handle_execute(
   """
   CREATE TABLE documents (
     id INTEGER PRIMARY KEY,
@@ -621,10 +621,10 @@ embedding = MyApp.OpenAI.get_embedding("Hello, world!")
 # Returns: [0.123, -0.456, 0.789, ...]
 
 # Convert to vector format
-vec = LibSqlEx.Native.vector(embedding)
+vec = EctoLibSql.Native.vector(embedding)
 
 # Insert
-{:ok, _, _, state} = LibSqlEx.handle_execute(
+{:ok, _, _, state} = EctoLibSql.handle_execute(
   "INSERT INTO documents (content, embedding) VALUES (?, vector(?))",
   ["Hello, world!", vec],
   [],
@@ -640,10 +640,10 @@ query_text = "greeting messages"
 query_embedding = MyApp.OpenAI.get_embedding(query_text)
 
 # Build distance SQL
-distance_sql = LibSqlEx.Native.vector_distance_cos("embedding", query_embedding)
+distance_sql = EctoLibSql.Native.vector_distance_cos("embedding", query_embedding)
 
 # Find most similar documents
-{:ok, _, result, state} = LibSqlEx.handle_execute(
+{:ok, _, result, state} = EctoLibSql.handle_execute(
   """
   SELECT id, content, #{distance_sql} as distance
   FROM documents
@@ -667,9 +667,9 @@ defmodule MyApp.RAG do
   @embedding_dimensions 1536
 
   def setup(state) do
-    vector_col = LibSqlEx.Native.vector_type(@embedding_dimensions, :f32)
+    vector_col = EctoLibSql.Native.vector_type(@embedding_dimensions, :f32)
 
-    LibSqlEx.handle_execute(
+    EctoLibSql.handle_execute(
       """
       CREATE TABLE IF NOT EXISTS knowledge_base (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -688,9 +688,9 @@ defmodule MyApp.RAG do
   def add_document(state, source, content) do
     # Get embedding from OpenAI
     embedding = get_embedding(content)
-    vec = LibSqlEx.Native.vector(embedding)
+    vec = EctoLibSql.Native.vector(embedding)
 
-    LibSqlEx.handle_execute(
+    EctoLibSql.handle_execute(
       """
       INSERT INTO knowledge_base (source, content, embedding, created_at)
       VALUES (?, ?, vector(?), ?)
@@ -703,9 +703,9 @@ defmodule MyApp.RAG do
 
   def search(state, query, limit \\ 5) do
     query_embedding = get_embedding(query)
-    distance_sql = LibSqlEx.Native.vector_distance_cos("embedding", query_embedding)
+    distance_sql = EctoLibSql.Native.vector_distance_cos("embedding", query_embedding)
 
-    {:ok, _, result, _} = LibSqlEx.handle_execute(
+    {:ok, _, result, _} = EctoLibSql.handle_execute(
       """
       SELECT source, content, #{distance_sql} as relevance
       FROM knowledge_base
@@ -733,9 +733,9 @@ end
 
 ```elixir
 # Create table with metadata
-vector_col = LibSqlEx.Native.vector_type(384, :f32)
+vector_col = EctoLibSql.Native.vector_type(384, :f32)
 
-{:ok, _, _, state} = LibSqlEx.handle_execute(
+{:ok, _, _, state} = EctoLibSql.handle_execute(
   """
   CREATE TABLE products (
     id INTEGER PRIMARY KEY,
@@ -752,9 +752,9 @@ vector_col = LibSqlEx.Native.vector_type(384, :f32)
 
 # Search within a category
 query_embedding = get_embedding("comfortable running shoes")
-distance_sql = LibSqlEx.Native.vector_distance_cos("description_embedding", query_embedding)
+distance_sql = EctoLibSql.Native.vector_distance_cos("description_embedding", query_embedding)
 
-{:ok, _, result, state} = LibSqlEx.handle_execute(
+{:ok, _, result, state} = EctoLibSql.handle_execute(
   """
   SELECT name, price, #{distance_sql} as similarity
   FROM products
@@ -780,10 +780,10 @@ opts = [
   encryption_key: System.get_env("DB_ENCRYPTION_KEY")
 ]
 
-{:ok, state} = LibSqlEx.connect(opts)
+{:ok, state} = EctoLibSql.connect(opts)
 
 # Use normally - encryption is transparent
-{:ok, _, _, state} = LibSqlEx.handle_execute(
+{:ok, _, _, state} = EctoLibSql.handle_execute(
   "INSERT INTO secrets (data) VALUES (?)",
   ["sensitive information"],
   [],
@@ -802,7 +802,7 @@ opts = [
   sync: true
 ]
 
-{:ok, state} = LibSqlEx.connect(opts)
+{:ok, state} = EctoLibSql.connect(opts)
 ```
 
 #### Key Management Best Practices
@@ -835,7 +835,7 @@ defmodule MyApp.DatabaseConfig do
 end
 
 # Usage
-{:ok, state} = LibSqlEx.connect(MyApp.DatabaseConfig.connection_opts())
+{:ok, state} = EctoLibSql.connect(MyApp.DatabaseConfig.connection_opts())
 ```
 
 ---
@@ -844,7 +844,7 @@ end
 
 ### Connection Functions
 
-#### `LibSqlEx.connect/1`
+#### `EctoLibSql.connect/1`
 
 Opens a database connection.
 
@@ -860,77 +860,77 @@ Opens a database connection.
 
 **Returns:** `{:ok, state}` or `{:error, reason}`
 
-#### `LibSqlEx.disconnect/2`
+#### `EctoLibSql.disconnect/2`
 
 Closes a database connection.
 
 **Parameters:**
 - `opts` (keyword list): Options (currently unused)
-- `state` (LibSqlEx.State): Connection state
+- `state` (EctoLibSql.State): Connection state
 
 **Returns:** `:ok`
 
-#### `LibSqlEx.ping/1`
+#### `EctoLibSql.ping/1`
 
 Checks if connection is alive.
 
 **Parameters:**
-- `state` (LibSqlEx.State): Connection state
+- `state` (EctoLibSql.State): Connection state
 
 **Returns:** `{:ok, state}` or `{:disconnect, reason, state}`
 
 ### Query Functions
 
-#### `LibSqlEx.handle_execute/4`
+#### `EctoLibSql.handle_execute/4`
 
 Executes a SQL query.
 
 **Parameters:**
-- `query` (String.t() | LibSqlEx.Query): SQL query
+- `query` (String.t() | EctoLibSql.Query): SQL query
 - `params` (list): Query parameters
 - `opts` (keyword list): Options
-- `state` (LibSqlEx.State): Connection state
+- `state` (EctoLibSql.State): Connection state
 
 **Returns:** `{:ok, query, result, state}` or `{:error, query, reason, state}`
 
 ### Transaction Functions
 
-#### `LibSqlEx.handle_begin/2`
+#### `EctoLibSql.handle_begin/2`
 
 Begins a transaction.
 
 **Parameters:**
 - `opts` (keyword list): Options
-- `state` (LibSqlEx.State): Connection state
+- `state` (EctoLibSql.State): Connection state
 
 **Returns:** `{:ok, :begin, state}` or `{:error, reason, state}`
 
-#### `LibSqlEx.handle_commit/2`
+#### `EctoLibSql.handle_commit/2`
 
 Commits a transaction.
 
 **Parameters:**
 - `opts` (keyword list): Options
-- `state` (LibSqlEx.State): Connection state
+- `state` (EctoLibSql.State): Connection state
 
 **Returns:** `{:ok, result, state}` or `{:error, reason, state}`
 
-#### `LibSqlEx.handle_rollback/2`
+#### `EctoLibSql.handle_rollback/2`
 
 Rolls back a transaction.
 
 **Parameters:**
 - `opts` (keyword list): Options
-- `state` (LibSqlEx.State): Connection state
+- `state` (EctoLibSql.State): Connection state
 
 **Returns:** `{:ok, result, state}` or `{:error, reason, state}`
 
-#### `LibSqlEx.Native.begin/2`
+#### `EctoLibSql.Native.begin/2`
 
 Begins a transaction with specific behavior.
 
 **Parameters:**
-- `state` (LibSqlEx.State): Connection state
+- `state` (EctoLibSql.State): Connection state
 - `opts` (keyword list): Options
   - `:behavior` - `:deferred`, `:immediate`, `:exclusive`, or `:read_only`
 
@@ -938,40 +938,40 @@ Begins a transaction with specific behavior.
 
 ### Prepared Statement Functions
 
-#### `LibSqlEx.Native.prepare/2`
+#### `EctoLibSql.Native.prepare/2`
 
 Prepares a SQL statement.
 
 **Parameters:**
-- `state` (LibSqlEx.State): Connection state
+- `state` (EctoLibSql.State): Connection state
 - `sql` (String.t()): SQL query
 
 **Returns:** `{:ok, stmt_id}` or `{:error, reason}`
 
-#### `LibSqlEx.Native.query_stmt/3`
+#### `EctoLibSql.Native.query_stmt/3`
 
 Executes a prepared SELECT statement.
 
 **Parameters:**
-- `state` (LibSqlEx.State): Connection state
+- `state` (EctoLibSql.State): Connection state
 - `stmt_id` (String.t()): Statement ID
 - `args` (list): Query parameters
 
 **Returns:** `{:ok, result}` or `{:error, reason}`
 
-#### `LibSqlEx.Native.execute_stmt/4`
+#### `EctoLibSql.Native.execute_stmt/4`
 
 Executes a prepared non-SELECT statement.
 
 **Parameters:**
-- `state` (LibSqlEx.State): Connection state
+- `state` (EctoLibSql.State): Connection state
 - `stmt_id` (String.t()): Statement ID
 - `sql` (String.t()): Original SQL (for sync detection)
 - `args` (list): Query parameters
 
 **Returns:** `{:ok, num_rows}` or `{:error, reason}`
 
-#### `LibSqlEx.Native.close_stmt/1`
+#### `EctoLibSql.Native.close_stmt/1`
 
 Closes a prepared statement.
 
@@ -982,106 +982,106 @@ Closes a prepared statement.
 
 ### Batch Functions
 
-#### `LibSqlEx.Native.batch/2`
+#### `EctoLibSql.Native.batch/2`
 
 Executes multiple statements independently.
 
 **Parameters:**
-- `state` (LibSqlEx.State): Connection state
+- `state` (EctoLibSql.State): Connection state
 - `statements` (list): List of `{sql, params}` tuples
 
 **Returns:** `{:ok, results}` or `{:error, reason}`
 
-#### `LibSqlEx.Native.batch_transactional/2`
+#### `EctoLibSql.Native.batch_transactional/2`
 
 Executes multiple statements in a transaction.
 
 **Parameters:**
-- `state` (LibSqlEx.State): Connection state
+- `state` (EctoLibSql.State): Connection state
 - `statements` (list): List of `{sql, params}` tuples
 
 **Returns:** `{:ok, results}` or `{:error, reason}`
 
 ### Cursor Functions
 
-#### `LibSqlEx.handle_declare/4`
+#### `EctoLibSql.handle_declare/4`
 
 Declares a cursor for streaming results.
 
 **Parameters:**
-- `query` (LibSqlEx.Query): SQL query
+- `query` (EctoLibSql.Query): SQL query
 - `params` (list): Query parameters
 - `opts` (keyword list): Options
-- `state` (LibSqlEx.State): Connection state
+- `state` (EctoLibSql.State): Connection state
 
 **Returns:** `{:ok, query, cursor, state}` or `{:error, reason, state}`
 
-#### `LibSqlEx.handle_fetch/4`
+#### `EctoLibSql.handle_fetch/4`
 
 Fetches rows from a cursor.
 
 **Parameters:**
-- `query` (LibSqlEx.Query): SQL query
+- `query` (EctoLibSql.Query): SQL query
 - `cursor`: Cursor reference
 - `opts` (keyword list): Options
   - `:max_rows` - Maximum rows per fetch (default 500)
-- `state` (LibSqlEx.State): Connection state
+- `state` (EctoLibSql.State): Connection state
 
 **Returns:** `{:cont, result, state}`, `{:deallocated, result, state}`, or `{:error, reason, state}`
 
-#### `LibSqlEx.handle_deallocate/3`
+#### `EctoLibSql.handle_deallocate/3`
 
 Deallocates a cursor.
 
 **Parameters:**
-- `query` (LibSqlEx.Query): SQL query
+- `query` (EctoLibSql.Query): SQL query
 - `cursor`: Cursor reference
 - `opts` (keyword list): Options
-- `state` (LibSqlEx.State): Connection state
+- `state` (EctoLibSql.State): Connection state
 
 **Returns:** `{:ok, result, state}` or `{:error, reason, state}`
 
 ### Metadata Functions
 
-#### `LibSqlEx.Native.get_last_insert_rowid/1`
+#### `EctoLibSql.Native.get_last_insert_rowid/1`
 
 Gets the rowid of the last inserted row.
 
 **Parameters:**
-- `state` (LibSqlEx.State): Connection state
+- `state` (EctoLibSql.State): Connection state
 
 **Returns:** Integer rowid
 
-#### `LibSqlEx.Native.get_changes/1`
+#### `EctoLibSql.Native.get_changes/1`
 
 Gets the number of rows changed by the last statement.
 
 **Parameters:**
-- `state` (LibSqlEx.State): Connection state
+- `state` (EctoLibSql.State): Connection state
 
 **Returns:** Integer count
 
-#### `LibSqlEx.Native.get_total_changes/1`
+#### `EctoLibSql.Native.get_total_changes/1`
 
 Gets the total number of rows changed since connection opened.
 
 **Parameters:**
-- `state` (LibSqlEx.State): Connection state
+- `state` (EctoLibSql.State): Connection state
 
 **Returns:** Integer count
 
-#### `LibSqlEx.Native.get_is_autocommit/1`
+#### `EctoLibSql.Native.get_is_autocommit/1`
 
 Checks if connection is in autocommit mode.
 
 **Parameters:**
-- `state` (LibSqlEx.State): Connection state
+- `state` (EctoLibSql.State): Connection state
 
 **Returns:** Boolean
 
 ### Vector Functions
 
-#### `LibSqlEx.Native.vector/1`
+#### `EctoLibSql.Native.vector/1`
 
 Creates a vector string from a list of numbers.
 
@@ -1090,7 +1090,7 @@ Creates a vector string from a list of numbers.
 
 **Returns:** String vector representation
 
-#### `LibSqlEx.Native.vector_type/2`
+#### `EctoLibSql.Native.vector_type/2`
 
 Creates a vector column type definition.
 
@@ -1100,7 +1100,7 @@ Creates a vector column type definition.
 
 **Returns:** String column type (e.g., "F32_BLOB(3)")
 
-#### `LibSqlEx.Native.vector_distance_cos/2`
+#### `EctoLibSql.Native.vector_distance_cos/2`
 
 Generates SQL for cosine distance calculation.
 
@@ -1112,12 +1112,12 @@ Generates SQL for cosine distance calculation.
 
 ### Sync Functions
 
-#### `LibSqlEx.Native.sync/1`
+#### `EctoLibSql.Native.sync/1`
 
 Manually synchronizes a remote replica.
 
 **Parameters:**
-- `state` (LibSqlEx.State): Connection state
+- `state` (EctoLibSql.State): Connection state
 
 **Returns:** `{:ok, message}` or `{:error, reason}`
 
@@ -1131,7 +1131,7 @@ Manually synchronizes a remote replica.
 defmodule MyApp.Blog do
   def setup(state) do
     # Create tables
-    {:ok, _, _, state} = LibSqlEx.handle_execute(
+    {:ok, _, _, state} = EctoLibSql.handle_execute(
       """
       CREATE TABLE IF NOT EXISTS posts (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1147,7 +1147,7 @@ defmodule MyApp.Blog do
       state
     )
 
-    {:ok, _, _, state} = LibSqlEx.handle_execute(
+    {:ok, _, _, state} = EctoLibSql.handle_execute(
       """
       CREATE INDEX IF NOT EXISTS idx_posts_author ON posts(author_id)
       """,
@@ -1156,7 +1156,7 @@ defmodule MyApp.Blog do
       state
     )
 
-    {:ok, _, _, state} = LibSqlEx.handle_execute(
+    {:ok, _, _, state} = EctoLibSql.handle_execute(
       """
       CREATE INDEX IF NOT EXISTS idx_posts_published ON posts(published_at)
       """,
@@ -1169,7 +1169,7 @@ defmodule MyApp.Blog do
   end
 
   def create_post(state, title, content, author_id) do
-    {:ok, _, _, state} = LibSqlEx.handle_execute(
+    {:ok, _, _, state} = EctoLibSql.handle_execute(
       """
       INSERT INTO posts (title, content, author_id, created_at)
       VALUES (?, ?, ?, ?)
@@ -1179,12 +1179,12 @@ defmodule MyApp.Blog do
       state
     )
 
-    post_id = LibSqlEx.Native.get_last_insert_rowid(state)
+    post_id = EctoLibSql.Native.get_last_insert_rowid(state)
     {:ok, post_id, state}
   end
 
   def publish_post(state, post_id) do
-    LibSqlEx.handle_execute(
+    EctoLibSql.handle_execute(
       "UPDATE posts SET published_at = ? WHERE id = ?",
       [System.system_time(:second), post_id],
       [],
@@ -1193,7 +1193,7 @@ defmodule MyApp.Blog do
   end
 
   def list_published_posts(state, limit \\ 10) do
-    {:ok, _, result, state} = LibSqlEx.handle_execute(
+    {:ok, _, result, state} = EctoLibSql.handle_execute(
       """
       SELECT id, title, author_id, published_at
       FROM posts
@@ -1214,7 +1214,7 @@ defmodule MyApp.Blog do
   end
 
   def get_post(state, post_id) do
-    {:ok, _, result, state} = LibSqlEx.handle_execute(
+    {:ok, _, result, state} = EctoLibSql.handle_execute(
       "SELECT id, title, content, author_id, published_at FROM posts WHERE id = ?",
       [post_id],
       [],
@@ -1245,10 +1245,10 @@ end
 defmodule MyApp.Orders do
   def create_order(state, user_id, items) do
     # Start transaction
-    {:ok, :begin, state} = LibSqlEx.handle_begin([], state)
+    {:ok, :begin, state} = EctoLibSql.handle_begin([], state)
 
     # Create order
-    {:ok, _, _, state} = LibSqlEx.handle_execute(
+    {:ok, _, _, state} = EctoLibSql.handle_execute(
       """
       INSERT INTO orders (user_id, status, total, created_at)
       VALUES (?, 'pending', 0, ?)
@@ -1258,13 +1258,13 @@ defmodule MyApp.Orders do
       state
     )
 
-    order_id = LibSqlEx.Native.get_last_insert_rowid(state)
+    order_id = EctoLibSql.Native.get_last_insert_rowid(state)
 
     # Add order items and calculate total
     {total, state} =
       Enum.reduce(items, {0, state}, fn %{product_id: pid, quantity: qty}, {acc, st} ->
         # Get product price
-        {:ok, _, result, st} = LibSqlEx.handle_execute(
+        {:ok, _, result, st} = EctoLibSql.handle_execute(
           "SELECT price FROM products WHERE id = ?",
           [pid],
           [],
@@ -1275,7 +1275,7 @@ defmodule MyApp.Orders do
         subtotal = price * qty
 
         # Insert order item
-        {:ok, _, _, st} = LibSqlEx.handle_execute(
+        {:ok, _, _, st} = EctoLibSql.handle_execute(
           """
           INSERT INTO order_items (order_id, product_id, quantity, price, subtotal)
           VALUES (?, ?, ?, ?, ?)
@@ -1286,7 +1286,7 @@ defmodule MyApp.Orders do
         )
 
         # Update product inventory
-        {:ok, _, _, st} = LibSqlEx.handle_execute(
+        {:ok, _, _, st} = EctoLibSql.handle_execute(
           "UPDATE products SET stock = stock - ? WHERE id = ? AND stock >= ?",
           [qty, pid, qty],
           [],
@@ -1297,7 +1297,7 @@ defmodule MyApp.Orders do
       end)
 
     # Update order total
-    {:ok, _, _, state} = LibSqlEx.handle_execute(
+    {:ok, _, _, state} = EctoLibSql.handle_execute(
       "UPDATE orders SET total = ? WHERE id = ?",
       [total, order_id],
       [],
@@ -1305,12 +1305,12 @@ defmodule MyApp.Orders do
     )
 
     # Commit transaction
-    {:ok, _, state} = LibSqlEx.handle_commit([], state)
+    {:ok, _, state} = EctoLibSql.handle_commit([], state)
 
     {:ok, order_id, state}
   rescue
     error ->
-      LibSqlEx.handle_rollback([], state)
+      EctoLibSql.handle_rollback([], state)
       {:error, error}
   end
 end
@@ -1345,7 +1345,7 @@ defmodule MyApp.Analytics do
        """, [user_id, days_ago(7)]}
     ]
 
-    {:ok, results} = LibSqlEx.Native.batch(state, statements)
+    {:ok, results} = EctoLibSql.Native.batch(state, statements)
 
     [total_posts, total_views, avg_engagement, recent_posts] = results
 
@@ -1370,9 +1370,9 @@ defmodule MyApp.SemanticSearch do
   @dimensions 384  # all-MiniLM-L6-v2 model
 
   def setup(state) do
-    vector_col = LibSqlEx.Native.vector_type(@dimensions, :f32)
+    vector_col = EctoLibSql.Native.vector_type(@dimensions, :f32)
 
-    {:ok, _, _, state} = LibSqlEx.handle_execute(
+    {:ok, _, _, state} = EctoLibSql.handle_execute(
       """
       CREATE TABLE IF NOT EXISTS documents (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1394,9 +1394,9 @@ defmodule MyApp.SemanticSearch do
   def index_document(state, title, content, category) do
     # Generate embedding
     embedding = MyApp.Embeddings.encode(content)
-    vec = LibSqlEx.Native.vector(embedding)
+    vec = EctoLibSql.Native.vector(embedding)
 
-    {:ok, _, _, state} = LibSqlEx.handle_execute(
+    {:ok, _, _, state} = EctoLibSql.handle_execute(
       """
       INSERT INTO documents (title, content, category, embedding, indexed_at)
       VALUES (?, ?, ?, vector(?), ?)
@@ -1406,7 +1406,7 @@ defmodule MyApp.SemanticSearch do
       state
     )
 
-    doc_id = LibSqlEx.Native.get_last_insert_rowid(state)
+    doc_id = EctoLibSql.Native.get_last_insert_rowid(state)
     {:ok, doc_id, state}
   end
 
@@ -1416,7 +1416,7 @@ defmodule MyApp.SemanticSearch do
 
     # Generate query embedding
     query_embedding = MyApp.Embeddings.encode(query)
-    distance_sql = LibSqlEx.Native.vector_distance_cos("embedding", query_embedding)
+    distance_sql = EctoLibSql.Native.vector_distance_cos("embedding", query_embedding)
 
     # Build SQL with optional category filter
     {sql, params} = if category do
@@ -1436,7 +1436,7 @@ defmodule MyApp.SemanticSearch do
        """, [limit]}
     end
 
-    {:ok, _, result, state} = LibSqlEx.handle_execute(sql, params, [], state)
+    {:ok, _, result, state} = EctoLibSql.handle_execute(sql, params, [], state)
 
     results = Enum.map(result.rows, fn [id, title, content, cat, score] ->
       %{
@@ -1455,7 +1455,7 @@ defmodule MyApp.SemanticSearch do
     # Use cursor for memory-efficient reindexing
     stream = DBConnection.stream(
       conn,
-      %LibSqlEx.Query{statement: "SELECT id, content FROM documents"},
+      %EctoLibSql.Query{statement: "SELECT id, content FROM documents"},
       []
     )
 
@@ -1467,14 +1467,14 @@ defmodule MyApp.SemanticSearch do
       statements =
         Enum.map(batch, fn [id, content] ->
           embedding = MyApp.Embeddings.encode(content)
-          vec = LibSqlEx.Native.vector(embedding)
+          vec = EctoLibSql.Native.vector(embedding)
 
           {"UPDATE documents SET embedding = vector(?) WHERE id = ?", [vec, id]}
         end)
 
       # Execute batch
       {:ok, state} = DBConnection.run(conn, fn state ->
-        {:ok, _} = LibSqlEx.Native.batch_transactional(state, statements)
+        {:ok, _} = EctoLibSql.Native.batch_transactional(state, statements)
         {:ok, state}
       end)
     end)
@@ -1501,12 +1501,12 @@ defmodule MyApp.Repo do
   use DBConnection
 
   def start_link(opts) do
-    DBConnection.start_link(LibSqlEx, opts)
+    DBConnection.start_link(EctoLibSql, opts)
   end
 
   def query(sql, params \\ []) do
     DBConnection.run(__MODULE__, fn conn ->
-      query = %LibSqlEx.Query{statement: sql}
+      query = %EctoLibSql.Query{statement: sql}
       DBConnection.execute(conn, query, params)
     end)
   end
@@ -1521,7 +1521,7 @@ defmodule MyApp.FastImport do
   # ❌ Slow: Individual inserts
   def slow_import(state, items) do
     Enum.reduce(items, state, fn item, acc ->
-      {:ok, _, _, new_state} = LibSqlEx.handle_execute(
+      {:ok, _, _, new_state} = EctoLibSql.handle_execute(
         "INSERT INTO items (name) VALUES (?)",
         [item.name],
         [],
@@ -1537,7 +1537,7 @@ defmodule MyApp.FastImport do
       {"INSERT INTO items (name) VALUES (?)", [item.name]}
     end)
 
-    {:ok, _} = LibSqlEx.Native.batch_transactional(state, statements)
+    {:ok, _} = EctoLibSql.Native.batch_transactional(state, statements)
   end
 end
 ```
@@ -1548,7 +1548,7 @@ end
 # Use prepared statements for repeated queries
 defmodule MyApp.UserLookup do
   def setup(state) do
-    {:ok, stmt} = LibSqlEx.Native.prepare(
+    {:ok, stmt} = EctoLibSql.Native.prepare(
       state,
       "SELECT * FROM users WHERE email = ?"
     )
@@ -1558,15 +1558,15 @@ defmodule MyApp.UserLookup do
 
   # ❌ Slow: Prepare each time
   def slow_lookup(state, email) do
-    {:ok, stmt} = LibSqlEx.Native.prepare(state, "SELECT * FROM users WHERE email = ?")
-    {:ok, result} = LibSqlEx.Native.query_stmt(state, stmt, [email])
-    LibSqlEx.Native.close_stmt(stmt)
+    {:ok, stmt} = EctoLibSql.Native.prepare(state, "SELECT * FROM users WHERE email = ?")
+    {:ok, result} = EctoLibSql.Native.query_stmt(state, stmt, [email])
+    EctoLibSql.Native.close_stmt(stmt)
     result
   end
 
   # ✅ Fast: Reuse prepared statement
   def fast_lookup(context, email) do
-    {:ok, result} = LibSqlEx.Native.query_stmt(
+    {:ok, result} = EctoLibSql.Native.query_stmt(
       context.state,
       context.lookup_stmt,
       [email]
@@ -1587,10 +1587,10 @@ opts = [
   sync: true  # Auto-sync on writes
 ]
 
-{:ok, state} = LibSqlEx.connect(opts)
+{:ok, state} = EctoLibSql.connect(opts)
 
 # Reads are local (microsecond latency)
-{:ok, _, result, state} = LibSqlEx.handle_execute(
+{:ok, _, result, state} = EctoLibSql.handle_execute(
   "SELECT * FROM users WHERE id = ?",
   [123],
   [],
@@ -1598,7 +1598,7 @@ opts = [
 )
 
 # Writes sync to remote (millisecond latency)
-{:ok, _, _, state} = LibSqlEx.handle_execute(
+{:ok, _, _, state} = EctoLibSql.handle_execute(
   "UPDATE users SET last_login = ? WHERE id = ?",
   [System.system_time(:second), 123],
   [],
@@ -1613,7 +1613,7 @@ opts = [
 defmodule MyApp.LargeQuery do
   # ❌ Memory-intensive: Load all rows
   def load_all(state) do
-    {:ok, _, result, _} = LibSqlEx.handle_execute(
+    {:ok, _, result, _} = EctoLibSql.handle_execute(
       "SELECT * FROM huge_table",
       [],
       [],
@@ -1627,7 +1627,7 @@ defmodule MyApp.LargeQuery do
   def stream_all(conn) do
     DBConnection.stream(
       conn,
-      %LibSqlEx.Query{statement: "SELECT * FROM huge_table"},
+      %EctoLibSql.Query{statement: "SELECT * FROM huge_table"},
       [],
       max_rows: 1000
     )
@@ -1664,7 +1664,7 @@ defmodule MyApp.Schema do
       {"CREATE INDEX idx_users_name_email ON users(name, email)", []}
     ]
 
-    LibSqlEx.Native.batch(state, statements)
+    EctoLibSql.Native.batch(state, statements)
   end
 end
 ```
@@ -1682,7 +1682,7 @@ end
 **Solution:**
 ```elixir
 # Make sure to recompile native code
-mix deps.clean libsqlex --build
+mix deps.clean ecto_libsql --build
 mix deps.get
 mix compile
 ```
@@ -1694,11 +1694,11 @@ mix compile
 **Solution:**
 ```elixir
 # Use IMMEDIATE transactions for write-heavy workloads
-{:ok, state} = LibSqlEx.Native.begin(state, behavior: :immediate)
+{:ok, state} = EctoLibSql.Native.begin(state, behavior: :immediate)
 
 # Or increase timeout in DBConnection
 {:ok, conn} = DBConnection.start_link(
-  LibSqlEx,
+  EctoLibSql,
   [database: "myapp.db"],
   timeout: 15_000  # 15 seconds
 )
@@ -1717,7 +1717,7 @@ IO.inspect(state.mode)  # Should be :local, :remote, or :remote_replica
 File.exists?("myapp.db")
 
 # Create table if not exists
-{:ok, _, _, state} = LibSqlEx.handle_execute(
+{:ok, _, _, state} = EctoLibSql.handle_execute(
   "CREATE TABLE IF NOT EXISTS users (...)",
   [],
   [],
@@ -1732,11 +1732,11 @@ File.exists?("myapp.db")
 **Solution:**
 ```elixir
 # Make sure vector dimensions match
-vector_col = LibSqlEx.Native.vector_type(1536, :f32)  # Must match embedding size
+vector_col = EctoLibSql.Native.vector_type(1536, :f32)  # Must match embedding size
 
 # Verify embedding is a list of numbers
 embedding = [1.0, 2.0, 3.0, ...]  # Not a string!
-vec = LibSqlEx.Native.vector(embedding)
+vec = EctoLibSql.Native.vector(embedding)
 
 # Use vector() function in SQL
 "INSERT INTO docs (embedding) VALUES (vector(?))", [vec]
@@ -1751,7 +1751,7 @@ defmodule MyApp.LoggingRepo do
     IO.puts("SQL: #{sql}")
     IO.inspect(params, label: "Params")
 
-    result = LibSqlEx.handle_execute(sql, params, [], state)
+    result = EctoLibSql.handle_execute(sql, params, [], state)
 
     IO.inspect(result, label: "Result")
     result
@@ -1760,7 +1760,7 @@ end
 
 # Check connection state
 IO.inspect(state)
-# %LibSqlEx.State{
+# %EctoLibSql.State{
 #   conn_id: "uuid",
 #   mode: :local,
 #   sync: true,
@@ -1768,10 +1768,10 @@ IO.inspect(state)
 # }
 
 # Verify metadata
-rowid = LibSqlEx.Native.get_last_insert_rowid(state)
-changes = LibSqlEx.Native.get_changes(state)
-total = LibSqlEx.Native.get_total_changes(state)
-autocommit = LibSqlEx.Native.get_is_autocommit(state)
+rowid = EctoLibSql.Native.get_last_insert_rowid(state)
+changes = EctoLibSql.Native.get_changes(state)
+total = EctoLibSql.Native.get_total_changes(state)
+autocommit = EctoLibSql.Native.get_is_autocommit(state)
 
 IO.inspect(%{
   last_rowid: rowid,
@@ -1789,4 +1789,4 @@ Found a bug or have a feature request? Please open an issue on GitHub!
 
 ## License
 
-LibSqlEx is released under the MIT License.
+EctoLibSql is released under the MIT License.

@@ -1,4 +1,4 @@
 [workspace]
 resolver = "2"
 
-members = ["native/libsqlex"]
+members = ["native/ecto_libsql"]

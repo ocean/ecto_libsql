@@ -1,11 +1,12 @@
 [package]
-name = "libsqlex"
-version = "0.1.0"
-authors = []
+name = "ecto_libsql"
+version = "0.2.0"
+authors = ["ocean"]
 edition = "2021"
+description = "Rust NIF for EctoLibSql Elixir adapter"
 
 [lib]
-name = "libsqlex"
+name = "ecto_libsql"
 crate-type = ["cdylib"]
 
 [dependencies]

@@ -38,21 +38,21 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-            native/libsqlex/target/
+            native/ecto_libsql/target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
 
       - name: Check Rust formatting
-        run: cargo fmt --check --manifest-path native/libsqlex/Cargo.toml
+        run: cargo fmt --check --manifest-path native/ecto_libsql/Cargo.toml
 
       - name: Run Clippy
-        run: cargo clippy --manifest-path native/libsqlex/Cargo.toml --all-targets --all-features
+        run: cargo clippy --manifest-path native/ecto_libsql/Cargo.toml --all-targets --all-features
         # Note: Currently not treating warnings as errors due to await_holding_lock warnings
         # These should be addressed in a future PR by using async-aware Mutex types
 
       - name: Run Rust tests
-        run: cargo test --manifest-path native/libsqlex/Cargo.toml --all-features
+        run: cargo test --manifest-path native/ecto_libsql/Cargo.toml --all-features
 
   elixir-tests:
     name: Elixir ${{ matrix.elixir }} / OTP ${{ matrix.otp }} / ${{ matrix.os }}
@@ -81,7 +81,7 @@ jobs:
             ~/.cargo/registry/index/
             ~/.cargo/registry/cache/
             ~/.cargo/git/db/
-            native/libsqlex/target/
+            native/ecto_libsql/target/
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
@@ -139,7 +139,7 @@ jobs:
             deps
             _build
             ~/.cargo
-            native/libsqlex/target/
+            native/ecto_libsql/target/
           key: ${{ runner.os }}-integration-${{ hashFiles('**/mix.lock', '**/Cargo.lock') }}
 
       - name: Install dependencies

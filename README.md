@@ -1,6 +1,6 @@
-# Libsqlex
+# EctoLibSql
 
-LibSqlEx is an unofficial Elixir database adapter built on top of Rust NIFs, providing a native driver connection to libSQL/Turso. It supports Local, Remote Replica, and Remote Only modes via configuration options.
+EctoLibSql is an unofficial Elixir database adapter built on top of Rust NIFs, providing a native driver connection to libSQL/Turso. It supports Local, Remote Replica, and Remote Only modes via configuration options.
 
 ## Features
 
@@ -20,12 +20,12 @@ LibSqlEx is an unofficial Elixir database adapter built on top of Rust NIFs, pro
 ## Installation
 
 the package can be installed
-by adding `libsqlex` to your list of dependencies in `mix.exs`:
+by adding `ecto_libsql` to your list of dependencies in `mix.exs`:
 
 ```elixir
 def deps do
   [
-    {:libsqlex, "~> 0.2.0"}
+    {:ecto_libsql, "~> 0.2.0"}
   ]
 end
 ```
@@ -43,14 +43,14 @@ defmodule Example do
       sync: true  # Enable auto-sync
     ]
 
-    case LibSqlEx.connect(opts) do
+    case EctoLibSql.connect(opts) do
       {:ok, state} ->
         # Create table
         query = "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)"
-        {:ok, _result, state} = LibSqlEx.handle_execute(query, [], [], state)
+        {:ok, _result, state} = EctoLibSql.handle_execute(query, [], [], state)
 
         # Insert data
-        {:ok, _result, state} = LibSqlEx.handle_execute(
+        {:ok, _result, state} = EctoLibSql.handle_execute(
           "INSERT INTO users (name) VALUES (?)",
           ["Alice"],
           [],
@@ -58,7 +58,7 @@ defmodule Example do
         )
 
         # Query data
-        {:ok, result, _state} = LibSqlEx.handle_execute(
+        {:ok, result, _state} = EctoLibSql.handle_execute(
           "SELECT * FROM users",
           [],
           [],
@@ -86,10 +86,10 @@ statements = [
   {"INSERT INTO users (name) VALUES (?)", ["Bob"]},
   {"SELECT * FROM users", []}
 ]
-{:ok, results} = LibSqlEx.Native.batch(state, statements)
+{:ok, results} = EctoLibSql.Native.batch(state, statements)
 
 # Transactional batch (all-or-nothing)
-{:ok, results} = LibSqlEx.Native.batch_transactional(state, statements)
+{:ok, results} = EctoLibSql.Native.batch_transactional(state, statements)
 ```
 
 ### Prepared Statements
@@ -98,14 +98,14 @@ Reuse compiled SQL for better performance:
 
 ```elixir
 # Prepare a statement
-{:ok, stmt_id} = LibSqlEx.Native.prepare(state, "SELECT * FROM users WHERE id = ?")
+{:ok, stmt_id} = EctoLibSql.Native.prepare(state, "SELECT * FROM users WHERE id = ?")
 
 # Execute it multiple times
-{:ok, result1} = LibSqlEx.Native.query_stmt(state, stmt_id, [1])
-{:ok, result2} = LibSqlEx.Native.query_stmt(state, stmt_id, [2])
+{:ok, result1} = EctoLibSql.Native.query_stmt(state, stmt_id, [1])
+{:ok, result2} = EctoLibSql.Native.query_stmt(state, stmt_id, [2])
 
 # Clean up
-:ok = LibSqlEx.Native.close_stmt(stmt_id)
+:ok = EctoLibSql.Native.close_stmt(stmt_id)
 ```
 
 ### Transaction Behaviors
@@ -114,16 +114,16 @@ Control transaction locking and concurrency:
 
 ```elixir
 # DEFERRED (default) - lock acquired on first write
-{:ok, state} = LibSqlEx.Native.begin(state, behavior: :deferred)
+{:ok, state} = EctoLibSql.Native.begin(state, behavior: :deferred)
 
 # IMMEDIATE - lock acquired immediately
-{:ok, state} = LibSqlEx.Native.begin(state, behavior: :immediate)
+{:ok, state} = EctoLibSql.Native.begin(state, behavior: :immediate)
 
 # EXCLUSIVE - exclusive lock, blocks all readers
-{:ok, state} = LibSqlEx.Native.begin(state, behavior: :exclusive)
+{:ok, state} = EctoLibSql.Native.begin(state, behavior: :exclusive)
 
 # READ_ONLY - read-only transaction
-{:ok, state} = LibSqlEx.Native.begin(state, behavior: :read_only)
+{:ok, state} = EctoLibSql.Native.begin(state, behavior: :read_only)
 ```
 
 ### Metadata Methods
@@ -132,16 +132,16 @@ Access database metadata:
 
 ```elixir
 # Get last inserted row ID
-rowid = LibSqlEx.Native.get_last_insert_rowid(state)
+rowid = EctoLibSql.Native.get_last_insert_rowid(state)
 
 # Get number of changes from last operation
-changes = LibSqlEx.Native.get_changes(state)
+changes = EctoLibSql.Native.get_changes(state)
 
 # Get total changes since connection opened
-total = LibSqlEx.Native.get_total_changes(state)
+total = EctoLibSql.Native.get_total_changes(state)
 
 # Check if in autocommit mode
-autocommit? = LibSqlEx.Native.get_is_autocommit(state)
+autocommit? = EctoLibSql.Native.get_is_autocommit(state)
 ```
 
 ### Cursor Support
@@ -149,10 +149,10 @@ autocommit? = LibSqlEx.Native.get_is_autocommit(state)
 For streaming large result sets without loading everything into memory:
 
 ```elixir
-{:ok, conn} = DBConnection.start_link(LibSqlEx, opts)
+{:ok, conn} = DBConnection.start_link(EctoLibSql, opts)
 
 # Use stream to paginate through large datasets
-DBConnection.stream(conn, %LibSqlEx.Query{statement: "SELECT * FROM large_table"}, [])
+DBConnection.stream(conn, %EctoLibSql.Query{statement: "SELECT * FROM large_table"}, [])
 |> Stream.each(fn result ->
   IO.puts("Got #{result.num_rows} rows")
 end)
@@ -167,20 +167,20 @@ Built-in support for vector similarity search:
 
 ```elixir
 # Create table with vector column
-vector_col = LibSqlEx.Native.vector_type(3)  # 3-dimensional vectors
+vector_col = EctoLibSql.Native.vector_type(3)  # 3-dimensional vectors
 sql = "CREATE TABLE items (id INT, embedding #{vector_col})"
-LibSqlEx.handle_execute(sql, [], [], state)
+EctoLibSql.handle_execute(sql, [], [], state)
 
 # Insert vectors
-vec = LibSqlEx.Native.vector([1.0, 2.0, 3.0])
+vec = EctoLibSql.Native.vector([1.0, 2.0, 3.0])
 sql = "INSERT INTO items (id, embedding) VALUES (?, vector(?))"
-LibSqlEx.handle_execute(sql, [1, vec], [], state)
+EctoLibSql.handle_execute(sql, [1, vec], [], state)
 
 # Search by similarity (cosine distance)
 query_vec = [1.5, 2.1, 2.9]
-distance_sql = LibSqlEx.Native.vector_distance_cos("embedding", query_vec)
+distance_sql = EctoLibSql.Native.vector_distance_cos("embedding", query_vec)
 sql = "SELECT * FROM items ORDER BY #{distance_sql} LIMIT 10"
-{:ok, results, _} = LibSqlEx.handle_execute(sql, [], [], state)
+{:ok, results, _} = EctoLibSql.handle_execute(sql, [], [], state)
 ```
 
 ### Encryption
@@ -193,7 +193,7 @@ opts = [
   database: "encrypted.db",
   encryption_key: "your-secret-key-at-least-32-chars-long"
 ]
-{:ok, state} = LibSqlEx.connect(opts)
+{:ok, state} = EctoLibSql.connect(opts)
 
 # Encrypted remote replica
 opts = [
@@ -203,7 +203,7 @@ opts = [
   encryption_key: "your-secret-key-at-least-32-chars-long",
   sync: true
 ]
-{:ok, state} = LibSqlEx.connect(opts)
+{:ok, state} = EctoLibSql.connect(opts)
 ```
 
 **Security Note**: Store encryption keys securely (environment variables, secret management systems). The local database file will be encrypted at rest.
@@ -224,7 +224,7 @@ opts = [
   uri: "wss://your-database.turso.io",
   auth_token: "your-token"
 ]
-{:ok, state} = LibSqlEx.connect(opts)
+{:ok, state} = EctoLibSql.connect(opts)
 ```
 
 libSQL automatically selects the protocol based on the URI scheme (https:// vs wss://)
@@ -258,10 +258,10 @@ opts = [
   sync: false  # Disable auto-sync
 ]
 
-{:ok, state} = LibSqlEx.connect(opts)
+{:ok, state} = EctoLibSql.connect(opts)
 
 # Make changes
-{:ok, _result, state} = LibSqlEx.handle_execute(
+{:ok, _result, state} = EctoLibSql.handle_execute(
   "INSERT INTO users (name) VALUES (?)",
   ["Alice"],
   [],
@@ -269,7 +269,7 @@ opts = [
 )
 
 # Manually sync when ready
-{:ok, _} = LibSqlEx.Native.sync(state)
+{:ok, _} = EctoLibSql.Native.sync(state)
 ```
 
 ## Connection Modes
@@ -277,7 +277,7 @@ opts = [
 ### Local Mode
 ```elixir
 opts = [database: "local.db"]
-{:ok, state} = LibSqlEx.connect(opts)
+{:ok, state} = EctoLibSql.connect(opts)
 ```
 
 ### Remote Only Mode
@@ -286,7 +286,7 @@ opts = [
   uri: "libsql://your-database.turso.io",
   auth_token: "your-auth-token"
 ]
-{:ok, state} = LibSqlEx.connect(opts)
+{:ok, state} = EctoLibSql.connect(opts)
 ```
 
 ### Remote Replica Mode
@@ -297,7 +297,7 @@ opts = [
   database: "local_replica.db",
   sync: true  # or false for manual sync
 ]
-{:ok, state} = LibSqlEx.connect(opts)
+{:ok, state} = EctoLibSql.connect(opts)
 ```
 
 ## Performance Tips
@@ -313,4 +313,4 @@ opts = [
 
 ## Documentation
 
-Full documentation available at <https://hexdocs.pm/libsqlex>.
+Full documentation available at <https://hexdocs.pm/ecto_libsql>.
