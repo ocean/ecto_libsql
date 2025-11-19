@@ -1,26 +1,10 @@
 # EctoLibSql
 
-EctoLibSql is an unofficial Elixir database adapter built on top of Rust NIFs, providing a native driver connection to libSQL/Turso. It supports Local, Remote Replica, and Remote Only modes via configuration options.
-
-## Features
-
-- ✅ **Multiple Connection Modes**: Local, Remote, and Remote Replica
-- ✅ **Batch Operations**: Execute multiple statements efficiently
-- ✅ **Prepared Statements**: Reusable compiled SQL statements for better performance
-- ✅ **Transaction Behaviors**: DEFERRED, IMMEDIATE, EXCLUSIVE, and READ_ONLY
-- ✅ **Metadata Methods**: Access last_insert_rowid, changes, and total_changes
-- ✅ **Auto/Manual Sync**: Automatic or manual synchronization for replicas
-- ✅ **Parameterized Queries**: Safe parameter binding
-- ✅ **Cursor Support**: Stream large result sets with DBConnection cursors
-- ✅ **Vector Search**: Built-in vector similarity search with helper functions
-- ✅ **Encryption**: AES-256-CBC encryption for local databases and replicas
-- ✅ **WebSocket Support**: Use WebSocket (wss://) or HTTP (https://) protocols
-- ✅ **libSQL 0.9.27**: Latest libSQL Rust crate with encryption feature 
+An Elixir database adapter for LibSQL and Turso, built with Rust NIFs. Supports local SQLite files, remote Turso databases, and embedded replicas with synchronization.
 
 ## Installation
 
-the package can be installed
-by adding `ecto_libsql` to your list of dependencies in `mix.exs`:
+Add `ecto_libsql` to your dependencies in `mix.exs`:
 
 ```elixir
 def deps do
@@ -30,287 +14,260 @@ def deps do
 end
 ```
 
-## Basic Usage
+## Quick Start
 
 ```elixir
-defmodule Example do
-  def run_query do
-    # Connect to the database via remote replica
-    opts = [
-      uri: System.get_env("LIBSQL_URI"),
-      auth_token: System.get_env("LIBSQL_TOKEN"),
-      database: "bar.db",
-      sync: true  # Enable auto-sync
-    ]
+# Local database
+{:ok, conn} = DBConnection.start_link(EctoLibSql, database: "local.db")
 
-    case EctoLibSql.connect(opts) do
-      {:ok, state} ->
-        # Create table
-        query = "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)"
-        {:ok, _result, state} = EctoLibSql.handle_execute(query, [], [], state)
+# Remote Turso database
+{:ok, conn} = DBConnection.start_link(EctoLibSql,
+  uri: "libsql://your-db.turso.io",
+  auth_token: "your-token"
+)
 
-        # Insert data
-        {:ok, _result, state} = EctoLibSql.handle_execute(
-          "INSERT INTO users (name) VALUES (?)",
-          ["Alice"],
-          [],
-          state
-        )
-
-        # Query data
-        {:ok, result, _state} = EctoLibSql.handle_execute(
-          "SELECT * FROM users",
-          [],
-          [],
-          state
-        )
-        IO.inspect(result)
-
-      {:error, reason} ->
-        IO.puts("Failed to connect: #{inspect(reason)}")
-    end
-  end
-end
+# Embedded replica (local database synced with remote)
+{:ok, conn} = DBConnection.start_link(EctoLibSql,
+  database: "local.db",
+  uri: "libsql://your-db.turso.io",
+  auth_token: "your-token",
+  sync: true
+)
 ```
 
-## Advanced Features
+## Features
 
-### Batch Operations
+**Connection Modes**
+- Local SQLite files
+- Remote LibSQL/Turso servers
+- Embedded replicas with automatic or manual sync
 
-Execute multiple statements in one roundtrip:
+**Core Functionality**
+- Parameterized queries with safe parameter binding
+- Prepared statements
+- Transactions with multiple isolation levels (deferred, immediate, exclusive)
+- Batch operations (transactional and non-transactional)
+- Streaming cursors for large result sets
+
+**Advanced Features**
+- Vector similarity search
+- Database encryption (AES-256-CBC)
+- WebSocket and HTTP protocols
+- Metadata access (last insert ID, row counts, etc.)
+
+## Usage Examples
+
+### Basic Queries
 
 ```elixir
-# Non-transactional batch (each statement independent)
-statements = [
-  {"INSERT INTO users (name) VALUES (?)", ["Alice"]},
-  {"INSERT INTO users (name) VALUES (?)", ["Bob"]},
-  {"SELECT * FROM users", []}
-]
-{:ok, results} = EctoLibSql.Native.batch(state, statements)
+{:ok, conn} = DBConnection.start_link(EctoLibSql, database: "test.db")
 
-# Transactional batch (all-or-nothing)
-{:ok, results} = EctoLibSql.Native.batch_transactional(state, statements)
+# Create table
+DBConnection.execute(conn, %EctoLibSql.Query{
+  statement: "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)"
+}, [])
+
+# Insert with parameters
+DBConnection.execute(conn, %EctoLibSql.Query{
+  statement: "INSERT INTO users (name) VALUES (?)"
+}, ["Alice"])
+
+# Query data
+{:ok, _query, result} = DBConnection.execute(conn, %EctoLibSql.Query{
+  statement: "SELECT * FROM users WHERE name = ?"
+}, ["Alice"])
+
+IO.inspect(result.rows)  # [[1, "Alice"]]
+```
+
+### Transactions
+
+```elixir
+DBConnection.transaction(conn, fn conn ->
+  DBConnection.execute(conn, %EctoLibSql.Query{
+    statement: "INSERT INTO users (name) VALUES (?)"
+  }, ["Bob"])
+
+  DBConnection.execute(conn, %EctoLibSql.Query{
+    statement: "INSERT INTO users (name) VALUES (?)"
+  }, ["Carol"])
+end)
 ```
 
 ### Prepared Statements
 
-Reuse compiled SQL for better performance:
-
 ```elixir
-# Prepare a statement
-{:ok, stmt_id} = EctoLibSql.Native.prepare(state, "SELECT * FROM users WHERE id = ?")
+# Prepare once, execute many times
+{:ok, state} = EctoLibSql.connect(database: "test.db")
 
-# Execute it multiple times
+{:ok, stmt_id} = EctoLibSql.Native.prepare(state,
+  "SELECT * FROM users WHERE id = ?")
+
 {:ok, result1} = EctoLibSql.Native.query_stmt(state, stmt_id, [1])
 {:ok, result2} = EctoLibSql.Native.query_stmt(state, stmt_id, [2])
 
-# Clean up
 :ok = EctoLibSql.Native.close_stmt(stmt_id)
 ```
 
-### Transaction Behaviors
-
-Control transaction locking and concurrency:
+### Batch Operations
 
 ```elixir
-# DEFERRED (default) - lock acquired on first write
-{:ok, state} = EctoLibSql.Native.begin(state, behavior: :deferred)
+{:ok, state} = EctoLibSql.connect(database: "test.db")
 
-# IMMEDIATE - lock acquired immediately
-{:ok, state} = EctoLibSql.Native.begin(state, behavior: :immediate)
-
-# EXCLUSIVE - exclusive lock, blocks all readers
-{:ok, state} = EctoLibSql.Native.begin(state, behavior: :exclusive)
-
-# READ_ONLY - read-only transaction
-{:ok, state} = EctoLibSql.Native.begin(state, behavior: :read_only)
-```
-
-### Metadata Methods
-
-Access database metadata:
-
-```elixir
-# Get last inserted row ID
-rowid = EctoLibSql.Native.get_last_insert_rowid(state)
-
-# Get number of changes from last operation
-changes = EctoLibSql.Native.get_changes(state)
-
-# Get total changes since connection opened
-total = EctoLibSql.Native.get_total_changes(state)
-
-# Check if in autocommit mode
-autocommit? = EctoLibSql.Native.get_is_autocommit(state)
-```
-
-### Cursor Support
-
-For streaming large result sets without loading everything into memory:
-
-```elixir
-{:ok, conn} = DBConnection.start_link(EctoLibSql, opts)
-
-# Use stream to paginate through large datasets
-DBConnection.stream(conn, %EctoLibSql.Query{statement: "SELECT * FROM large_table"}, [])
-|> Stream.each(fn result ->
-  IO.puts("Got #{result.num_rows} rows")
-end)
-|> Stream.run()
-```
-
-The cursor automatically fetches rows in chunks (default 500 rows per fetch).
-
-### Vector Search
-
-Built-in support for vector similarity search:
-
-```elixir
-# Create table with vector column
-vector_col = EctoLibSql.Native.vector_type(3)  # 3-dimensional vectors
-sql = "CREATE TABLE items (id INT, embedding #{vector_col})"
-EctoLibSql.handle_execute(sql, [], [], state)
-
-# Insert vectors
-vec = EctoLibSql.Native.vector([1.0, 2.0, 3.0])
-sql = "INSERT INTO items (id, embedding) VALUES (?, vector(?))"
-EctoLibSql.handle_execute(sql, [1, vec], [], state)
-
-# Search by similarity (cosine distance)
-query_vec = [1.5, 2.1, 2.9]
-distance_sql = EctoLibSql.Native.vector_distance_cos("embedding", query_vec)
-sql = "SELECT * FROM items ORDER BY #{distance_sql} LIMIT 10"
-{:ok, results, _} = EctoLibSql.handle_execute(sql, [], [], state)
-```
-
-### Encryption
-
-Encrypt local databases and replicas with AES-256-CBC:
-
-```elixir
-# Local encrypted database
-opts = [
-  database: "encrypted.db",
-  encryption_key: "your-secret-key-at-least-32-chars-long"
-]
-{:ok, state} = EctoLibSql.connect(opts)
-
-# Encrypted remote replica
-opts = [
-  uri: "libsql://your-database.turso.io",
-  auth_token: "your-token",
-  database: "encrypted_replica.db",
-  encryption_key: "your-secret-key-at-least-32-chars-long",
-  sync: true
-]
-{:ok, state} = EctoLibSql.connect(opts)
-```
-
-**Security Note**: Store encryption keys securely (environment variables, secret management systems). The local database file will be encrypted at rest.
-
-### WebSocket Protocol
-
-Use WebSocket for lower latency and multiplexing by changing the URI scheme:
-
-```elixir
-# HTTP (default)
-opts = [
-  uri: "https://your-database.turso.io",
-  auth_token: "your-token"
+# Execute multiple statements together
+statements = [
+  {"INSERT INTO users (name) VALUES (?)", ["Dave"]},
+  {"INSERT INTO users (name) VALUES (?)", ["Eve"]},
+  {"UPDATE users SET name = ? WHERE id = ?", ["David", 1]}
 ]
 
-# WebSocket (lower latency, multiplexing)
-opts = [
-  uri: "wss://your-database.turso.io",
-  auth_token: "your-token"
-]
-{:ok, state} = EctoLibSql.connect(opts)
+# Non-transactional (each statement independent)
+{:ok, results} = EctoLibSql.Native.batch(state, statements)
+
+# Transactional (all-or-nothing)
+{:ok, results} = EctoLibSql.Native.batch_transactional(state, statements)
 ```
 
-libSQL automatically selects the protocol based on the URI scheme (https:// vs wss://)
-
-## Local Opts
-```elixir
-    opts = [
-      database: "bar.db",
-    ]
-
-```
-
-## Remote Only Opts
-```elixir
-
-    opts = [
-      uri: System.get_env("LIBSQL_URI"),
-      auth_token: System.get_env("LIBSQL_TOKEN"),
-    ]
-```
-
-### Manual Sync
-
-For remote replica mode with manual sync control:
+### Streaming Large Results
 
 ```elixir
-opts = [
-  uri: System.get_env("LIBSQL_URI"),
-  auth_token: System.get_env("LIBSQL_TOKEN"),
-  database: "bar.db",
-  sync: false  # Disable auto-sync
-]
+{:ok, conn} = DBConnection.start_link(EctoLibSql, database: "test.db")
 
-{:ok, state} = EctoLibSql.connect(opts)
-
-# Make changes
-{:ok, _result, state} = EctoLibSql.handle_execute(
-  "INSERT INTO users (name) VALUES (?)",
-  ["Alice"],
+# Stream results in chunks to avoid loading everything into memory
+stream = DBConnection.stream(conn,
+  %EctoLibSql.Query{statement: "SELECT * FROM large_table"},
   [],
-  state
+  max_rows: 1000
 )
+
+Enum.each(stream, fn result ->
+  IO.puts("Processing #{result.num_rows} rows")
+  # Process each chunk
+end)
+```
+
+### Vector Similarity Search
+
+```elixir
+{:ok, state} = EctoLibSql.connect(database: "vectors.db")
+
+# Create table with vector column (3 dimensions)
+vector_type = EctoLibSql.Native.vector_type(3)
+EctoLibSql.handle_execute(
+  "CREATE TABLE items (id INTEGER, embedding #{vector_type})",
+  [], [], state
+)
+
+# Insert vector
+vec = EctoLibSql.Native.vector([1.0, 2.0, 3.0])
+EctoLibSql.handle_execute(
+  "INSERT INTO items VALUES (?, vector(?))",
+  [1, vec], [], state
+)
+
+# Find similar vectors (cosine distance)
+query_vector = [1.5, 2.1, 2.9]
+distance_fn = EctoLibSql.Native.vector_distance_cos("embedding", query_vector)
+{:ok, results, _} = EctoLibSql.handle_execute(
+  "SELECT id FROM items ORDER BY #{distance_fn} LIMIT 10",
+  [], [], state
+)
+```
+
+### Database Encryption
+
+```elixir
+# Encrypted local database
+{:ok, conn} = DBConnection.start_link(EctoLibSql,
+  database: "encrypted.db",
+  encryption_key: "your-secret-key-must-be-at-least-32-characters"
+)
+
+# Encrypted embedded replica
+{:ok, conn} = DBConnection.start_link(EctoLibSql,
+  database: "encrypted.db",
+  uri: "libsql://your-db.turso.io",
+  auth_token: "your-token",
+  encryption_key: "your-secret-key-must-be-at-least-32-characters",
+  sync: true
+)
+```
+
+### Manual Sync Control
+
+```elixir
+# Disable automatic sync for embedded replicas
+{:ok, state} = EctoLibSql.connect(
+  database: "local.db",
+  uri: "libsql://your-db.turso.io",
+  auth_token: "your-token",
+  sync: false
+)
+
+# Make local changes
+EctoLibSql.handle_execute("INSERT INTO users (name) VALUES (?)", ["Alice"], [], state)
 
 # Manually sync when ready
 {:ok, _} = EctoLibSql.Native.sync(state)
 ```
 
+## Configuration Options
+
+| Option | Type | Description |
+|--------|------|-------------|
+| `database` | string | Path to local SQLite database file |
+| `uri` | string | Remote LibSQL server URI (e.g., `libsql://...` or `wss://...`) |
+| `auth_token` | string | Authentication token for remote connections |
+| `sync` | boolean | Enable automatic sync for embedded replicas |
+| `encryption_key` | string | Encryption key (32+ characters) for local database |
+
 ## Connection Modes
 
-### Local Mode
+The adapter automatically detects the connection mode based on the options provided:
+
+- **Local**: Only `database` specified
+- **Remote**: `uri` and `auth_token` specified
+- **Embedded Replica**: All of `database`, `uri`, `auth_token`, and `sync` specified
+
+## Transaction Behaviors
+
+Control transaction locking behavior:
+
 ```elixir
-opts = [database: "local.db"]
-{:ok, state} = EctoLibSql.connect(opts)
+# Deferred (default) - locks acquired on first write
+{:ok, state} = EctoLibSql.Native.begin(state, behavior: :deferred)
+
+# Immediate - acquire write lock immediately
+{:ok, state} = EctoLibSql.Native.begin(state, behavior: :immediate)
+
+# Exclusive - acquire exclusive lock immediately
+{:ok, state} = EctoLibSql.Native.begin(state, behavior: :exclusive)
 ```
 
-### Remote Only Mode
+## Metadata Functions
+
 ```elixir
-opts = [
-  uri: "libsql://your-database.turso.io",
-  auth_token: "your-auth-token"
-]
-{:ok, state} = EctoLibSql.connect(opts)
+# Get last inserted row ID
+rowid = EctoLibSql.Native.get_last_insert_rowid(state)
+
+# Get number of rows changed by last statement
+changes = EctoLibSql.Native.get_changes(state)
+
+# Get total rows changed since connection opened
+total = EctoLibSql.Native.get_total_changes(state)
+
+# Check if in autocommit mode (not in transaction)
+autocommit? = EctoLibSql.Native.get_is_autocommit(state)
 ```
-
-### Remote Replica Mode
-```elixir
-opts = [
-  uri: "libsql://your-database.turso.io",
-  auth_token: "your-auth-token",
-  database: "local_replica.db",
-  sync: true  # or false for manual sync
-]
-{:ok, state} = EctoLibSql.connect(opts)
-```
-
-## Performance Tips
-
-1. **Use Prepared Statements** for queries executed multiple times
-2. **Use Batch Operations** to reduce roundtrips for bulk operations
-3. **Use Remote Replica Mode** for read-heavy workloads (microsecond latency)
-4. **Use IMMEDIATE transactions** for write-heavy workloads to reduce lock contention
-5. **Use WebSocket (wss://)** for lower latency and better multiplexing than HTTP
-6. **Use Cursors** for large result sets to avoid loading everything into memory
-7. **Disable auto-sync** and sync manually for better control in high-write scenarios
-8. **Use Encryption** for sensitive data without performance penalty
 
 ## Documentation
 
-Full documentation available at <https://hexdocs.pm/ecto_libsql>.
+Full documentation is available at [https://hexdocs.pm/ecto_libsql](https://hexdocs.pm/ecto_libsql).
+
+## License
+
+Apache 2.0
+
+## Credits
+
+This library is a fork of [libsqlex](https://github.com/danawanb/libsqlex) by [danawanb](https://github.com/danawanb), extended from a DBConnection adapter to a full Ecto adapter with additional features including vector search, encryption, cursor support, and comprehensive documentation.
