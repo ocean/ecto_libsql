@@ -47,13 +47,11 @@ end
 - Prepared statements
 - Transactions with multiple isolation levels (deferred, immediate, exclusive)
 - Batch operations (transactional and non-transactional)
-- Streaming cursors for large result sets
+- Metadata access (last insert ID, row counts, etc.)
 
 **Advanced Features**
 - Vector similarity search
-- Database encryption (AES-256-CBC)
 - WebSocket and HTTP protocols
-- Metadata access (last insert ID, row counts, etc.)
 
 ## Documentation
 
