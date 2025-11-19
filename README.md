@@ -63,4 +63,4 @@ Apache 2.0
 
 ## Credits
 
-This library is a fork of [libsqlex](https://github.com/danawanb/libsqlex) by [danawanb](https://github.com/danawanb), extended from a DBConnection adapter to a full Ecto adapter with additional features including vector search, encryption, cursor support, and comprehensive documentation.
+This library is a fork of [libsqlex](https://github.com/danawanb/libsqlex) by [danawanb](https://github.com/danawanb), extended from a DBConnection adapter to a full Ecto adapter with additional features including vector similarity search, batch operations, prepared statements, and comprehensive documentation.
