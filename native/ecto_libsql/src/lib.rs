@@ -1184,7 +1184,7 @@ fn fetch_cursor<'a>(env: Env<'a>, cursor_id: &str, max_rows: usize) -> NifResult
     Ok(result.encode(env))
 }
 
-rustler::init!("Elixir.LibSqlEx.Native");
+rustler::init!("Elixir.EctoLibSql.Native");
 
 #[cfg(test)]
 mod tests {

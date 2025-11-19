@@ -1,43 +1,78 @@
-defmodule Ecto.Adapters.LibSqlEx do
+defmodule Ecto.Adapters.EctoLibSql do
   @moduledoc """
-  Ecto adapter for LibSQL/Turso databases.
+  Ecto adapter for LibSQL and Turso databases.
 
-  This adapter leverages the libsqlex library to provide full Ecto support
-  for LibSQL databases, including local SQLite, remote Turso, and remote replica modes.
+  This adapter provides full Ecto support for LibSQL databases, including
+  local SQLite files, remote Turso cloud databases, and embedded replicas
+  that sync between local and remote.
 
-  ## Example Configuration
+  ## Connection Modes
+
+  The adapter automatically detects the connection mode based on configuration:
+
+  - **Local**: Only `:database` specified - uses local SQLite file
+  - **Remote**: `:uri` and `:auth_token` specified - connects directly to Turso
+  - **Remote Replica**: All of `:database`, `:uri`, `:auth_token`, and `:sync` specified -
+    maintains local copy with automatic sync to remote
+
+  ## Configuration Examples
+
+  ### Local Database
 
       config :my_app, MyApp.Repo,
-        adapter: Ecto.Adapters.LibSqlEx,
+        adapter: Ecto.Adapters.EctoLibSql,
         database: "my_app.db"
 
-  ## Remote Turso Configuration
+  ### Remote Turso Database
 
       config :my_app, MyApp.Repo,
-        adapter: Ecto.Adapters.LibSqlEx,
+        adapter: Ecto.Adapters.EctoLibSql,
         uri: "libsql://your-database.turso.io",
         auth_token: "your-auth-token"
 
-  ## Remote Replica Configuration
+  ### Embedded Replica (Local + Remote Sync)
 
       config :my_app, MyApp.Repo,
-        adapter: Ecto.Adapters.LibSqlEx,
+        adapter: Ecto.Adapters.EctoLibSql,
         database: "replica.db",
         uri: "libsql://your-database.turso.io",
         auth_token: "your-auth-token",
         sync: true
 
-  ## Options
+  ### With Encryption
 
-    * `:database` - The path to the local database file (for local or replica mode)
-    * `:uri` - The URI for the remote Turso database
-    * `:auth_token` - Authentication token for Turso
-    * `:sync` - Auto-sync for replica mode (default: true)
-    * `:encryption_key` - Encryption key for local database encryption
+      config :my_app, MyApp.Repo,
+        adapter: Ecto.Adapters.EctoLibSql,
+        database: "encrypted.db",
+        encryption_key: "your-secret-key-must-be-at-least-32-characters"
+
+  ## Configuration Options
+
+  - `:database` - Path to local SQLite database file
+  - `:uri` - Remote LibSQL server URI (e.g., `"libsql://your-db.turso.io"`)
+  - `:auth_token` - Authentication token for remote connections
+  - `:sync` - Enable automatic sync for embedded replicas (boolean, default: `true` when in replica mode)
+  - `:encryption_key` - Encryption key for local database (minimum 32 characters)
+
+  ## Features
+
+  - Full Ecto query support (schemas, changesets, associations, etc.)
+  - Migration support with DDL transactions
+  - SQLite-compatible data types with Ecto type conversions
+  - Constraint violation detection and error handling
+  - Storage management (`mix ecto.create`, `mix ecto.drop`, etc.)
+  - Structure dump/load support
+
+  ## Limitations
+
+  - No advisory locking for migrations (SQLite uses database-level locking)
+  - Some advanced PostgreSQL/MySQL features may not be available
+  - Vector search requires LibSQL-specific syntax
+
   """
 
   use Ecto.Adapters.SQL,
-    driver: :libsqlex,
+    driver: :ecto_libsql,
     migration_lock: nil
 
   @behaviour Ecto.Adapter.Storage
@@ -49,7 +84,7 @@ defmodule Ecto.Adapters.LibSqlEx do
   defmacro __before_compile__(_env), do: :ok
 
   @doc false
-  def connection, do: Ecto.Adapters.LibSqlEx.Connection
+  def connection, do: Ecto.Adapters.EctoLibSql.Connection
 
   @impl Ecto.Adapter.Schema
   def autogenerate(:id), do: nil
@@ -73,9 +108,9 @@ defmodule Ecto.Adapters.LibSqlEx do
 
         false ->
           # Connect to create the database
-          case LibSqlEx.connect(opts) do
+          case EctoLibSql.connect(opts) do
             {:ok, state} ->
-              LibSqlEx.disconnect([], state)
+              EctoLibSql.disconnect([], state)
               :ok
 
             {:error, reason} ->
@@ -140,9 +175,9 @@ defmodule Ecto.Adapters.LibSqlEx do
     case File.read(path) do
       {:ok, sql} ->
         # Connect and execute the schema
-        {:ok, state} = LibSqlEx.connect(config)
-        {:ok, _result, _state} = LibSqlEx.handle_execute(sql, [], [], state)
-        LibSqlEx.disconnect([], state)
+        {:ok, state} = EctoLibSql.connect(config)
+        {:ok, _result, _state} = EctoLibSql.handle_execute(sql, [], [], state)
+        EctoLibSql.disconnect([], state)
         {:ok, path}
 
       {:error, reason} ->

@@ -1,23 +1,23 @@
-# Example: Using LibSqlEx as an Ecto Adapter
+# Example: Using EctoLibSql as an Ecto Adapter
 #
-# This file demonstrates how to use LibSqlEx with Ecto for schema definition,
+# This file demonstrates how to use EctoLibSql with Ecto for schema definition,
 # migrations, and queries.
 
 # Step 1: Configure your repository in config/config.exs
 
 # config :my_app, MyApp.Repo,
-#   adapter: Ecto.Adapters.LibSqlEx,
+#   adapter: Ecto.Adapters.EctoLibSql,
 #   database: "my_app.db"
 #
 # # Or for remote Turso:
 # config :my_app, MyApp.Repo,
-#   adapter: Ecto.Adapters.LibSqlEx,
+#   adapter: Ecto.Adapters.EctoLibSql,
 #   uri: "libsql://your-database.turso.io",
 #   auth_token: System.get_env("TURSO_AUTH_TOKEN")
 #
 # # Or for remote replica (best of both worlds):
 # config :my_app, MyApp.Repo,
-#   adapter: Ecto.Adapters.LibSqlEx,
+#   adapter: Ecto.Adapters.EctoLibSql,
 #   database: "replica.db",
 #   uri: "libsql://your-database.turso.io",
 #   auth_token: System.get_env("TURSO_AUTH_TOKEN"),
@@ -28,7 +28,7 @@
 defmodule MyApp.Repo do
   use Ecto.Repo,
     otp_app: :my_app,
-    adapter: Ecto.Adapters.LibSqlEx
+    adapter: Ecto.Adapters.EctoLibSql
 end
 
 # Step 3: Define your schemas

@@ -1,7 +1,7 @@
-defmodule Ecto.Adapters.LibSqlEx.ConnectionTest do
+defmodule Ecto.Adapters.EctoLibSql.ConnectionTest do
   use ExUnit.Case, async: true
 
-  alias Ecto.Adapters.LibSqlEx.Connection
+  alias Ecto.Adapters.EctoLibSql.Connection
   alias Ecto.Migration.{Table, Index}
 
   describe "DDL generation" do

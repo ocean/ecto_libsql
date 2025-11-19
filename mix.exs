@@ -1,23 +1,25 @@
-defmodule LibSqlEx.MixProject do
+defmodule EctoLibSql.MixProject do
   use Mix.Project
+
+  @version "0.1.0"
+  @source_url "https://github.com/ocean/libsqlex"
 
   def project do
     [
-      app: :libsqlex,
-      version: "0.3.0",
+      app: :ecto_libsql,
+      version: @version,
       elixir: "~> 1.17",
       start_permanent: Mix.env() == :prod,
       deps: deps(),
-      name: "LibSqlEx",
-      source_url: "https://github.com/danawanb/libsqlex",
+      name: "EctoLibSql",
+      source_url: @source_url,
+      homepage_url: @source_url,
       package: package(),
       description: description(),
-      licenses: ["Apache-2.0"],
-      links: %{"GitHub" => "https://github.com/danawanb/libsqlex"}
+      docs: docs()
     ]
   end
 
-  # Run "mix help compile.app" to learn about applications.
   def application do
     [
       extra_applications: [:logger]
@@ -25,28 +27,56 @@ defmodule LibSqlEx.MixProject do
   end
 
   defp description() do
-    "Unofficial Elixir database driver connection to libSQL/Turso."
+    """
+    Ecto adapter for LibSQL and Turso databases. Supports local SQLite files,
+    remote Turso cloud databases, and embedded replicas with sync. Built with
+    Rust NIFs for high performance.
+    """
   end
 
-  # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
       {:rustler, "~> 0.36"},
       {:db_connection, "~> 2.1"},
       {:ecto, "~> 3.11"},
       {:ecto_sql, "~> 3.11"},
-      {:ex_doc, ">= 0.0.0", only: :dev, runtime: false}
-      # {:dep_from_hexpm, "~> 0.3.0"},
-      # {:dep_from_git, git: "https://github.com/elixir-lang/my_dep.git", tag: "0.1.0"}
+      {:ex_doc, "~> 0.31", only: :dev, runtime: false},
+      {:jason, "~> 1.4", only: [:dev, :test]}
     ]
   end
 
   defp package() do
     [
-      # These are the default files included in the package
-      files: ~w(lib priv .formatter.exs mix.exs README* native ),
+      name: "ecto_libsql",
+      files: ~w(lib priv .formatter.exs mix.exs README* LICENSE* CHANGELOG* native),
       licenses: ["Apache-2.0"],
-      links: %{"GitHub" => "https://github.com/danawanb/libsqlex"}
+      links: %{
+        "GitHub" => @source_url,
+        "Original Fork" => "https://github.com/danawanb/libsqlex"
+      },
+      maintainers: ["ocean"]
+    ]
+  end
+
+  defp docs do
+    [
+      main: "EctoLibSql",
+      source_ref: "v#{@version}",
+      source_url: @source_url,
+      extras: ["README.md", "CHANGELOG.md"],
+      groups_for_modules: [
+        "Core Modules": [EctoLibSql, EctoLibSql.Native],
+        "Support Modules": [
+          EctoLibSql.Query,
+          EctoLibSql.Result,
+          EctoLibSql.State,
+          EctoLibSql.Error
+        ],
+        "Ecto Integration": [
+          Ecto.Adapters.EctoLibSql,
+          Ecto.Adapters.EctoLibSql.Connection
+        ]
+      ]
     ]
   end
 end

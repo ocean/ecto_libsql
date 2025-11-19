@@ -1,11 +1,11 @@
 [package]
-name = "libsqlex"
+name = "ecto_libsql"
 version = "0.1.0"
 authors = []
 edition = "2021"
 
 [lib]
-name = "libsqlex"
+name = "ecto_libsql"
 crate-type = ["cdylib"]
 
 [dependencies]

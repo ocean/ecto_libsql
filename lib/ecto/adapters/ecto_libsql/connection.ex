@@ -1,5 +1,24 @@
-defmodule Ecto.Adapters.LibSqlEx.Connection do
-  @moduledoc false
+defmodule Ecto.Adapters.EctoLibSql.Connection do
+  @moduledoc """
+  Implementation of Ecto.Adapters.SQL.Connection for LibSQL.
+
+  This module handles SQL query generation and DDL operations for LibSQL/SQLite.
+  It implements the `Ecto.Adapters.SQL.Connection` behavior, translating Ecto's
+  query structures into SQLite-compatible SQL.
+
+  ## Key Responsibilities
+
+  - Query generation (`all/1`, `update_all/1`, `delete_all/1`)
+  - Insert/update/delete operations with RETURNING support
+  - DDL generation (CREATE TABLE, ALTER TABLE, CREATE INDEX, etc.)
+  - Constraint name extraction for error handling
+  - Type mapping between Ecto and SQLite
+
+  ## SQLite Compatibility
+
+  This module ensures generated SQL is compatible with SQLite/LibSQL syntax,
+  including handling of AUTOINCREMENT, ON CONFLICT clauses, and type affinities.
+  """
 
   @behaviour Ecto.Adapters.SQL.Connection
 
@@ -7,12 +26,12 @@ defmodule Ecto.Adapters.LibSqlEx.Connection do
 
   @impl true
   def child_spec(opts) do
-    DBConnection.child_spec(LibSqlEx, opts)
+    DBConnection.child_spec(EctoLibSql, opts)
   end
 
   @impl true
   def prepare_execute(conn, name, sql, params, opts) do
-    query = %LibSqlEx.Query{name: name, statement: sql}
+    query = %EctoLibSql.Query{name: name, statement: sql}
 
     case DBConnection.prepare_execute(conn, query, params, opts) do
       {:ok, _query, result} -> {:ok, query, result}
@@ -22,7 +41,7 @@ defmodule Ecto.Adapters.LibSqlEx.Connection do
 
   @impl true
   def execute(conn, sql, params, opts) when is_binary(sql) do
-    query = %LibSqlEx.Query{statement: sql}
+    query = %EctoLibSql.Query{statement: sql}
 
     case DBConnection.execute(conn, query, params, opts) do
       {:ok, _query, result} -> {:ok, result}
@@ -43,7 +62,7 @@ defmodule Ecto.Adapters.LibSqlEx.Connection do
 
   @impl true
   def stream(conn, sql, params, opts) do
-    DBConnection.stream(conn, %LibSqlEx.Query{statement: sql}, params, opts)
+    DBConnection.stream(conn, %EctoLibSql.Query{statement: sql}, params, opts)
   end
 
   @impl true

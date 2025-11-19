@@ -1,11 +1,11 @@
-defmodule Ecto.Integration.LibSqlExTest do
+defmodule Ecto.Integration.EctoLibSqlTest do
   use ExUnit.Case, async: false
 
   # Define test modules for Ecto schemas and repo
   defmodule TestRepo do
     use Ecto.Repo,
-      otp_app: :libsqlex,
-      adapter: Ecto.Adapters.LibSqlEx
+      otp_app: :ecto_libsql,
+      adapter: Ecto.Adapters.EctoLibSql
   end
 
   defmodule User do
@@ -20,7 +20,7 @@ defmodule Ecto.Integration.LibSqlExTest do
       field(:balance, :decimal)
       field(:bio, :string)
 
-      has_many(:posts, Ecto.Integration.LibSqlExTest.Post)
+      has_many(:posts, Ecto.Integration.EctoLibSqlTest.Post)
 
       timestamps()
     end
@@ -45,7 +45,7 @@ defmodule Ecto.Integration.LibSqlExTest do
       field(:view_count, :integer, default: 0)
       field(:published_at, :naive_datetime)
 
-      belongs_to(:user, Ecto.Integration.LibSqlExTest.User)
+      belongs_to(:user, Ecto.Integration.EctoLibSqlTest.User)
 
       timestamps()
     end

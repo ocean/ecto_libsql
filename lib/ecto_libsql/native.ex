@@ -1,47 +1,140 @@
-defmodule LibSqlEx.Native do
-  use Rustler,
-    otp_app: :libsqlex,
-    crate: :libsqlex
+defmodule EctoLibSql.Native do
+  @moduledoc """
+  Rust NIF (Native Implemented Functions) bridge for LibSQL operations.
 
-  # native bridge from rust check lib.rs
+  This module provides the low-level interface to the Rust-based LibSQL client,
+  exposing both raw NIF functions and high-level Elixir helper functions.
+
+  ## NIF Functions
+
+  The NIF functions are implemented in Rust (`native/ecto_libsql/src/lib.rs`) and
+  provide direct access to LibSQL operations:
+
+  - Connection management: `connect/2`, `ping/1`, `close/2`
+  - Query execution: `query_args/5`, `execute_with_transaction/3`
+  - Transaction control: `begin_transaction_with_behavior/2`, `commit_or_rollback_transaction/5`
+  - Prepared statements: `prepare_statement/2`, `query_prepared/5`, `execute_prepared/6`
+  - Batch operations: `execute_batch/4`, `execute_transactional_batch/4`
+  - Metadata: `last_insert_rowid/1`, `changes/1`, `total_changes/1`, `is_autocommit/1`
+  - Cursors: `declare_cursor/3`, `fetch_cursor/2`
+  - Sync: `do_sync/2`
+
+  ## Helper Functions
+
+  High-level Elixir wrappers that provide ergonomic interfaces:
+
+  - `query/3`, `execute_non_trx/3`, `execute_with_trx/3` - Query execution
+  - `begin/2`, `commit/1`, `rollback/1` - Transaction management
+  - `prepare/2`, `execute_stmt/4`, `query_stmt/3`, `close_stmt/1` - Prepared statements
+  - `batch/2`, `batch_transactional/2` - Batch operations
+  - `get_last_insert_rowid/1`, `get_changes/1`, `get_total_changes/1`, `get_is_autocommit/1` - Metadata
+  - `vector/1`, `vector_type/2`, `vector_distance_cos/2` - Vector search helpers
+  - `sync/1` - Manual replica sync
+
+  ## Thread Safety
+
+  The Rust implementation uses thread-safe registries (using `Mutex<HashMap>`)
+  to manage connections, transactions, statements, and cursors. Each is
+  identified by a UUID for safe concurrent access.
+
+  """
+
+  use Rustler,
+    otp_app: :ecto_libsql,
+    crate: :ecto_libsql
+
+  # Raw NIF functions - implemented in Rust (native/ecto_libsql/src/lib.rs)
+  # These all raise :nif_not_loaded errors until the NIF is loaded
+
+  @doc false
   def ping(_conn), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc false
   def connect(_opts, _mode), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc false
   def query_args(_conn, _mode, _query, _args, _sync), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc false
   def begin_transaction(_conn), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc false
   def begin_transaction_with_behavior(_conn, _behavior), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc false
   def execute_with_transaction(_trx_id, _query, _args), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc false
   def query_with_trx_args(_trx_id, _query, _args), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc false
   def handle_status_transaction(_trx_id), do: :erlang.nif_error(:nif_not_loaded)
 
+  @doc false
   def commit_or_rollback_transaction(_trx, _conn, _mode, _sync, _param),
     do: :erlang.nif_error(:nif_not_loaded)
 
+  @doc false
   def do_sync(_conn, _mode), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc false
   def close(_id, _opt), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc false
   def execute_batch(_conn, _mode, _sync, _statements), do: :erlang.nif_error(:nif_not_loaded)
 
+  @doc false
   def execute_transactional_batch(_conn, _mode, _sync, _statements),
     do: :erlang.nif_error(:nif_not_loaded)
 
+  @doc false
   def prepare_statement(_conn, _sql), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc false
   def query_prepared(_conn, _stmt_id, _mode, _sync, _args), do: :erlang.nif_error(:nif_not_loaded)
 
+  @doc false
   def execute_prepared(_conn, _stmt_id, _mode, _sync, _args, _sql_hint),
     do: :erlang.nif_error(:nif_not_loaded)
 
+  @doc false
   def last_insert_rowid(_conn), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc false
   def changes(_conn), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc false
   def total_changes(_conn), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc false
   def is_autocommit(_conn), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc false
   def declare_cursor(_conn, _sql, _args), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc false
   def fetch_cursor(_cursor_id, _max_rows), do: :erlang.nif_error(:nif_not_loaded)
 
-  # helper
+  # High-level Elixir helper functions
 
-  def sync(%LibSqlEx.State{conn_id: conn_id, mode: mode} = _state) do
+  @doc """
+  Manually trigger a sync for embedded replicas.
+
+  For connections in `:remote_replica` mode, this function forces a
+  synchronization with the remote Turso database.
+
+  ## Parameters
+    - state: The connection state
+
+  ## Example
+      {:ok, _} = EctoLibSql.Native.sync(state)
+
+  """
+  def sync(%EctoLibSql.State{conn_id: conn_id, mode: mode} = _state) do
     do_sync(conn_id, mode)
   end
 
+  @doc false
   def close_conn(id, opt, state) do
     case close(id, opt) do
       :ok -> :ok
@@ -49,13 +142,15 @@ defmodule LibSqlEx.Native do
     end
   end
 
+  @doc false
   def execute_non_trx(query, state, args) do
     query(state, query, args)
   end
 
+  @doc false
   def query(
-        %LibSqlEx.State{conn_id: conn_id, mode: mode, sync: syncx} = state,
-        %LibSqlEx.Query{statement: statement} = query,
+        %EctoLibSql.State{conn_id: conn_id, mode: mode, sync: syncx} = state,
+        %EctoLibSql.Query{statement: statement} = query,
         args
       ) do
     case query_args(conn_id, mode, syncx, statement, args) do
@@ -87,7 +182,7 @@ defmodule LibSqlEx.Native do
             {columns, rows}
           end
 
-        result = %LibSqlEx.Result{
+        result = %EctoLibSql.Result{
           command: command,
           columns: columns,
           rows: rows,
@@ -97,13 +192,14 @@ defmodule LibSqlEx.Native do
         {:ok, query, result, state}
 
       {:error, message} ->
-        {:error, %LibSqlEx.Error{message: message}, state}
+        {:error, %EctoLibSql.Error{message: message}, state}
     end
   end
 
+  @doc false
   def execute_with_trx(
-        %LibSqlEx.State{conn_id: _conn_id, trx_id: trx_id} = state,
-        %LibSqlEx.Query{statement: statement} = query,
+        %EctoLibSql.State{conn_id: _conn_id, trx_id: trx_id} = state,
+        %EctoLibSql.Query{statement: statement} = query,
         args
       ) do
     # Check if statement has RETURNING clause - if so, use query instead of execute
@@ -117,7 +213,7 @@ defmodule LibSqlEx.Native do
           "rows" => rows,
           "num_rows" => num_rows
         } ->
-          result = %LibSqlEx.Result{
+          result = %EctoLibSql.Result{
             command: detect_command(statement),
             columns: columns,
             rows: rows,
@@ -127,13 +223,13 @@ defmodule LibSqlEx.Native do
           {:ok, query, result, state}
 
         {:error, message} ->
-          {:error, %LibSqlEx.Error{message: message}, state}
+          {:error, %EctoLibSql.Error{message: message}, state}
       end
     else
       # Use execute for statements without RETURNING
       case execute_with_transaction(trx_id, statement, args) do
         num_rows when is_integer(num_rows) ->
-          result = %LibSqlEx.Result{
+          result = %EctoLibSql.Result{
             command: detect_command(statement),
             num_rows: num_rows
           }
@@ -141,33 +237,74 @@ defmodule LibSqlEx.Native do
           {:ok, query, result, state}
 
         {:error, message} ->
-          {:error, %LibSqlEx.Error{message: message}, state}
+          {:error, %EctoLibSql.Error{message: message}, state}
       end
     end
   end
 
-  def begin(%LibSqlEx.State{conn_id: conn_id, mode: mode} = _state, opts \\ []) do
+  @doc """
+  Begin a new transaction with optional behavior control.
+
+  ## Parameters
+    - state: The connection state
+    - opts: Options keyword list
+      - `:behavior` - Transaction behavior (`:deferred`, `:immediate`, or `:exclusive`), defaults to `:deferred`
+
+  ## Transaction Behaviors
+
+  - `:deferred` - Default. Locks are acquired on first write operation
+  - `:immediate` - Acquires write lock immediately when transaction begins
+  - `:exclusive` - Acquires exclusive lock immediately, blocking all other connections
+
+  ## Example
+      {:ok, new_state} = EctoLibSql.Native.begin(state, behavior: :immediate)
+
+  """
+  def begin(%EctoLibSql.State{conn_id: conn_id, mode: mode} = _state, opts \\ []) do
     behavior = Keyword.get(opts, :behavior, :deferred)
 
     case begin_transaction_with_behavior(conn_id, behavior) do
       trx_id when is_binary(trx_id) ->
-        {:ok, %LibSqlEx.State{conn_id: conn_id, trx_id: trx_id, mode: mode}}
+        {:ok, %EctoLibSql.State{conn_id: conn_id, trx_id: trx_id, mode: mode}}
 
       {:error, reason} ->
         {:error, reason}
     end
   end
 
-  def commit(%LibSqlEx.State{conn_id: conn_id, trx_id: trx_id, mode: mode, sync: syncx} = _state) do
+  @doc """
+  Commit the current transaction.
+
+  For embedded replicas with auto-sync enabled, this also triggers a sync.
+
+  ## Parameters
+    - state: The connection state with an active transaction
+
+  ## Example
+      {:ok, _} = EctoLibSql.Native.commit(state)
+
+  """
+  def commit(%EctoLibSql.State{conn_id: conn_id, trx_id: trx_id, mode: mode, sync: syncx} = _state) do
     commit_or_rollback_transaction(trx_id, conn_id, mode, syncx, "commit")
   end
 
+  @doc """
+  Roll back the current transaction.
+
+  ## Parameters
+    - state: The connection state with an active transaction
+
+  ## Example
+      {:ok, _} = EctoLibSql.Native.rollback(state)
+
+  """
   def rollback(
-        %LibSqlEx.State{conn_id: conn_id, trx_id: trx_id, mode: mode, sync: syncx} = _state
+        %EctoLibSql.State{conn_id: conn_id, trx_id: trx_id, mode: mode, sync: syncx} = _state
       ) do
     commit_or_rollback_transaction(trx_id, conn_id, mode, syncx, "rollback")
   end
 
+  @doc false
   def detect_command(query) do
     query
     |> String.downcase()
@@ -195,10 +332,10 @@ defmodule LibSqlEx.Native do
     - sql: The SQL query to prepare
 
   ## Example
-      {:ok, stmt_id} = LibSqlEx.Native.prepare(state, "SELECT * FROM users WHERE id = ?")
-      {:ok, result} = LibSqlEx.Native.query_stmt(state, stmt_id, [42])
+      {:ok, stmt_id} = EctoLibSql.Native.prepare(state, "SELECT * FROM users WHERE id = ?")
+      {:ok, result} = EctoLibSql.Native.query_stmt(state, stmt_id, [42])
   """
-  def prepare(%LibSqlEx.State{conn_id: conn_id} = _state, sql) do
+  def prepare(%EctoLibSql.State{conn_id: conn_id} = _state, sql) do
     case prepare_statement(conn_id, sql) do
       stmt_id when is_binary(stmt_id) ->
         {:ok, stmt_id}
@@ -219,11 +356,11 @@ defmodule LibSqlEx.Native do
     - args: List of parameters
 
   ## Example
-      {:ok, stmt_id} = LibSqlEx.Native.prepare(state, "INSERT INTO users (name) VALUES (?)")
-      {:ok, rows_affected} = LibSqlEx.Native.execute_stmt(state, stmt_id, "INSERT INTO users (name) VALUES (?)", ["Alice"])
+      {:ok, stmt_id} = EctoLibSql.Native.prepare(state, "INSERT INTO users (name) VALUES (?)")
+      {:ok, rows_affected} = EctoLibSql.Native.execute_stmt(state, stmt_id, "INSERT INTO users (name) VALUES (?)", ["Alice"])
   """
   def execute_stmt(
-        %LibSqlEx.State{conn_id: conn_id, mode: mode, sync: syncx} = _state,
+        %EctoLibSql.State{conn_id: conn_id, mode: mode, sync: syncx} = _state,
         stmt_id,
         sql,
         args
@@ -247,17 +384,17 @@ defmodule LibSqlEx.Native do
     - args: List of parameters
 
   ## Example
-      {:ok, stmt_id} = LibSqlEx.Native.prepare(state, "SELECT * FROM users WHERE id = ?")
-      {:ok, result} = LibSqlEx.Native.query_stmt(state, stmt_id, [42])
+      {:ok, stmt_id} = EctoLibSql.Native.prepare(state, "SELECT * FROM users WHERE id = ?")
+      {:ok, result} = EctoLibSql.Native.query_stmt(state, stmt_id, [42])
   """
   def query_stmt(
-        %LibSqlEx.State{conn_id: conn_id, mode: mode, sync: syncx} = _state,
+        %EctoLibSql.State{conn_id: conn_id, mode: mode, sync: syncx} = _state,
         stmt_id,
         args
       ) do
     case query_prepared(conn_id, stmt_id, mode, syncx, args) do
       %{"columns" => columns, "rows" => rows, "num_rows" => num_rows} ->
-        result = %LibSqlEx.Result{
+        result = %EctoLibSql.Result{
           command: :select,
           columns: columns,
           rows: rows,
@@ -278,9 +415,9 @@ defmodule LibSqlEx.Native do
     - stmt_id: The statement ID to close
 
   ## Example
-      {:ok, stmt_id} = LibSqlEx.Native.prepare(state, "SELECT * FROM users WHERE id = ?")
+      {:ok, stmt_id} = EctoLibSql.Native.prepare(state, "SELECT * FROM users WHERE id = ?")
       # ... use statement ...
-      :ok = LibSqlEx.Native.close_stmt(stmt_id)
+      :ok = EctoLibSql.Native.close_stmt(stmt_id)
   """
   def close_stmt(stmt_id) do
     close(stmt_id, :stmt_id)
@@ -293,10 +430,10 @@ defmodule LibSqlEx.Native do
     - state: The connection state
 
   ## Example
-      {:ok, _result, state} = LibSqlEx.Native.execute_non_trx(query, state, ["Alice"])
-      rowid = LibSqlEx.Native.get_last_insert_rowid(state)
+      {:ok, _result, state} = EctoLibSql.Native.execute_non_trx(query, state, ["Alice"])
+      rowid = EctoLibSql.Native.get_last_insert_rowid(state)
   """
-  def get_last_insert_rowid(%LibSqlEx.State{conn_id: conn_id} = _state) do
+  def get_last_insert_rowid(%EctoLibSql.State{conn_id: conn_id} = _state) do
     last_insert_rowid(conn_id)
   end
 
@@ -307,10 +444,10 @@ defmodule LibSqlEx.Native do
     - state: The connection state
 
   ## Example
-      {:ok, _result, state} = LibSqlEx.Native.execute_non_trx(query, state, [])
-      num_changes = LibSqlEx.Native.get_changes(state)
+      {:ok, _result, state} = EctoLibSql.Native.execute_non_trx(query, state, [])
+      num_changes = EctoLibSql.Native.get_changes(state)
   """
-  def get_changes(%LibSqlEx.State{conn_id: conn_id} = _state) do
+  def get_changes(%EctoLibSql.State{conn_id: conn_id} = _state) do
     changes(conn_id)
   end
 
@@ -321,9 +458,9 @@ defmodule LibSqlEx.Native do
     - state: The connection state
 
   ## Example
-      total = LibSqlEx.Native.get_total_changes(state)
+      total = EctoLibSql.Native.get_total_changes(state)
   """
-  def get_total_changes(%LibSqlEx.State{conn_id: conn_id} = _state) do
+  def get_total_changes(%EctoLibSql.State{conn_id: conn_id} = _state) do
     total_changes(conn_id)
   end
 
@@ -334,9 +471,9 @@ defmodule LibSqlEx.Native do
     - state: The connection state
 
   ## Example
-      autocommit? = LibSqlEx.Native.get_is_autocommit(state)
+      autocommit? = EctoLibSql.Native.get_is_autocommit(state)
   """
-  def get_is_autocommit(%LibSqlEx.State{conn_id: conn_id} = _state) do
+  def get_is_autocommit(%EctoLibSql.State{conn_id: conn_id} = _state) do
     is_autocommit(conn_id)
   end
 
@@ -348,7 +485,7 @@ defmodule LibSqlEx.Native do
 
   ## Example
       # Create a 3-dimensional vector
-      vec = LibSqlEx.Native.vector([1.0, 2.0, 3.0])
+      vec = EctoLibSql.Native.vector([1.0, 2.0, 3.0])
       # Use in query: "INSERT INTO items (embedding) VALUES (?)"
   """
   def vector(values) when is_list(values) do
@@ -363,7 +500,7 @@ defmodule LibSqlEx.Native do
     - type: :f32 (float32) or :f64 (float64), defaults to :f32
 
   ## Example
-      column_def = LibSqlEx.Native.vector_type(3)  # "F32_BLOB(3)"
+      column_def = EctoLibSql.Native.vector_type(3)  # "F32_BLOB(3)"
       # Use in: "CREATE TABLE items (embedding \#{column_def})"
   """
   def vector_type(dimensions, type \\ :f32) when is_integer(dimensions) and dimensions > 0 do
@@ -382,7 +519,7 @@ defmodule LibSqlEx.Native do
     - vector: The query vector (list of numbers or vector string)
 
   ## Example
-      distance_sql = LibSqlEx.Native.vector_distance_cos("embedding", [1.0, 2.0, 3.0])
+      distance_sql = EctoLibSql.Native.vector_distance_cos("embedding", [1.0, 2.0, 3.0])
       # Returns: "vector_distance_cos(embedding, '[1.0,2.0,3.0]')"
       # Use in: "SELECT * FROM items ORDER BY \#{distance_sql} LIMIT 10"
   """
@@ -405,17 +542,17 @@ defmodule LibSqlEx.Native do
         {"INSERT INTO users (name) VALUES (?)", ["Bob"]},
         {"SELECT * FROM users", []}
       ]
-      {:ok, results} = LibSqlEx.Native.batch(state, statements)
+      {:ok, results} = EctoLibSql.Native.batch(state, statements)
   """
-  def batch(%LibSqlEx.State{conn_id: conn_id, mode: mode, sync: syncx} = _state, statements) do
+  def batch(%EctoLibSql.State{conn_id: conn_id, mode: mode, sync: syncx} = _state, statements) do
     case execute_batch(conn_id, mode, syncx, statements) do
       results when is_list(results) ->
-        # Convert each result to LibSqlEx.Result struct
+        # Convert each result to EctoLibSql.Result struct
         parsed_results =
           Enum.map(results, fn result ->
             case result do
               %{"columns" => columns, "rows" => rows, "num_rows" => num_rows} ->
-                %LibSqlEx.Result{
+                %EctoLibSql.Result{
                   command: :batch,
                   columns: columns,
                   rows: rows,
@@ -423,7 +560,7 @@ defmodule LibSqlEx.Native do
                 }
 
               _ ->
-                %LibSqlEx.Result{command: :batch}
+                %EctoLibSql.Result{command: :batch}
             end
           end)
 
@@ -448,20 +585,20 @@ defmodule LibSqlEx.Native do
         {"INSERT INTO users (name) VALUES (?)", ["Bob"]},
         {"UPDATE users SET active = 1", []}
       ]
-      {:ok, results} = LibSqlEx.Native.batch_transactional(state, statements)
+      {:ok, results} = EctoLibSql.Native.batch_transactional(state, statements)
   """
   def batch_transactional(
-        %LibSqlEx.State{conn_id: conn_id, mode: mode, sync: syncx} = _state,
+        %EctoLibSql.State{conn_id: conn_id, mode: mode, sync: syncx} = _state,
         statements
       ) do
     case execute_transactional_batch(conn_id, mode, syncx, statements) do
       results when is_list(results) ->
-        # Convert each result to LibSqlEx.Result struct
+        # Convert each result to EctoLibSql.Result struct
         parsed_results =
           Enum.map(results, fn result ->
             case result do
               %{"columns" => columns, "rows" => rows, "num_rows" => num_rows} ->
-                %LibSqlEx.Result{
+                %EctoLibSql.Result{
                   command: :batch,
                   columns: columns,
                   rows: rows,
@@ -469,7 +606,7 @@ defmodule LibSqlEx.Native do
                 }
 
               _ ->
-                %LibSqlEx.Result{command: :batch}
+                %EctoLibSql.Result{command: :batch}
             end
           end)
 
