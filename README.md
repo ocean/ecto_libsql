@@ -51,6 +51,7 @@ end
 
 **Advanced Features**
 - Vector similarity search
+- Database encryption (AES-256-CBC for local and embedded replica databases)
 - WebSocket and HTTP protocols
 
 ## Documentation
@@ -63,4 +64,4 @@ Apache 2.0
 
 ## Credits
 
-This library is a fork of [libsqlex](https://github.com/danawanb/libsqlex) by [danawanb](https://github.com/danawanb), extended from a DBConnection adapter to a full Ecto adapter with additional features including vector similarity search, batch operations, prepared statements, and comprehensive documentation.
+This library is a fork of [libsqlex](https://github.com/danawanb/libsqlex) by [danawanb](https://github.com/danawanb), extended from a DBConnection adapter to a full Ecto adapter with additional features including vector similarity search, database encryption, batch operations, prepared statements, and comprehensive documentation.
