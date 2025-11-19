@@ -1,6 +1,6 @@
 # EctoLibSql
 
-An Elixir database adapter for LibSQL and Turso, built with Rust NIFs. Supports local SQLite files, remote Turso databases, and embedded replicas with synchronization.
+`ecto_libsql` is an (unofficial) Elixir Ecto database adapter for LibSQL and Turso, built with Rust NIFs. It supports local SQLite files, remote replica with synchronisation, and remote only [Turso](https://turso.tech/) databases.
 
 ## Installation
 
@@ -43,7 +43,7 @@ end
 - Embedded replicas with automatic or manual sync
 
 **Core Functionality**
-- Parameterized queries with safe parameter binding
+- Parameterised queries with safe parameter binding
 - Prepared statements
 - Transactions with multiple isolation levels (deferred, immediate, exclusive)
 - Batch operations (transactional and non-transactional)
@@ -263,6 +263,17 @@ autocommit? = EctoLibSql.Native.get_is_autocommit(state)
 ## Documentation
 
 Full documentation is available at [https://hexdocs.pm/ecto_libsql](https://hexdocs.pm/ecto_libsql).
+
+## Performance Tips
+
+1. **Use Prepared Statements** for queries executed multiple times
+2. **Use Batch Operations** to reduce roundtrips for bulk operations
+3. **Use Remote Replica Mode** for read-heavy workloads (microsecond latency)
+4. **Use IMMEDIATE transactions** for write-heavy workloads to reduce lock contention
+5. **Use WebSocket (wss://)** for lower latency and better multiplexing than HTTP
+6. **Use Cursors** for large result sets to avoid loading everything into memory
+7. **Disable auto-sync** and sync manually for better control in high-write scenarios
+8. **Use Encryption** for sensitive data without performance penalty
 
 ## License
 
