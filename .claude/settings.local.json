@@ -11,7 +11,8 @@
       "Bash(iex -S mix:*)",
       "Bash(mix deps.get:*)",
       "Bash(cargo fmt:*)",
-      "WebFetch(domain:docs.github.com)"
+      "WebFetch(domain:docs.github.com)",
+      "Bash(yamllint:*)"
     ],
     "deny": [],
     "ask": []

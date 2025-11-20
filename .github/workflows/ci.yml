@@ -96,7 +96,7 @@ jobs:
           path: |
             deps
             _build
-          key: ${{ runner.os }}-mix-1.18.0-27.0-${{ hashFiles('**/mix.lock') }}
+          key: ${{ runner.os }}-mix-1.18.0-27.0-${{ hashFiles('**/mix.lock', '**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-mix-1.18.0-27.0-
 
@@ -157,7 +157,7 @@ jobs:
           path: |
             deps
             _build
-          key: ${{ runner.os }}-mix-${{ matrix.elixir }}-${{ matrix.otp }}-${{ hashFiles('**/mix.lock') }}
+          key: ${{ runner.os }}-mix-${{ matrix.elixir }}-${{ matrix.otp }}-${{ hashFiles('**/mix.lock', '**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-mix-${{ matrix.elixir }}-${{ matrix.otp }}-
 
@@ -188,15 +188,28 @@ jobs:
           elixir-version: '1.18.0'
           otp-version: '27.0'
 
-      - name: Cache dependencies
+      - name: Cache Mix dependencies
         uses: actions/cache@v4
         with:
           path: |
             deps
             _build
-            ~/.cargo
+          key: ${{ runner.os }}-integration-mix-${{ hashFiles('**/mix.lock', '**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-integration-mix-
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
             native/ecto_libsql/target/
-          key: ${{ runner.os }}-integration-${{ hashFiles('**/mix.lock', '**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
 
       - name: Verify Rust toolchain
         run: |
@@ -260,16 +273,30 @@ jobs:
           elixir-version: '1.18.0'
           otp-version: '27.0'
 
-      - name: Cache dependencies
+      - name: Cache Mix dependencies
         if: steps.check-secrets.outputs.skip != 'true'
         uses: actions/cache@v4
         with:
           path: |
             deps
             _build
-            ~/.cargo
+          key: ${{ runner.os }}-turso-mix-${{ hashFiles('**/mix.lock', '**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-turso-mix-
+
+      - name: Cache Rust dependencies
+        if: steps.check-secrets.outputs.skip != 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
             native/ecto_libsql/target/
-          key: ${{ runner.os }}-turso-${{ hashFiles('**/mix.lock', '**/Cargo.lock') }}
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+          restore-keys: |
+            ${{ runner.os }}-cargo-
 
       - name: Install dependencies
         if: steps.check-secrets.outputs.skip != 'true'
