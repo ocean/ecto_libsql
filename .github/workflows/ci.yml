@@ -211,23 +211,41 @@ jobs:
     name: Turso Remote Database Tests
     runs-on: ubuntu-latest
     needs: [rust-checks, elixir-tests-latest, elixir-tests-compatibility]
-    # Only run on PRs to main when secrets are available
-    if: github.event_name == 'pull_request' && github.base_ref == 'main' && secrets.TURSO_DB_URI != '' && secrets.TURSO_AUTH_TOKEN != ''
+    # Only run on PRs to main
+    if: github.event_name == 'pull_request' && github.base_ref == 'main'
+    env:
+      TURSO_DB_URI: ${{ secrets.TURSO_DB_URI }}
+      TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
 
     steps:
+      - name: Check if secrets are available
+        id: check-secrets
+        run: |
+          if [ -z "$TURSO_DB_URI" ] || [ -z "$TURSO_AUTH_TOKEN" ]; then
+            echo "Secrets not available, skipping tests"
+            echo "skip=true" >> $GITHUB_OUTPUT
+          else
+            echo "Secrets available, running tests"
+            echo "skip=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Checkout code
+        if: steps.check-secrets.outputs.skip != 'true'
         uses: actions/checkout@v4
 
       - name: Set up Rust
+        if: steps.check-secrets.outputs.skip != 'true'
         uses: dtolnay/rust-toolchain@stable
 
       - name: Set up Elixir
+        if: steps.check-secrets.outputs.skip != 'true'
         uses: erlef/setup-beam@v1
         with:
           elixir-version: '1.18.0'
           otp-version: '27.0'
 
       - name: Cache dependencies
+        if: steps.check-secrets.outputs.skip != 'true'
         uses: actions/cache@v4
         with:
           path: |
@@ -238,15 +256,15 @@ jobs:
           key: ${{ runner.os }}-turso-${{ hashFiles('**/mix.lock', '**/Cargo.lock') }}
 
       - name: Install dependencies
+        if: steps.check-secrets.outputs.skip != 'true'
         run: mix deps.get
 
       - name: Compile project
+        if: steps.check-secrets.outputs.skip != 'true'
         run: mix compile
 
       - name: Run Turso remote tests
-        env:
-          TURSO_DB_URI: ${{ secrets.TURSO_DB_URI }}
-          TURSO_AUTH_TOKEN: ${{ secrets.TURSO_AUTH_TOKEN }}
+        if: steps.check-secrets.outputs.skip != 'true'
         run: mix test test/turso_remote_test.exs --trace
 
   all-checks-pass:

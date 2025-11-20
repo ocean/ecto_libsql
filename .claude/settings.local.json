@@ -10,7 +10,8 @@
       "Bash(mix clean:*)",
       "Bash(iex -S mix:*)",
       "Bash(mix deps.get:*)",
-      "Bash(cargo fmt:*)"
+      "Bash(cargo fmt:*)",
+      "WebFetch(domain:docs.github.com)"
     ],
     "deny": [],
     "ask": []
