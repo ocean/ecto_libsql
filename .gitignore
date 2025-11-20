@@ -25,12 +25,15 @@ ecto_libsql-*.tar
 # Rust binary artifacts
 /target/
 
+# Compiled native libraries (architecture-specific)
+/priv/native/*.so
+/priv/native/*.dll
+/priv/native/*.dylib
 
+# Test databases
 bar.db
 bar.db-info
 bar.db-shm
 bar.db-wal
-
-# Test databases
 test_encrypted*.db
 test_encrypted*.db-*
