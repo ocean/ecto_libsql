@@ -55,12 +55,14 @@ jobs:
         run: cargo test --manifest-path native/ecto_libsql/Cargo.toml --all-features
 
   elixir-tests-latest:
-    name: Elixir 1.18.0 / OTP 27.0 / ${{ matrix.os }}
+    name: Elixir ${{ matrix.elixir }} / OTP ${{ matrix.otp }} / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: true
       matrix:
         os: [ubuntu-latest, macos-latest]
+        elixir: ['1.18.0']
+        otp: ['27.0']
 
     steps:
       - name: Checkout code
@@ -87,8 +89,8 @@ jobs:
       - name: Set up Elixir
         uses: erlef/setup-beam@v1
         with:
-          elixir-version: '1.18.0'
-          otp-version: '27.0'
+          elixir-version: ${{ matrix.elixir }}
+          otp-version: ${{ matrix.otp }}
 
       - name: Cache Mix dependencies
         uses: actions/cache@v4
@@ -96,9 +98,9 @@ jobs:
           path: |
             deps
             _build
-          key: ${{ runner.os }}-mix-1.18.0-27.0-${{ hashFiles('**/mix.lock', '**/Cargo.lock') }}
+          key: ${{ runner.os }}-mix-${{ matrix.elixir }}-${{ matrix.otp }}-${{ hashFiles('**/mix.lock', '**/Cargo.lock') }}
           restore-keys: |
-            ${{ runner.os }}-mix-1.18.0-27.0-
+            ${{ runner.os }}-mix-${{ matrix.elixir }}-${{ matrix.otp }}-
 
       - name: Install Mix dependencies
         run: mix deps.get

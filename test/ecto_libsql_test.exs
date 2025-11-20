@@ -467,7 +467,7 @@ defmodule EctoLibSqlTest do
     assert balance == 100.50
   end
 
-  test "transaction behaviors - deferred and read_only", state do
+  test "transaction behaviours - deferred and read_only", state do
     {:ok, state} = EctoLibSql.connect(state[:opts])
 
     # Test DEFERRED (default)

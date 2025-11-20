@@ -121,13 +121,47 @@ defmodule EctoLibSql.Native do
   Manually trigger a sync for embedded replicas.
 
   For connections in `:remote_replica` mode, this function forces a
-  synchronization with the remote Turso database.
+  synchronisation with the remote Turso database, pulling down any changes
+  from the remote and pushing local changes up.
+
+  ## When to Use
+
+  In most cases, you don't need to call this manually - automatic sync happens
+  when you connect with `sync: true`. However, manual sync is useful for:
+
+  - **Critical reads after remote writes**: When you need to immediately read
+    data that was just written to the remote database
+  - **Before shutdown**: Ensuring all local changes are synced before closing
+    the connection
+  - **After batch operations**: Forcing sync after bulk inserts/updates to
+    ensure data is persisted remotely
+  - **Coordinating between replicas**: When multiple replicas need to see
+    consistent data immediately
 
   ## Parameters
-    - state: The connection state
+    - state: The connection state (must be in `:remote_replica` mode)
 
-  ## Example
+  ## Returns
+    - `{:ok, "success sync"}` on successful sync
+    - `{:error, reason}` if sync fails
+
+  ## Examples
+
+      # Force sync after critical write
+      {:ok, state} = EctoLibSql.connect(database: "local.db", uri: turso_uri, auth_token: token, sync: true)
+      {:ok, _, _, state} = EctoLibSql.handle_execute("INSERT INTO users ...", [], [], state)
+      {:ok, "success sync"} = EctoLibSql.Native.sync(state)
+
+      # Ensure sync before shutdown
       {:ok, _} = EctoLibSql.Native.sync(state)
+      :ok = EctoLibSql.disconnect([], state)
+
+  ## Notes
+
+  - Sync is only applicable for `:remote_replica` mode connections
+  - For `:local` mode, this is a no-op
+  - For `:remote` mode, data is already on the remote server
+  - Sync happens synchronously and may take time depending on data size
 
   """
   def sync(%EctoLibSql.State{conn_id: conn_id, mode: mode} = _state) do
@@ -243,14 +277,14 @@ defmodule EctoLibSql.Native do
   end
 
   @doc """
-  Begin a new transaction with optional behavior control.
+  Begin a new transaction with optional behaviour control.
 
   ## Parameters
     - state: The connection state
     - opts: Options keyword list
-      - `:behavior` - Transaction behavior (`:deferred`, `:immediate`, or `:exclusive`), defaults to `:deferred`
+      - `:behavior` - Transaction behaviour (`:deferred`, `:immediate`, or `:exclusive`), defaults to `:deferred`
 
-  ## Transaction Behaviors
+  ## Transaction Behaviours
 
   - `:deferred` - Default. Locks are acquired on first write operation
   - `:immediate` - Acquires write lock immediately when transaction begins

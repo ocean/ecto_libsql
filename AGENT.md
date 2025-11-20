@@ -1516,7 +1516,7 @@ Begins a transaction with specific behaviour.
 **Parameters:**
 - `state` (EctoLibSql.State): Connection state
 - `opts` (keyword list): Options
-  - `:behavior` - `:deferred`, `:immediate`, `:exclusive`, or `:read_only`
+  - `:behaviour` - `:deferred`, `:immediate`, `:exclusive`, or `:read_only`
 
 **Returns:** `{:ok, state}` or `{:error, reason}`
 

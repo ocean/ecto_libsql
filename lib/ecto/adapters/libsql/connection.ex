@@ -3,7 +3,7 @@ defmodule Ecto.Adapters.LibSql.Connection do
   Implementation of Ecto.Adapters.SQL.Connection for LibSQL.
 
   This module handles SQL query generation and DDL operations for LibSQL/SQLite.
-  It implements the `Ecto.Adapters.SQL.Connection` behavior, translating Ecto's
+  It implements the `Ecto.Adapters.SQL.Connection` behaviour, translating Ecto's
   query structures into SQLite-compatible SQL.
 
   ## Key Responsibilities

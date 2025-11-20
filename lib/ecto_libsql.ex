@@ -125,7 +125,7 @@ defmodule EctoLibSql do
   @doc """
   Begins a new database transaction.
 
-  The transaction behavior (deferred/immediate/exclusive) can be controlled
+  The transaction behaviour (deferred/immediate/exclusive) can be controlled
   via options passed to the Native module.
   """
   def handle_begin(_opts, state) do

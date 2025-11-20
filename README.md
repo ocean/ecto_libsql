@@ -289,26 +289,81 @@ distance_fn = EctoLibSql.Native.vector_distance_cos("embedding", query_vector)
 )
 ```
 
-### Manual Sync Control
+### Embedded Replica Synchronisation
+
+When using embedded replica mode (`sync: true`), the library automatically handles synchronisation between your local database and Turso cloud. However, you can also trigger manual sync when needed.
+
+#### Automatic Sync Behaviour
 
 ```elixir
-# Disable automatic sync for embedded replicas
+# Automatic sync is enabled with sync: true
 {:ok, state} = EctoLibSql.connect(
   database: "local.db",
   uri: "libsql://your-db.turso.io",
   auth_token: "your-token",
-  sync: false
+  sync: true  # Automatic sync enabled
 )
 
-# Make local changes
-EctoLibSql.handle_execute(
-  "INSERT INTO users (name) VALUES (?)",
-  ["Alice"], [], state
+# Writes and reads work normally - sync happens automatically
+EctoLibSql.handle_execute("INSERT INTO users (name) VALUES (?)", ["Alice"], [], state)
+EctoLibSql.handle_execute("SELECT * FROM users", [], [], state)
+```
+
+**How automatic sync works:**
+- Initial sync happens when you first connect
+- Changes are synced automatically in the background
+- You don't need to call `sync/1` in most applications
+
+#### Manual Sync Control
+
+For specific use cases, you can manually trigger synchronisation:
+
+```elixir
+# Force immediate sync after critical operation
+EctoLibSql.handle_execute("INSERT INTO orders (total) VALUES (?)", [1000.00], [], state)
+{:ok, _} = EctoLibSql.Native.sync(state)  # Ensure synced to cloud immediately
+
+# Before shutdown - ensure all changes are persisted
+{:ok, _} = EctoLibSql.Native.sync(state)
+:ok = EctoLibSql.disconnect([], state)
+
+# Coordinate between multiple replicas
+{:ok, _} = EctoLibSql.Native.sync(replica1)  # Push local changes
+{:ok, _} = EctoLibSql.Native.sync(replica2)  # Pull those changes on another replica
+```
+
+**When to use manual sync:**
+- **Critical operations**: Immediately after writes that must be durable
+- **Before shutdown**: Ensuring all local changes reach the cloud
+- **Coordinating replicas**: When multiple replicas need consistent data immediately
+- **After batch operations**: Following bulk inserts/updates
+
+**When you DON'T need manual sync:**
+- Normal application reads/writes (automatic sync handles this)
+- Most CRUD operations (background sync is sufficient)
+- Development and testing (automatic sync is fine)
+
+#### Disabling Automatic Sync
+
+You can disable automatic sync and rely entirely on manual control:
+
+```elixir
+# Disable automatic sync
+{:ok, state} = EctoLibSql.connect(
+  database: "local.db",
+  uri: "libsql://your-db.turso.io",
+  auth_token: "your-token",
+  sync: false  # Manual sync only
 )
+
+# Make local changes (not synced yet)
+EctoLibSql.handle_execute("INSERT INTO users (name) VALUES (?)", ["Alice"], [], state)
 
 # Manually synchronise when ready
-{:ok, "success sync"} = EctoLibSql.Native.sync(state)
+{:ok, _} = EctoLibSql.Native.sync(state)
 ```
+
+This is useful for offline-first applications or when you want explicit control over when data syncs.
 
 ## Configuration Options
 
@@ -355,7 +410,7 @@ config :my_app, MyApp.Repo,
   sync: true
 ```
 
-This mode provides microsecond read latency (local file) with automatic cloud backup.
+This mode provides microsecond read latency (local file) with automatic cloud backup. Synchronisation happens automatically in the background - see the [Embedded Replica Synchronisation](#embedded-replica-synchronisation) section for details on sync behaviour and manual sync control.
 
 ## Transaction Behaviours
 
