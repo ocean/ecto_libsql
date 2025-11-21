@@ -2,7 +2,7 @@ defmodule EctoLibSql.MixProject do
   use Mix.Project
 
   @version "0.4.0"
-  @source_url "https://github.com/ocean/libsqlex"
+  @source_url "https://github.com/ocean/ecto_libsql"
 
   def project do
     [
@@ -63,7 +63,7 @@ defmodule EctoLibSql.MixProject do
       main: "EctoLibSql",
       source_ref: "v#{@version}",
       source_url: @source_url,
-      extras: ["README.md", "CHANGELOG.md"],
+      extras: ["README.md", "CHANGELOG.md", "ECTO_MIGRATION_GUIDE.md"],
       groups_for_modules: [
         "Core Modules": [EctoLibSql, EctoLibSql.Native],
         "Support Modules": [
