@@ -36,7 +36,7 @@ defmodule EctoLibSql.MixProject do
 
   defp deps do
     [
-      {:rustler, "~> 0.36"},
+      {:rustler, "~> 0.37.1"},
       {:db_connection, "~> 2.1"},
       {:ecto, "~> 3.11"},
       {:ecto_sql, "~> 3.11"},
