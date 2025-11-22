@@ -222,17 +222,28 @@ jobs:
         run: mix deps.get
 
       - name: Compile project
-        run: mix compile
+        run: |
+          echo "Compiling with MIX_ENV=$MIX_ENV"
+          mix compile --force --verbose
+          echo "Compilation finished"
 
       - name: Verify NIF library exists
         run: |
-          if [ ! -f "target/release/libecto_libsql.so" ]; then
-            echo "ERROR: NIF library not found after compilation!"
-            echo "Looking for compiled artifacts:"
-            find . -name "libecto_libsql.so" -o -name "*.so" | head -20
+          echo "Checking for NIF library..."
+          echo "Contents of priv/:"
+          ls -laR priv/ || echo "priv/ does not exist"
+          echo ""
+          echo "Contents of target/release/:"
+          ls -la target/release/ | grep -E "libecto_libsql|ecto_libsql" || echo "No ecto_libsql files in target/release/"
+          echo ""
+          echo "Contents of _build/test/lib/ecto_libsql/:"
+          ls -laR _build/test/lib/ecto_libsql/ | head -50 || echo "_build path does not exist"
+          echo ""
+          if [ ! -f "priv/native/ecto_libsql.so" ]; then
+            echo "ERROR: NIF library not found at priv/native/ecto_libsql.so"
             exit 1
           fi
-          echo "NIF library found successfully"
+          echo "SUCCESS: NIF library found at priv/native/ecto_libsql.so"
 
       - name: Run full test suite (excluding Turso remote tests)
         run: mix test --trace --exclude turso_remote
