@@ -33,12 +33,6 @@ jobs:
           toolchain: ${{ matrix.rust }}
           components: rustfmt, clippy
 
-      - name: Display files
-        run: |
-          ls -la
-          cd native
-          ls -la
-
       - name: Debug Cargo.toml files
         run: find . -name Cargo.toml -print
 
@@ -112,6 +106,9 @@ jobs:
 
       - name: Compile (warnings as errors)
         run: mix compile --warnings-as-errors
+
+      - name: Debug .so files
+        run: find . -name '*.so' -print
 
       - name: Run Elixir tests
         run: mix test
