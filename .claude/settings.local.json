@@ -12,7 +12,10 @@
       "Bash(mix deps.get:*)",
       "Bash(cargo fmt:*)",
       "WebFetch(domain:docs.github.com)",
-      "Bash(yamllint:*)"
+      "Bash(yamllint:*)",
+      "Bash(mix help:*)",
+      "Bash(MIX_ENV=test mix clean:*)",
+      "Bash(MIX_ENV=test mix compile:*)"
     ],
     "deny": [],
     "ask": []
