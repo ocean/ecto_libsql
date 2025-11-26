@@ -5,6 +5,62 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.5.0] - 2024-11-26
+
+### Changed
+
+- **Rust NIF Error Handling (BREAKING for direct NIF users)**
+  - Eliminated all 146 `unwrap()` calls from production Rust code
+  - Added `safe_lock()` and `safe_lock_arc()` helper functions for safe mutex locking
+  - All NIF errors now return `{:error, message}` tuples to Elixir instead of panicking
+  - Mutex poisoning errors are handled gracefully with descriptive context
+  - Invalid connection/transaction/statement/cursor IDs return proper errors
+
+### Fixed
+
+- **VM Stability** - NIF errors no longer crash the entire BEAM VM
+  - Invalid operations (bad connection IDs, missing resources) now return error tuples
+  - Processes survive NIF errors, allowing supervision trees to work properly
+  - Error messages include descriptive context for easier debugging
+
+### Added
+
+- **Comprehensive Error Handling Tests**
+  - Added `test/error_demo_test.exs` with 7 tests demonstrating graceful error handling
+  - Added `test/error_handling_test.exs` with 14 comprehensive error coverage tests
+  - All tests verify that NIF errors return proper error tuples instead of crashing the BEAM VM
+
+### Technical Details
+
+**Before 0.5.0:**
+- 146 `unwrap()` calls in Rust production code
+- Mutex/registry errors → panic → entire BEAM VM crash
+- Invalid IDs → panic → VM crash
+- Supervision trees ineffective for NIF errors
+
+**After 0.5.0:**
+- 0 `unwrap()` calls in Rust production code (100% eliminated)
+- All errors return `{:error, "descriptive message"}` tuples
+- Processes can handle errors and recover
+- Supervision trees work as expected
+
+### Migration Guide
+
+This is a **non-breaking change** for normal Ecto usage. Your existing code will continue to work exactly as before, but is now significantly more stable.
+
+**What Changed:**
+- NIF functions that previously panicked now return `{:error, reason}` tuples
+- Your existing error handling code will now catch errors that previously crashed the VM
+
+**Recommended Actions:**
+1. Review error handling in code that uses `EctoLibSql.Native` functions directly
+2. Ensure supervision strategies are in place for database operations
+3. Consider adding retry logic for transient errors (connection timeouts, etc.)
+
+### Notes
+
+This release represents a major stability improvement for production deployments. The refactoring ensures that `ecto_libsql` handles errors the "Elixir way" - returning error tuples that can be supervised, rather than panicking at the Rust level and crashing the VM.
+
 ## [0.4.0] - 2025-11-19
 
 ### Changed

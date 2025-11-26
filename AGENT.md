@@ -1614,18 +1614,6 @@ Fetches rows from a cursor.
 
 **Returns:** `{:cont, result, state}`, `{:deallocated, result, state}`, or `{:error, reason, state}`
 
-#### `EctoLibSql.handle_deallocate/3`
-
-Deallocates a cursor.
-
-**Parameters:**
-- `query` (EctoLibSql.Query): SQL query
-- `cursor`: Cursor reference
-- `opts` (keyword list): Options
-- `state` (EctoLibSql.State): Connection state
-
-**Returns:** `{:ok, result, state}` or `{:error, reason, state}`
-
 ### Metadata Functions
 
 #### `EctoLibSql.Native.get_last_insert_rowid/1`
@@ -2528,7 +2516,6 @@ The error handling improvements have **no performance impact** on the happy path
 ### Further Reading
 
 - [Error Handling Demo Tests](test/error_demo_test.exs) - See concrete examples
-- [Changes Summary](CHANGES_SUMMARY.md) - Technical details of the refactoring
 - [Elixir Error Handling](https://hexdocs.pm/elixir/try-catch-and-rescue.html) - Official Elixir guide
 
 ---

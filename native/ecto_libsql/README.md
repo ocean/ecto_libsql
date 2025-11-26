@@ -17,6 +17,34 @@ This Rust crate provides the native bridge between Elixir and the LibSQL databas
 - **Vector Search**: Native support for vector similarity operations
 - **Database Encryption**: AES-256-CBC encryption for local databases
 - **Thread-Safe Registries**: Concurrent access to connections, transactions, statements, and cursors using Mutex-protected HashMaps
+- **Production-Ready Error Handling**: All errors return proper Elixir error tuples instead of panicking (see Reliability section below)
+
+## Reliability (v0.5.0+)
+
+As of version 0.5.0, the NIF implements comprehensive error handling to ensure production stability:
+
+- **Zero Panics**: Eliminated all 146 `unwrap()` calls from production code
+- **Safe Mutex Locking**: Custom `safe_lock()` helpers handle poisoned mutexes gracefully
+- **Proper Error Propagation**: All errors return `{:error, message}` tuples to Elixir
+- **VM Protection**: NIF errors never crash the BEAM VM
+- **Descriptive Errors**: All error messages include context for easier debugging
+
+### Error Handling Pattern
+
+The codebase uses safe error handling throughout:
+
+```rust
+// Helper functions for safe mutex locking
+fn safe_lock<'a, T>(mutex: &'a Mutex<T>, context: &str) 
+    -> Result<MutexGuard<'a, T>, rustler::Error>
+
+// Usage pattern
+let conn_map = safe_lock(&CONNECTION_REGISTRY, "function_name")?;
+let client = conn_map.get(conn_id)
+    .ok_or_else(|| rustler::Error::Term(Box::new("Connection not found")))?;
+```
+
+This ensures that all error paths return to Elixir for proper handling by supervision trees.
 
 ## Building
 
@@ -49,6 +77,8 @@ The NIF uses a registry-based architecture where:
 - Each connection, transaction, statement, and cursor is assigned a unique UUID
 - Thread-safe HashMaps (protected by Mutex) store these entities
 - Elixir code references entities by UUID, ensuring safe concurrent access
+- All registry operations use safe locking to prevent panics from mutex poisoning
+- Invalid UUIDs return descriptive errors rather than panicking
 
 ## Resources
 

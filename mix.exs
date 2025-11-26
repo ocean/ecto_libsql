@@ -1,7 +1,7 @@
 defmodule EctoLibSql.MixProject do
   use Mix.Project
 
-  @version "0.4.0"
+  @version "0.5.0"
   @source_url "https://github.com/ocean/ecto_libsql"
 
   def project do
@@ -29,8 +29,11 @@ defmodule EctoLibSql.MixProject do
   defp description() do
     """
     Elixir Ecto adapter for LibSQL and Turso databases. Supports local SQLite files,
-    remote Turso cloud databases, and embedded replicas with sync. Built with
-    Rust NIFs for high performance.
+    remote Turso cloud databases, and embedded replicas with sync.
+
+    Built with Rust NIFs for high performance.
+
+    Recently updated (0.5.0+) to massively improve Rust reliability and fault tolerance.
     """
   end
 
@@ -62,7 +65,7 @@ defmodule EctoLibSql.MixProject do
       main: "EctoLibSql",
       source_ref: "v#{@version}",
       source_url: @source_url,
-      extras: ["README.md", "CHANGELOG.md", "ECTO_MIGRATION_GUIDE.md"],
+      extras: ["README.md", "CHANGELOG.md", "AGENT.md", "ECTO_MIGRATION_GUIDE.md"],
       groups_for_modules: [
         "Core Modules": [EctoLibSql, EctoLibSql.Native],
         "Support Modules": [
