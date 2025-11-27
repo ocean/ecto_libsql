@@ -11,7 +11,7 @@ Add `ecto_libsql` to your dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:ecto_libsql, "~> 0.4.0"}
+    {:ecto_libsql, "~> 0.5.0"}
   ]
 end
 ```
@@ -97,7 +97,6 @@ For lower-level control, you can use the DBConnection interface directly:
 **Reliability**
 - **Production-ready error handling**: All Rust NIF errors return proper Elixir error tuples instead of crashing the BEAM VM
 - **Graceful degradation**: Invalid operations (bad connection IDs, missing resources) return `{:error, message}` for proper supervision tree handling
-- **Zero panic risk**: 100% of panic-prone `unwrap()` calls eliminated from production code
 
 ## Documentation
 
