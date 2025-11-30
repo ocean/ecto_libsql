@@ -92,7 +92,7 @@ For lower-level control, you can use the DBConnection interface directly:
 - WebSocket and HTTP protocols
 - Cursor-based streaming for large result sets (via DBConnection interface)
 
-**Note:** Ecto `Repo.stream()` is not yet implemented. For streaming large datasets, use the DBConnection cursor interface directly (see examples in AGENT.md).
+**Note:** Ecto `Repo.stream()` is not yet implemented. For streaming large datasets, use the DBConnection cursor interface directly (see examples in AGENTS.md).
 
 **Reliability**
 - **Production-ready error handling**: All Rust NIF errors return proper Elixir error tuples instead of crashing the BEAM VM
@@ -101,7 +101,7 @@ For lower-level control, you can use the DBConnection interface directly:
 ## Documentation
 
 - **API Documentation**: [https://hexdocs.pm/ecto_libsql](https://hexdocs.pm/ecto_libsql)
-- **LLM / AGENT Guide**: [AGENT.md](AGENT.md)
+- **LLM / AGENT Guide**: [AGENTS.md](AGENTS.md)
 - **Changelog**: [CHANGELOG.md](CHANGELOG.md)
 - **Migration Guide**: [ECTO_MIGRATION_GUIDE.md](ECTO_MIGRATION_GUIDE.md)
 

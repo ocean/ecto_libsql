@@ -5,6 +5,86 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.6.0] - 2025-11-30
+
+### Fixed
+
+- **Remote Sync Performance & Reliability**
+  - Removed redundant manual `.sync()` calls after write operations for embedded replicas
+  - LibSQL automatically handles sync to remote primary database - manual syncs were causing double-sync overhead
+  - Added 30-second timeout to connection establishment to prevent indefinite hangs
+  - All Turso remote tests now pass reliably (previously 4 tests timed out)
+  - Test suite execution time improved significantly (~107s vs timing out at 60s+)
+
+- **Ecto Migrations Compatibility (Issue #20)**
+  - Fixed DDL function grouping that was causing compilation errors
+  - Added comprehensive migration test suite (759 lines) covering all SQLite ALTER TABLE operations
+  - Improved handling of SQLite's limited ALTER TABLE support
+  - Added tests for column operations, constraint management, and index creation
+
+- **Prepared Statement Execution**
+  - Fixed panic in prepared statement execution that could crash the BEAM VM
+  - Added proper error handling for prepared statement operations
+  - Improved error messages for prepared statement failures
+
+- **Extended LibSQL DDL Support**
+  - Added support for additional ALTER TABLE operations compatible with LibSQL
+  - Improved DDL operation grouping and execution order
+  - Better handling of SQLite dialect quirks
+
+### Added
+
+- **Cursor Streaming Support**
+  - Implemented cursor-based streaming for large result sets
+  - Added `handle_declare/4`, `handle_fetch/4`, and `handle_deallocate/4` DBConnection callbacks
+  - Memory-efficient processing of large queries
+  - Rust NIF functions: `declare_cursor/3`, `fetch_cursor/2`, cursor registry management
+
+- **Comprehensive Test Coverage**
+  - Added 138 new DDL generation tests in `test/ecto_connection_test.exs`
+  - Added 759 lines of migration tests in `test/ecto_migration_test.exs`
+  - Improved error handling test coverage
+  - All 162 tests passing (0 failures)
+
+### Changed
+
+- **Sync Behaviour for Embedded Replicas**
+  - Automatic sync after writes has been removed (LibSQL handles this natively)
+  - Manual `sync()` via `EctoLibSql.Native.sync/1` still available for explicit control
+  - Improved sync timeout handling with configurable `DEFAULT_SYNC_TIMEOUT_SECS` (30s)
+  - Added connection timeout to prevent hangs during initial replica sync
+
+- **Documentation Updates**
+  - Updated all documentation to reflect sync behaviour changes
+  - Added clarification about when manual sync is needed vs automatic
+  - Improved Turso/LibSQL compatibility documentation references
+
+### Technical Details
+
+**Sync Performance Before:**
+- Manual `.sync()` called after every write operation
+- Double sync overhead (LibSQL auto-sync + manual sync)
+- 120-second timeout causing long test hangs
+- 4 tests timing out after 60+ seconds each
+
+**Sync Performance After:**
+- LibSQL's native auto-sync used correctly
+- No redundant manual sync calls
+- 30-second connection timeout for fast failure
+- All tests passing in ~107 seconds
+
+**Key Insight:**
+According to Turso documentation: "Writes are sent to the remote primary database by default, then the local database updates automatically once the remote write succeeds." Manual sync is only needed when explicitly pulling down changes from remote (e.g., after reconnecting to an existing replica).
+
+### Migration Notes
+
+This is a **non-breaking change** for normal usage. However, if you were relying on automatic sync behaviour after writes in embedded replica mode, you may now need to explicitly call `EctoLibSql.Native.sync/1` when you need to ensure remote data is pulled down (e.g., after reconnecting to an existing local database).
+
+**Recommended Actions:**
+1. Review code that uses embedded replicas with `sync: true`
+2. Add explicit `sync()` calls after reconnecting to existing local databases if you need to pull down remote changes
+3. Remove any redundant manual `sync()` calls after write operations
+
 ## [0.5.0] - 2025-11-27
 
 ### Changed

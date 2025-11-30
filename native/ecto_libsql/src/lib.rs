@@ -7,6 +7,7 @@ use rustler::types::atom::nil;
 use rustler::{resource_impl, Atom, Encoder, Env, NifResult, Resource, Term};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::Duration;
 use tokio::runtime::Runtime;
 use uuid::Uuid;
 
@@ -35,6 +36,30 @@ fn safe_lock_arc<'a, T>(
 
 static TOKIO_RUNTIME: Lazy<Runtime> =
     Lazy::new(|| Runtime::new().expect("Failed to create Tokio runtime"));
+
+// Default timeout for sync operations (in seconds).
+const DEFAULT_SYNC_TIMEOUT_SECS: u64 = 30;
+
+// Helper function to perform sync with timeout.
+async fn sync_with_timeout(
+    client: &Arc<Mutex<LibSQLConn>>,
+    timeout_secs: u64,
+) -> Result<(), String> {
+    let timeout = Duration::from_secs(timeout_secs);
+
+    tokio::time::timeout(timeout, async {
+        let client_guard =
+            safe_lock_arc(client, "sync_with_timeout client").map_err(|e| format!("{:?}", e))?;
+        client_guard
+            .db
+            .sync()
+            .await
+            .map_err(|e| format!("Sync error: {}", e))?;
+        Ok::<_, String>(())
+    })
+    .await
+    .map_err(|_| format!("Sync timeout after {} seconds", timeout_secs))?
+}
 
 #[resource_impl]
 impl Resource for LibSQLConn {}
@@ -243,13 +268,7 @@ pub fn do_sync(conn_id: &str, mode: Atom) -> NifResult<(rustler::Atom, String)> 
     let client_clone = client.clone();
     let result = TOKIO_RUNTIME.block_on(async {
         if matches!(decode_mode(mode), Some(Mode::RemoteReplica)) {
-            let client_guard =
-                safe_lock_arc(&client_clone, "do_sync client").map_err(|e| format!("{:?}", e))?;
-            client_guard
-                .db
-                .sync()
-                .await
-                .map_err(|e| format!("Sync error: {}", e))?;
+            sync_with_timeout(&client_clone, DEFAULT_SYNC_TIMEOUT_SECS).await?;
         }
 
         Ok::<_, String>(())
@@ -264,20 +283,14 @@ pub fn do_sync(conn_id: &str, mode: Atom) -> NifResult<(rustler::Atom, String)> 
 #[rustler::nif(schedule = "DirtyIo")]
 pub fn commit_or_rollback_transaction(
     trx_id: &str,
-    conn_id: &str,
-    mode: Atom,
-    syncx: Atom,
+    _conn_id: &str,
+    _mode: Atom,
+    _syncx: Atom,
     param: &str,
 ) -> NifResult<(rustler::Atom, String)> {
     let trx = safe_lock(&TXN_REGISTRY, "commit_or_rollback txn_registry")?
         .remove(trx_id)
         .ok_or_else(|| rustler::Error::Term(Box::new("Transaction not found")))?;
-
-    let conn_map = safe_lock(&CONNECTION_REGISTRY, "commit_or_rollback conn_map")?;
-    let client = conn_map
-        .get(conn_id)
-        .ok_or_else(|| rustler::Error::Term(Box::new("Connection not found")))?
-        .clone();
 
     let result = TOKIO_RUNTIME.block_on(async {
         if param == "commit" {
@@ -289,17 +302,9 @@ pub fn commit_or_rollback_transaction(
                 .await
                 .map_err(|e| format!("Rollback error: {}", e))?;
         }
-        if matches!(decode_mode(mode), Some(Mode::RemoteReplica)) && syncx == enable_sync() {
-            let client_guard = safe_lock_arc(&client, "commit_or_rollback client")
-                .map_err(|e| format!("{:?}", e))?;
-            client_guard
-                .db
-                .sync()
-                .await
-                .map_err(|e| format!("Sync error: {}", e))?;
-        }
-        //else
-        //no sync
+
+        // NOTE: LibSQL automatically syncs transaction commits to remote for embedded replicas.
+        // No manual sync needed here.
 
         Ok::<_, String>(())
     });
@@ -370,86 +375,101 @@ fn connect(opts: Term, mode: Term) -> NifResult<String> {
     let rt = tokio::runtime::Runtime::new()
         .map_err(|e| rustler::Error::Term(Box::new(format!("Tokio runtime err {}", e))))?;
 
+    // Wrap the entire connection process with a timeout.
     rt.block_on(async {
-        let db = match mode.atom_to_string() {
-            Ok(mode_str) => {
-                if mode_str == "remote_replica" {
-                    let url = url.ok_or_else(|| rustler::Error::BadArg)?;
-                    let token = token.ok_or_else(|| rustler::Error::BadArg)?;
-                    let dbname = dbname.ok_or_else(|| rustler::Error::BadArg)?;
+        let timeout = Duration::from_secs(DEFAULT_SYNC_TIMEOUT_SECS);
 
-                    let mut builder = Builder::new_remote_replica(dbname, url, token);
+        tokio::time::timeout(timeout, async {
+            let db = match mode.atom_to_string() {
+                Ok(mode_str) => {
+                    if mode_str == "remote_replica" {
+                        let url = url.ok_or_else(|| rustler::Error::BadArg)?;
+                        let token = token.ok_or_else(|| rustler::Error::BadArg)?;
+                        let dbname = dbname.ok_or_else(|| rustler::Error::BadArg)?;
 
-                    if let Some(key) = encryption_key {
-                        let config = EncryptionConfig {
-                            cipher: Cipher::Aes256Cbc,
-                            encryption_key: Bytes::from(key),
-                        };
-                        builder = builder.encryption_config(config);
+                        let mut builder = Builder::new_remote_replica(dbname, url, token);
+
+                        if let Some(key) = encryption_key {
+                            let config = EncryptionConfig {
+                                cipher: Cipher::Aes256Cbc,
+                                encryption_key: Bytes::from(key),
+                            };
+                            builder = builder.encryption_config(config);
+                        }
+
+                        builder.build().await
+                    } else if mode_str == "remote" {
+                        let url = url.ok_or_else(|| rustler::Error::BadArg)?;
+                        let token = token.ok_or_else(|| rustler::Error::BadArg)?;
+
+                        Builder::new_remote(url, token).build().await
+                    } else if mode_str == "local" {
+                        let dbname = dbname.ok_or_else(|| rustler::Error::BadArg)?;
+
+                        let mut builder = Builder::new_local(dbname);
+
+                        if let Some(key) = encryption_key {
+                            let config = EncryptionConfig {
+                                cipher: Cipher::Aes256Cbc,
+                                encryption_key: Bytes::from(key),
+                            };
+                            builder = builder.encryption_config(config);
+                        }
+
+                        builder.build().await
+                    } else {
+                        // else value will return string error
+                        return Err(rustler::Error::Term(Box::new(format!("Unknown mode",))));
                     }
+                }
 
-                    builder.build().await
-                } else if mode_str == "remote" {
-                    let url = url.ok_or_else(|| rustler::Error::BadArg)?;
-                    let token = token.ok_or_else(|| rustler::Error::BadArg)?;
-
-                    Builder::new_remote(url, token).build().await
-                } else if mode_str == "local" {
-                    let dbname = dbname.ok_or_else(|| rustler::Error::BadArg)?;
-
-                    let mut builder = Builder::new_local(dbname);
-
-                    if let Some(key) = encryption_key {
-                        let config = EncryptionConfig {
-                            cipher: Cipher::Aes256Cbc,
-                            encryption_key: Bytes::from(key),
-                        };
-                        builder = builder.encryption_config(config);
-                    }
-
-                    builder.build().await
-                } else {
-                    // else value will return string error
-                    return Err(rustler::Error::Term(Box::new(format!("Unknown mode",))));
+                Err(other) => {
+                    return Err(rustler::Error::Term(Box::new(format!(
+                        "Unknown mode: {:?}",
+                        other
+                    ))))
                 }
             }
+            .map_err(|e| rustler::Error::Term(Box::new(format!("Failed to build DB: {}", e))))?;
 
-            Err(other) => {
-                return Err(rustler::Error::Term(Box::new(format!(
-                    "Unknown mode: {:?}",
-                    other
-                ))))
+            let conn = db
+                .connect()
+                .map_err(|e| rustler::Error::Term(Box::new(format!("Failed to connect: {}", e))))?;
+
+            let mode_str = mode.atom_to_string().map_err(|e| {
+                rustler::Error::Term(Box::new(format!("Invalid mode atom: {:?}", e)))
+            })?;
+
+            if mode_str != "local" {
+                conn.query("SELECT 1", ())
+                    .await
+                    .map_err(|e| rustler::Error::Term(Box::new(format!("Failed ping: {}", e))))?;
             }
-        }
-        .map_err(|e| rustler::Error::Term(Box::new(format!("Failed to build DB: {}", e))))?;
 
-        let conn = db
-            .connect()
-            .map_err(|e| rustler::Error::Term(Box::new(format!("Failed to connect: {}", e))))?;
+            let libsql_conn = Arc::new(Mutex::new(LibSQLConn {
+                db,
+                client: Arc::new(Mutex::new(conn)),
+            }));
 
-        let mode_str = mode
-            .atom_to_string()
-            .map_err(|e| rustler::Error::Term(Box::new(format!("Invalid mode atom: {:?}", e))))?;
+            let conn_id = Uuid::new_v4().to_string();
+            safe_lock(&CONNECTION_REGISTRY, "connect conn_registry")
+                .map_err(|e| {
+                    rustler::Error::Term(Box::new(format!(
+                        "Failed to register connection: {:?}",
+                        e
+                    )))
+                })?
+                .insert(conn_id.clone(), libsql_conn);
 
-        if mode_str != "local" {
-            conn.query("SELECT 1", ())
-                .await
-                .map_err(|e| rustler::Error::Term(Box::new(format!("Failed ping: {}", e))))?;
-        }
-
-        let libsql_conn = Arc::new(Mutex::new(LibSQLConn {
-            db,
-            client: Arc::new(Mutex::new(conn)),
-        }));
-
-        let conn_id = Uuid::new_v4().to_string();
-        safe_lock(&CONNECTION_REGISTRY, "connect conn_registry")
-            .map_err(|e| {
-                rustler::Error::Term(Box::new(format!("Failed to register connection: {:?}", e)))
-            })?
-            .insert(conn_id.clone(), libsql_conn);
-
-        Ok(conn_id)
+            Ok(conn_id)
+        })
+        .await
+        .map_err(|_| {
+            rustler::Error::Term(Box::new(format!(
+                "Connection timeout after {} seconds",
+                DEFAULT_SYNC_TIMEOUT_SECS
+            )))
+        })?
     })
 }
 
@@ -457,14 +477,14 @@ fn connect(opts: Term, mode: Term) -> NifResult<String> {
 fn query_args<'a>(
     env: Env<'a>,
     conn_id: &str,
-    mode: Atom,
-    syncx: Atom,
+    _mode: Atom,
+    _syncx: Atom,
     query: &str,
     args: Vec<Term<'a>>,
 ) -> NifResult<Term<'a>> {
     let conn_map = safe_lock(&CONNECTION_REGISTRY, "query_args conn_map")?;
 
-    let is_sync = !matches!(detect_query_type(query), QueryType::Select);
+    let _is_sync = !matches!(detect_query_type(query), QueryType::Select);
 
     if let Some(client) = conn_map.get(conn_id) {
         let client = client.clone();
@@ -484,14 +504,12 @@ fn query_args<'a>(
                 Ok(res_rows) => {
                     let result = collect_rows(env, res_rows).await?;
 
-                    if let Some(modex) = decode_mode(mode) {
-                        // if remote replica and a write query then sync
-                        if matches!(modex, Mode::RemoteReplica) && is_sync && syncx == enable_sync()
-                        {
-                            let client_guard = safe_lock_arc(&client, "query_args sync")?;
-                            let _ = client_guard.db.sync().await;
-                        }
-                    }
+                    // NOTE: LibSQL automatically syncs writes to remote for embedded replicas.
+                    // According to Turso docs, "writes are sent to the remote primary database by default,
+                    // then the local database updates automatically once the remote write succeeds."
+                    // We do NOT need to manually call sync() after writes - that would be redundant
+                    // and cause performance issues. Manual sync via do_sync() is still available for
+                    // explicit user control.
 
                     Ok(result)
                 }
@@ -672,8 +690,8 @@ pub fn detect_query_type(query: &str) -> QueryType {
 fn execute_batch<'a>(
     env: Env<'a>,
     conn_id: &str,
-    mode: Atom,
-    syncx: Atom,
+    _mode: Atom,
+    _syncx: Atom,
     statements: Vec<Term<'a>>,
 ) -> Result<NifResult<Term<'a>>, rustler::Error> {
     let conn_map = safe_lock(&CONNECTION_REGISTRY, "execute_batch conn_map")?;
@@ -722,26 +740,8 @@ fn execute_batch<'a>(
             }
 
             // Check if we need to sync
-            let needs_sync = batch_stmts.iter().any(|(sql, _)| {
-                matches!(
-                    detect_query_type(sql),
-                    QueryType::Insert
-                        | QueryType::Update
-                        | QueryType::Delete
-                        | QueryType::Create
-                        | QueryType::Drop
-                        | QueryType::Alter
-                )
-            });
-
-            if needs_sync {
-                if let Some(modex) = decode_mode(mode) {
-                    if matches!(modex, Mode::RemoteReplica) && syncx == enable_sync() {
-                        let client_guard = safe_lock_arc(&client, "execute_batch sync")?;
-                        let _ = client_guard.db.sync().await;
-                    }
-                }
-            }
+            // NOTE: LibSQL automatically syncs writes to remote for embedded replicas.
+            // No manual sync needed here.
 
             Ok(Ok(all_results.encode(env)))
         });
@@ -756,8 +756,8 @@ fn execute_batch<'a>(
 fn execute_transactional_batch<'a>(
     env: Env<'a>,
     conn_id: &str,
-    mode: Atom,
-    syncx: Atom,
+    _mode: Atom,
+    _syncx: Atom,
     statements: Vec<Term<'a>>,
 ) -> Result<NifResult<Term<'a>>, rustler::Error> {
     let conn_map = safe_lock(&CONNECTION_REGISTRY, "execute_transactional_batch conn_map")?;
@@ -819,27 +819,8 @@ fn execute_transactional_batch<'a>(
                 .map_err(|e| rustler::Error::Term(Box::new(format!("Commit failed: {}", e))))?;
 
             // Sync if needed
-            let needs_sync = batch_stmts.iter().any(|(sql, _)| {
-                matches!(
-                    detect_query_type(sql),
-                    QueryType::Insert
-                        | QueryType::Update
-                        | QueryType::Delete
-                        | QueryType::Create
-                        | QueryType::Drop
-                        | QueryType::Alter
-                )
-            });
-
-            if needs_sync {
-                if let Some(modex) = decode_mode(mode) {
-                    if matches!(modex, Mode::RemoteReplica) && syncx == enable_sync() {
-                        let client_guard =
-                            safe_lock_arc(&client, "execute_transactional_batch sync")?;
-                        let _ = client_guard.db.sync().await;
-                    }
-                }
-            }
+            // NOTE: LibSQL automatically syncs writes to remote for embedded replicas.
+            // No manual sync needed here.
 
             Ok(Ok(all_results.encode(env)))
         });
@@ -963,7 +944,7 @@ fn execute_prepared<'a>(
         .collect::<Result<_, _>>()
         .map_err(|e| rustler::Error::Term(Box::new(e)))?;
 
-    let is_sync = !matches!(detect_query_type(sql_hint), QueryType::Select);
+    let _is_sync = !matches!(detect_query_type(sql_hint), QueryType::Select);
 
     drop(stmt_registry); // Release lock before async operation
     drop(conn_map); // Release lock before async operation
@@ -983,15 +964,8 @@ fn execute_prepared<'a>(
             .await
             .map_err(|e| rustler::Error::Term(Box::new(format!("Execute failed: {}", e))))?;
 
-        // Auto-sync if needed
-        if is_sync {
-            if let Some(modex) = decode_mode(mode) {
-                if matches!(modex, Mode::RemoteReplica) && syncx == enable_sync() {
-                    let client_guard = safe_lock_arc(&client, "execute_prepared sync")?;
-                    let _ = client_guard.db.sync().await;
-                }
-            }
-        }
+        // NOTE: LibSQL automatically syncs writes to remote for embedded replicas.
+        // No manual sync needed here.
 
         Ok(affected as u64)
     });

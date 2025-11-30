@@ -980,6 +980,9 @@ defmodule TursoRemoteTest do
           sync: true
         )
 
+      # Manually sync to pull down latest data from remote
+      _ = EctoLibSql.Native.sync(replica1_again)
+
       # Wait for sync to pull down data from remote
       # We need to verify the data exists, not just that the table exists
       # Try multiple times to give sync time to complete
