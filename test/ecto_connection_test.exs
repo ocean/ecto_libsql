@@ -99,22 +99,23 @@ defmodule Ecto.Adapters.LibSql.ConnectionTest do
       assert sql == ~s(ALTER TABLE "users" ADD COLUMN "bio" TEXT)
     end
 
-    test "raises on column modification" do
+    test "modifies column with ALTER COLUMN (libSQL extension)" do
       table = %Table{name: :users, prefix: nil}
-      changes = [{:modify, :age, :string, []}]
+      changes = [{:modify, :age, :string, [null: false]}]
 
-      assert_raise ArgumentError, ~r/ALTER COLUMN is not supported/, fn ->
-        Connection.execute_ddl({:alter, table, changes})
-      end
+      [sql] = Connection.execute_ddl({:alter, table, changes})
+
+      assert sql =~ ~s[ALTER TABLE "users" ALTER COLUMN]
+      assert sql =~ ~s["age" TO "age" TEXT NOT NULL]
     end
 
-    test "raises on column removal" do
+    test "removes column with DROP COLUMN (libSQL/SQLite 3.35.0+)" do
       table = %Table{name: :users, prefix: nil}
       changes = [{:remove, :age, :integer, []}]
 
-      assert_raise ArgumentError, ~r/DROP COLUMN/, fn ->
-        Connection.execute_ddl({:alter, table, changes})
-      end
+      [sql] = Connection.execute_ddl({:alter, table, changes})
+
+      assert sql == ~s[ALTER TABLE "users" DROP COLUMN "age"]
     end
 
     test "creates index" do

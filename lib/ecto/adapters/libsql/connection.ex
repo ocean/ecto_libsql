@@ -142,18 +142,32 @@ defmodule Ecto.Adapters.LibSql.Connection do
         column_def = column_definition({:add, name, type, opts}, false)
         ["ALTER TABLE #{table_name} ADD COLUMN #{column_def}"]
 
-      {:modify, _name, _type, _opts} ->
-        raise ArgumentError,
-              "ALTER COLUMN is not supported by SQLite. " <>
-                "You need to recreate the table instead."
+      {:modify, name, type, opts} ->
+        # libSQL supports ALTER TABLE ALTER COLUMN for modifying column attributes.
+        # This is a libSQL extension beyond standard SQLite.
+        # Supported modifications: type affinity, NOT NULL, CHECK, DEFAULT, and REFERENCES.
+        # Note: Existing rows are not revalidated; constraints only apply to new/updated data.
+        column_def = alter_column_definition(name, type, opts)
+        ["ALTER TABLE #{table_name} ALTER COLUMN #{column_def}"]
 
       {:remove, name, _type, _opts} ->
-        # SQLite doesn't support DROP COLUMN directly (before 3.35.0).
-        # For now, raise an error suggesting table recreation.
-        raise ArgumentError,
-              "DROP COLUMN for #{name} is not supported by older SQLite versions. " <>
-                "You need to recreate the table instead."
+        # libSQL/SQLite 3.35.0+ supports DROP COLUMN.
+        # Limitations: Cannot drop columns that are PRIMARY KEY, have UNIQUE constraint,
+        # or are referenced by other parts of the schema.
+        ["ALTER TABLE #{table_name} DROP COLUMN #{quote_name(name)}"]
     end)
+  end
+
+  defp alter_column_definition(name, %Ecto.Migration.Reference{} = ref, opts) do
+    base_type = column_type(ref.type, [])
+    references = reference_expr(ref)
+    # For ALTER COLUMN, we construct: column_name new_type [constraints] [references].
+    "#{quote_name(name)} TO #{quote_name(name)} #{base_type}#{column_options(opts, false)}#{references}"
+  end
+
+  defp alter_column_definition(name, type, opts) do
+    # For ALTER COLUMN, we construct: column_name TO column_name new_type [constraints].
+    "#{quote_name(name)} TO #{quote_name(name)} #{column_type(type, opts)}#{column_options(opts, false)}"
   end
 
   def execute_ddl({:create, %Ecto.Migration.Index{} = index}) do
