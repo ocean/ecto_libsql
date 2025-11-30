@@ -7,6 +7,7 @@ use rustler::types::atom::nil;
 use rustler::{resource_impl, Atom, Encoder, Env, NifResult, Resource, Term};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
+use std::time::Duration;
 use tokio::runtime::Runtime;
 use uuid::Uuid;
 
@@ -35,6 +36,30 @@ fn safe_lock_arc<'a, T>(
 
 static TOKIO_RUNTIME: Lazy<Runtime> =
     Lazy::new(|| Runtime::new().expect("Failed to create Tokio runtime"));
+
+// Default timeout for sync operations (in seconds).
+const DEFAULT_SYNC_TIMEOUT_SECS: u64 = 120;
+
+// Helper function to perform sync with timeout.
+async fn sync_with_timeout(
+    client: &Arc<Mutex<LibSQLConn>>,
+    timeout_secs: u64,
+) -> Result<(), String> {
+    let timeout = Duration::from_secs(timeout_secs);
+
+    tokio::time::timeout(timeout, async {
+        let client_guard =
+            safe_lock_arc(client, "sync_with_timeout client").map_err(|e| format!("{:?}", e))?;
+        client_guard
+            .db
+            .sync()
+            .await
+            .map_err(|e| format!("Sync error: {}", e))?;
+        Ok::<_, String>(())
+    })
+    .await
+    .map_err(|_| format!("Sync timeout after {} seconds", timeout_secs))?
+}
 
 #[resource_impl]
 impl Resource for LibSQLConn {}
@@ -243,13 +268,7 @@ pub fn do_sync(conn_id: &str, mode: Atom) -> NifResult<(rustler::Atom, String)> 
     let client_clone = client.clone();
     let result = TOKIO_RUNTIME.block_on(async {
         if matches!(decode_mode(mode), Some(Mode::RemoteReplica)) {
-            let client_guard =
-                safe_lock_arc(&client_clone, "do_sync client").map_err(|e| format!("{:?}", e))?;
-            client_guard
-                .db
-                .sync()
-                .await
-                .map_err(|e| format!("Sync error: {}", e))?;
+            sync_with_timeout(&client_clone, DEFAULT_SYNC_TIMEOUT_SECS).await?;
         }
 
         Ok::<_, String>(())
@@ -290,13 +309,7 @@ pub fn commit_or_rollback_transaction(
                 .map_err(|e| format!("Rollback error: {}", e))?;
         }
         if matches!(decode_mode(mode), Some(Mode::RemoteReplica)) && syncx == enable_sync() {
-            let client_guard = safe_lock_arc(&client, "commit_or_rollback client")
-                .map_err(|e| format!("{:?}", e))?;
-            client_guard
-                .db
-                .sync()
-                .await
-                .map_err(|e| format!("Sync error: {}", e))?;
+            sync_with_timeout(&client, DEFAULT_SYNC_TIMEOUT_SECS).await?;
         }
         //else
         //no sync
@@ -488,8 +501,7 @@ fn query_args<'a>(
                         // if remote replica and a write query then sync
                         if matches!(modex, Mode::RemoteReplica) && is_sync && syncx == enable_sync()
                         {
-                            let client_guard = safe_lock_arc(&client, "query_args sync")?;
-                            let _ = client_guard.db.sync().await;
+                            let _ = sync_with_timeout(&client, DEFAULT_SYNC_TIMEOUT_SECS).await;
                         }
                     }
 
@@ -737,8 +749,7 @@ fn execute_batch<'a>(
             if needs_sync {
                 if let Some(modex) = decode_mode(mode) {
                     if matches!(modex, Mode::RemoteReplica) && syncx == enable_sync() {
-                        let client_guard = safe_lock_arc(&client, "execute_batch sync")?;
-                        let _ = client_guard.db.sync().await;
+                        let _ = sync_with_timeout(&client, DEFAULT_SYNC_TIMEOUT_SECS).await;
                     }
                 }
             }
@@ -834,9 +845,7 @@ fn execute_transactional_batch<'a>(
             if needs_sync {
                 if let Some(modex) = decode_mode(mode) {
                     if matches!(modex, Mode::RemoteReplica) && syncx == enable_sync() {
-                        let client_guard =
-                            safe_lock_arc(&client, "execute_transactional_batch sync")?;
-                        let _ = client_guard.db.sync().await;
+                        let _ = sync_with_timeout(&client, DEFAULT_SYNC_TIMEOUT_SECS).await;
                     }
                 }
             }
@@ -987,8 +996,7 @@ fn execute_prepared<'a>(
         if is_sync {
             if let Some(modex) = decode_mode(mode) {
                 if matches!(modex, Mode::RemoteReplica) && syncx == enable_sync() {
-                    let client_guard = safe_lock_arc(&client, "execute_prepared sync")?;
-                    let _ = client_guard.db.sync().await;
+                    let _ = sync_with_timeout(&client, DEFAULT_SYNC_TIMEOUT_SECS).await;
                 }
             }
         }

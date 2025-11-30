@@ -212,6 +212,7 @@ defmodule Ecto.Adapters.LibSql.Connection do
   defp alter_column_definition(name, %Ecto.Migration.Reference{} = ref, opts) do
     base_type = column_type(ref.type, [])
     references = reference_expr(ref)
+
     # For ALTER COLUMN, we construct: column_name TO column_name new_type [constraints] [references].
     "#{quote_name(name)} TO #{quote_name(name)} #{base_type}#{column_options(opts, false)}#{references}"
   end
