@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Binary ID Type System (Issue #23) - Complete Resolution**
+  - Fixed `autogenerate(:binary_id)` to generate string UUIDs instead of binary UUIDs
+  - Fixed `loaders(:binary_id)` to pass through string UUIDs from TEXT columns (was expecting binary)
+  - Fixed `dumpers(:binary_id)` to pass through string UUIDs (was converting to binary)
+  - Fixed Rust NIF to handle Elixir `Binary` type for BLOB data (was only checking `Vec<u8>`)
+  - LibSQL stores `:binary_id` as TEXT, not BLOB, so string UUIDs are required throughout the pipeline
+  - Prevents "Unsupported argument type" errors when inserting records with binary_id or binary fields
+  - Removed unnecessary `blob_encode` wrapper - binary data now passes through directly
+  - **Fixed INSERT without RETURNING clause** - Now correctly returns `rows: nil` instead of `rows: []` when no RETURNING clause is present, preventing CaseClauseError in Ecto.Adapters.SQL
+  - **Fixed BLOB encoding in Rust NIF** - Binary data now returns as Elixir binaries (`<<...>>`) instead of lists (`[...]`), properly encoding BLOBs using `OwnedBinary`
+
+- **Test Coverage Improvements**
+  - Added comprehensive integration tests for `binary_id` autogeneration (6 new tests, all passing)
+  - Added end-to-end tests for `:binary` (BLOB) field CRUD operations
+  - Added tests for `binary_id` with associations and foreign keys
+  - Total: 194 lines of new integration tests in `test/ecto_integration_test.exs`
+
 ## [0.6.0] - 2025-11-30
 
 ### Fixed

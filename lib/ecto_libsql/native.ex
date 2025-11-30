@@ -211,10 +211,10 @@ defmodule EctoLibSql.Native do
             num_rows
           end
 
-        # For UPDATE/DELETE without RETURNING, columns and rows will be empty
+        # For INSERT/UPDATE/DELETE without RETURNING, columns and rows will be empty
         # Set them to nil to match Ecto's expectations
         {columns, rows} =
-          if command in [:update, :delete] and columns == [] and rows == [] do
+          if command in [:insert, :update, :delete] and columns == [] and rows == [] do
             {nil, nil}
           else
             {columns, rows}

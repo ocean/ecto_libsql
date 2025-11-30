@@ -4,7 +4,7 @@ use libsql::{Builder, Cipher, EncryptionConfig, Rows, Transaction, TransactionBe
 use once_cell::sync::Lazy;
 use rustler::atoms;
 use rustler::types::atom::nil;
-use rustler::{resource_impl, Atom, Binary, Encoder, Env, NifResult, Resource, Term};
+use rustler::{resource_impl, Atom, Binary, Encoder, Env, NifResult, OwnedBinary, Resource, Term};
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
@@ -611,7 +611,13 @@ async fn collect_rows<'a>(env: Env<'a>, mut rows: Rows) -> Result<Term<'a>, rust
                 Ok(Value::Text(val)) => val.encode(env),
                 Ok(Value::Integer(val)) => val.encode(env),
                 Ok(Value::Real(val)) => val.encode(env),
-                Ok(Value::Blob(val)) => val.encode(env),
+                Ok(Value::Blob(val)) => match OwnedBinary::new(val.len()) {
+                    Some(mut owned) => {
+                        owned.as_mut_slice().copy_from_slice(&val);
+                        Binary::from_owned(owned, env).encode(env)
+                    }
+                    None => nil().encode(env),
+                },
                 Ok(Value::Null) => nil().encode(env),
                 Err(_) => nil().encode(env),
             };
@@ -634,29 +640,6 @@ async fn collect_rows<'a>(env: Env<'a>, mut rows: Rows) -> Result<Term<'a>, rust
     );
 
     Ok(result_map.encode(env))
-}
-
-pub fn decode_term_to_valuex(term: Term) -> Result<Value, String> {
-    if let Ok(v) = term.decode::<i64>() {
-        Ok(Value::Integer(v))
-    } else if let Ok(v) = term.decode::<bool>() {
-        Ok(Value::Integer(if v { 1 } else { 0 }))
-    } else if let Ok(v) = term.decode::<String>() {
-        Ok(Value::Text(v))
-    } else if let Ok(v) = term.decode::<Vec<u8>>() {
-        //Ok(Value::Blob(v))
-        //
-        if v.len() == 16 {
-            match Uuid::from_slice(&v) {
-                Ok(uuid) => Ok(Value::Text(uuid.to_string())),
-                Err(_) => Ok(Value::Blob(v)), // fallback
-            }
-        } else {
-            Ok(Value::Blob(v))
-        }
-    } else {
-        Err(format!("Unsupported argument type: {:?}", term))
-    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -1287,7 +1270,13 @@ fn fetch_cursor<'a>(env: Env<'a>, cursor_id: &str, max_rows: usize) -> NifResult
                     Value::Text(s) => s.encode(env),
                     Value::Integer(i) => i.encode(env),
                     Value::Real(f) => f.encode(env),
-                    Value::Blob(b) => b.encode(env),
+                    Value::Blob(b) => match OwnedBinary::new(b.len()) {
+                        Some(mut owned) => {
+                            owned.as_mut_slice().copy_from_slice(b);
+                            Binary::from_owned(owned, env).encode(env)
+                        }
+                        None => nil().encode(env),
+                    },
                     Value::Null => nil().encode(env),
                 })
                 .collect();

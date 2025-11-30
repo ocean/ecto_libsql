@@ -128,10 +128,10 @@ defmodule Ecto.Adapters.LibSqlTest do
       assert result == "10:30:00"
     end
 
-    test "dumps binary with blob wrapper" do
-      dumper = LibSql.dumpers(:binary, :binary) |> List.last()
-      {:ok, result} = dumper.(<<1, 2, 3>>)
-      assert {:blob, <<1, 2, 3>>} == result
+    test "dumps binary as-is (no wrapper needed)" do
+      dumpers = LibSql.dumpers(:binary, :binary)
+      # Should just be [type] - binary passes through directly to Rust
+      assert dumpers == [:binary]
     end
   end
 
