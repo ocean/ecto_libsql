@@ -269,6 +269,144 @@ defmodule Ecto.Adapters.LibSql.ConnectionTest do
     end
   end
 
+  describe "foreign key references" do
+    test "creates table with references using :id type" do
+      table = %Table{name: :posts, prefix: nil}
+
+      columns = [
+        {:add, :id, :id, [primary_key: true]},
+        {:add, :user_id, %Ecto.Migration.Reference{table: :users, column: :id, type: :id}, []}
+      ]
+
+      [sql] = Connection.execute_ddl({:create, table, columns})
+
+      assert sql =~ ~s("posts")
+      assert sql =~ ~s["user_id" INTEGER REFERENCES "users"("id")]
+    end
+
+    test "creates table with references using :binary_id type" do
+      table = %Table{name: :places_place_types, prefix: nil}
+
+      columns = [
+        {:add, :place_id,
+         %Ecto.Migration.Reference{
+           table: :places,
+           column: :id,
+           type: :binary_id,
+           on_delete: :delete_all
+         }, [null: false]},
+        {:add, :place_type_id,
+         %Ecto.Migration.Reference{
+           table: :place_types,
+           column: :id,
+           type: :binary_id,
+           on_delete: :delete_all
+         }, [null: false]}
+      ]
+
+      [sql] = Connection.execute_ddl({:create, table, columns})
+
+      assert sql =~ ~s["place_id" TEXT REFERENCES "places"("id") ON DELETE CASCADE NOT NULL]
+
+      assert sql =~
+               ~s["place_type_id" TEXT REFERENCES "place_types"("id") ON DELETE CASCADE NOT NULL]
+    end
+
+    test "creates table with reference using on_delete :nilify_all" do
+      table = %Table{name: :posts, prefix: nil}
+
+      columns = [
+        {:add, :author_id,
+         %Ecto.Migration.Reference{
+           table: :users,
+           column: :id,
+           type: :binary_id,
+           on_delete: :nilify_all
+         }, []}
+      ]
+
+      [sql] = Connection.execute_ddl({:create, table, columns})
+
+      assert sql =~ ~s["author_id" TEXT REFERENCES "users"("id") ON DELETE SET NULL]
+    end
+
+    test "creates table with reference using on_delete :restrict" do
+      table = %Table{name: :posts, prefix: nil}
+
+      columns = [
+        {:add, :category_id,
+         %Ecto.Migration.Reference{
+           table: :categories,
+           column: :id,
+           type: :integer,
+           on_delete: :restrict
+         }, []}
+      ]
+
+      [sql] = Connection.execute_ddl({:create, table, columns})
+
+      assert sql =~ ~s["category_id" INTEGER REFERENCES "categories"("id") ON DELETE RESTRICT]
+    end
+
+    test "creates table with reference using on_update :update_all" do
+      table = %Table{name: :posts, prefix: nil}
+
+      columns = [
+        {:add, :user_id,
+         %Ecto.Migration.Reference{
+           table: :users,
+           column: :id,
+           type: :integer,
+           on_update: :update_all
+         }, []}
+      ]
+
+      [sql] = Connection.execute_ddl({:create, table, columns})
+
+      assert sql =~ ~s["user_id" INTEGER REFERENCES "users"("id") ON UPDATE CASCADE]
+    end
+
+    test "creates table with reference using both on_delete and on_update" do
+      table = %Table{name: :posts, prefix: nil}
+
+      columns = [
+        {:add, :user_id,
+         %Ecto.Migration.Reference{
+           table: :users,
+           column: :id,
+           type: :integer,
+           on_delete: :delete_all,
+           on_update: :update_all
+         }, []}
+      ]
+
+      [sql] = Connection.execute_ddl({:create, table, columns})
+
+      assert sql =~
+               ~s["user_id" INTEGER REFERENCES "users"("id") ON DELETE CASCADE ON UPDATE CASCADE]
+    end
+
+    test "creates table with reference using default on_delete :nothing" do
+      table = %Table{name: :posts, prefix: nil}
+
+      columns = [
+        {:add, :user_id,
+         %Ecto.Migration.Reference{
+           table: :users,
+           column: :id,
+           type: :integer,
+           on_delete: :nothing
+         }, []}
+      ]
+
+      [sql] = Connection.execute_ddl({:create, table, columns})
+
+      # :nothing should not add any ON DELETE clause.
+      assert sql =~ ~s["user_id" INTEGER REFERENCES "users"("id")]
+      refute sql =~ "ON DELETE"
+    end
+  end
+
   describe "constraint conversion" do
     test "converts UNIQUE constraint errors" do
       error = %{message: "UNIQUE constraint failed: users.email"}

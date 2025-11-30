@@ -110,7 +110,12 @@ defmodule Ecto.Adapters.LibSql.Connection do
     table_name = quote_table(table.prefix, table.name)
     if_not_exists = if command == :create_if_not_exists, do: " IF NOT EXISTS", else: ""
 
-    column_definitions = Enum.map_join(columns, ", ", &column_definition/1)
+    # Check if we have a composite primary key.
+    composite_pk = composite_primary_key?(columns)
+
+    column_definitions =
+      Enum.map_join(columns, ", ", &column_definition(&1, composite_pk))
+
     table_options = table_options(table, columns)
 
     [
@@ -133,7 +138,8 @@ defmodule Ecto.Adapters.LibSql.Connection do
 
     Enum.flat_map(changes, fn
       {:add, name, type, opts} ->
-        column_def = column_definition({:add, name, type, opts})
+        # When altering, we're only adding one column, so no composite PK.
+        column_def = column_definition({:add, name, type, opts}, false)
         ["ALTER TABLE #{table_name} ADD COLUMN #{column_def}"]
 
       {:modify, _name, _type, _opts} ->
@@ -142,8 +148,8 @@ defmodule Ecto.Adapters.LibSql.Connection do
                 "You need to recreate the table instead."
 
       {:remove, name, _type, _opts} ->
-        # SQLite doesn't support DROP COLUMN directly (before 3.35.0)
-        # For now, raise an error suggesting table recreation
+        # SQLite doesn't support DROP COLUMN directly (before 3.35.0).
+        # For now, raise an error suggesting table recreation.
         raise ArgumentError,
               "DROP COLUMN for #{name} is not supported by older SQLite versions. " <>
                 "You need to recreate the table instead."
@@ -201,9 +207,43 @@ defmodule Ecto.Adapters.LibSql.Connection do
 
   ## DDL Helpers
 
-  defp column_definition({:add, name, type, opts}) do
-    "#{quote_name(name)} #{column_type(type, opts)}#{column_options(opts)}"
+  defp composite_primary_key?(columns) do
+    pk_count =
+      Enum.count(columns, fn {:add, _name, _type, opts} ->
+        Keyword.get(opts, :primary_key, false)
+      end)
+
+    pk_count > 1
   end
+
+  defp column_definition({:add, name, %Ecto.Migration.Reference{} = ref, opts}, composite_pk) do
+    base_type = column_type(ref.type, [])
+    references = reference_expr(ref)
+    "#{quote_name(name)} #{base_type}#{references}#{column_options(opts, composite_pk)}"
+  end
+
+  defp column_definition({:add, name, type, opts}, composite_pk) do
+    "#{quote_name(name)} #{column_type(type, opts)}#{column_options(opts, composite_pk)}"
+  end
+
+  defp reference_expr(%Ecto.Migration.Reference{} = ref) do
+    referenced_table = quote_name(ref.table)
+    referenced_column = quote_name(ref.column || :id)
+
+    " REFERENCES #{referenced_table}(#{referenced_column})" <>
+      reference_on_delete(ref.on_delete) <>
+      reference_on_update(ref.on_update)
+  end
+
+  defp reference_on_delete(:nothing), do: ""
+  defp reference_on_delete(:delete_all), do: " ON DELETE CASCADE"
+  defp reference_on_delete(:nilify_all), do: " ON DELETE SET NULL"
+  defp reference_on_delete(:restrict), do: " ON DELETE RESTRICT"
+
+  defp reference_on_update(:nothing), do: ""
+  defp reference_on_update(:update_all), do: " ON UPDATE CASCADE"
+  defp reference_on_update(:nilify_all), do: " ON UPDATE SET NULL"
+  defp reference_on_update(:restrict), do: " ON UPDATE RESTRICT"
 
   defp column_type(:id, _opts), do: "INTEGER"
   defp column_type(:binary_id, _opts), do: "TEXT"
@@ -240,10 +280,15 @@ defmodule Ecto.Adapters.LibSql.Connection do
     end
   end
 
-  defp column_options(opts) do
+  defp column_options(opts, composite_pk) do
     default = column_default(Keyword.get(opts, :default))
     null = if Keyword.get(opts, :null) == false, do: " NOT NULL", else: ""
-    pk = if Keyword.get(opts, :primary_key), do: " PRIMARY KEY", else: ""
+
+    # Only add PRIMARY KEY to individual column if it's not part of a composite key.
+    pk =
+      if Keyword.get(opts, :primary_key) && !composite_pk,
+        do: " PRIMARY KEY",
+        else: ""
 
     "#{pk}#{null}#{default}"
   end

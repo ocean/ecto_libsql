@@ -22,7 +22,7 @@ defmodule TursoRemoteTest do
   @moduletag skip: is_nil(@turso_uri) || is_nil(@turso_token)
 
   setup_all do
-    unless is_nil(@turso_uri) || is_nil(@turso_token) do
+    if !(is_nil(@turso_uri) || is_nil(@turso_token)) do
       IO.puts("\n[TURSO TESTS] Running remote Turso database tests")
       IO.puts("[TURSO TESTS] Using database: #{@turso_uri}")
     end
