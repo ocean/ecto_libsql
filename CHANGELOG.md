@@ -16,8 +16,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added support for custom field replacement with `on_conflict: {fields, _, targets}`
   - Fixed composite unique index constraint handling - now correctly generates `ON CONFLICT (col1, col2) DO NOTHING/UPDATE`
   - Improved constraint name extraction from SQLite error messages to handle composite constraints
-  - Added 8 comprehensive tests for various upsert scenarios
+  - Added 8 comprehensive connection tests for various upsert scenarios
   - Added 154 lines of integration tests demonstrating real-world usage with composite unique indexes
+  - Fixed test setup to ensure clean database state by dropping and recreating tables before each test
 
 - **Binary ID Type System (Issue #23) - Complete Resolution**
   - Fixed `autogenerate(:binary_id)` to generate string UUIDs instead of binary UUIDs
