@@ -429,16 +429,44 @@ This updated analysis is based on:
    - [libsql/src/database.rs](https://github.com/tursodatabase/libsql/blob/main/libsql/src/database.rs)
    - [libsql/src/rows.rs](https://github.com/tursodatabase/libsql/blob/main/libsql/src/rows.rs)
    - [libsql/src/transaction.rs](https://github.com/tursodatabase/libsql/blob/main/libsql/src/transaction.rs)
+   - [libsql/src/params.rs](https://github.com/tursodatabase/libsql/blob/main/libsql/src/params.rs)
 
 2. **Official Documentation**:
    - [libsql Rust Crate Documentation](https://docs.rs/libsql)
    - [Connection struct docs](https://docs.rs/libsql/latest/libsql/struct.Connection.html)
    - [Turso SQLite Compatibility](https://github.com/tursodatabase/turso/blob/main/COMPAT.md)
+   - [Turso Rust Bindings README](https://github.com/tursodatabase/turso/blob/main/bindings/rust/README.md)
 
 3. **ecto_libsql v0.6.0**:
    - [Release Notes](https://github.com/ocean/ecto_libsql/releases/tag/0.6.0)
    - Current implementation review (Nov 30, 2025)
    - CHANGELOG.md analysis
+
+### Additional Resources (Blocked - Review in Unrestricted Environment)
+
+The following resources were blocked (403 errors) during analysis but should be reviewed:
+
+1. **Turso Rust SDK Reference**:
+   - URL: https://docs.turso.tech/sdk/rust/reference
+   - Contains: Complete Turso-specific features and extensions
+   - Why Important: May have Turso-specific features not in base libsql
+
+2. **libsql Builder Module**:
+   - URL: https://raw.githubusercontent.com/tursodatabase/libsql/main/libsql/src/builder.rs
+   - Contains: Complete Builder API with all configuration options
+   - Why Important: Connection configuration, encryption, sync protocol options
+
+3. **docs.rs Complete libsql Documentation**:
+   - URL: https://docs.rs/libsql/latest/libsql/
+   - Contains: Full API reference with all structs, traits, and methods
+   - Why Important: Comprehensive API coverage we may have missed
+
+4. **libsql-sys Low-Level Bindings**:
+   - URL: https://lib.rs/crates/libsql-sys
+   - Contains: Low-level SQLite FFI bindings
+   - Why Important: May expose additional SQLite features
+
+**Action Item**: Review these URLs in an unrestricted environment to ensure complete API coverage.
 
 ---
 
