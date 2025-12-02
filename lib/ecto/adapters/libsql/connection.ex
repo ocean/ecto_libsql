@@ -92,7 +92,19 @@ defmodule Ecto.Adapters.LibSql.Connection do
     #   "SQLite failure: `UNIQUE constraint failed: users.email`" -> "email"
     #   "UNIQUE constraint failed: users.email" -> "email"
     #   "NOT NULL constraint failed: users.name" -> "name"
-    # Note: Return as string, not atom, because Ecto changesets use string constraint names
+    #   "UNIQUE constraint failed: users.slug, users.parent_slug" -> "slug"
+    #
+    # Note: SQLite only reports column names, not index names, even for composite unique indexes.
+    # For composite constraints, it may report multiple columns separated by commas.
+    # We extract all column names and return the first one, as Ecto will use this to match
+    # against constraint names defined in changesets.
+    #
+    # Important: For composite unique indexes, users should define their constraint in the
+    # changeset using either:
+    #   - The first column name (e.g., "slug")
+    #   - The full index name if they need more specificity
+    #
+    # Return as string, not atom, because Ecto changesets use string constraint names
     case Regex.run(~r/constraint failed: (?:\w+\.)?(\w+)/, message) do
       [_, name] -> name
       _ -> "unknown"
@@ -419,8 +431,8 @@ defmodule Ecto.Adapters.LibSql.Connection do
   end
 
   @impl true
-  def insert(prefix, table, header, rows, _on_conflict, returning, _placeholders) do
-    fields = intersperse_map(header, ?,, &quote_name/1)
+  def insert(prefix, table, header, rows, on_conflict, returning, placeholders) do
+    fields = intersperse_map(header, ", ", &quote_name/1)
 
     values =
       if rows == [] do
@@ -429,15 +441,79 @@ defmodule Ecto.Adapters.LibSql.Connection do
         [" VALUES ", encode_values(rows)]
       end
 
-    ["INSERT INTO ", quote_table(prefix, table), " (", fields, ")", values | returning(returning)]
+    [
+      "INSERT",
+      insert_as(on_conflict),
+      " INTO ",
+      quote_table(prefix, table),
+      " (",
+      fields,
+      ")",
+      values,
+      on_conflict(on_conflict, header, placeholders) | returning(returning)
+    ]
   end
 
   defp encode_values(rows) do
     rows
     |> Enum.map(fn row ->
-      ["(", intersperse_map(row, ?,, fn _ -> "?" end), ")"]
+      ["(", intersperse_map(row, ", ", fn _ -> "?" end), ")"]
     end)
     |> Enum.intersperse(", ")
+  end
+
+  # Helper for INSERT OR ... syntax (not used for now, keeping for SQLite REPLACE compatibility)
+  defp insert_as(_on_conflict), do: []
+
+  # Generate ON CONFLICT clause for upsert operations
+  # Pattern: {:raise, conflict_target, opts}
+  defp on_conflict({:raise, _, _}, _header, _placeholders), do: []
+
+  # Pattern: {:nothing, _, conflict_target}
+  defp on_conflict({:nothing, _, targets}, _header, _placeholders)
+       when is_list(targets) and length(targets) > 0 do
+    [" ON CONFLICT ", conflict_target(targets), "DO NOTHING"]
+  end
+
+  defp on_conflict({:nothing, _, []}, _header, _placeholders) do
+    " ON CONFLICT DO NOTHING"
+  end
+
+  # Pattern: {:replace_all, _, conflict_target}
+  defp on_conflict({:replace_all, _, {:constraint, _}}, _header, _placeholders) do
+    raise ArgumentError, "Upsert in LibSQL does not support ON CONSTRAINT"
+  end
+
+  defp on_conflict({:replace_all, _, []}, _header, _placeholders) do
+    raise ArgumentError, "Upsert in LibSQL requires :conflict_target"
+  end
+
+  defp on_conflict({:replace_all, _, targets}, header, _placeholders) when is_list(targets) do
+    [" ON CONFLICT ", conflict_target(targets), "DO ", replace(header)]
+  end
+
+  # Pattern: {fields_list, _, conflict_target} - for custom field replacement
+  defp on_conflict({fields, _, targets}, _header, _placeholders)
+       when is_list(fields) and is_list(targets) and length(targets) > 0 do
+    [" ON CONFLICT ", conflict_target(targets), "DO ", replace(fields)]
+  end
+
+  # Fallback for other on_conflict values (including plain :raise, etc.)
+  defp on_conflict(_on_conflict, _header, _placeholders), do: []
+
+  defp conflict_target([]), do: []
+
+  defp conflict_target(targets) do
+    ["(", intersperse_map(targets, ", ", &quote_name/1), ") "]
+  end
+
+  defp replace(fields) do
+    ["UPDATE SET " | intersperse_map(fields, ", ", &replace_field/1)]
+  end
+
+  defp replace_field(field) do
+    quoted = quote_name(field)
+    [quoted, " = ", "excluded.", quoted]
   end
 
   @impl true

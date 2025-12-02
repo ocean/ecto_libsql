@@ -667,6 +667,165 @@ defmodule Ecto.Integration.EctoLibSqlTest do
     end
   end
 
+  describe "on_conflict with composite unique index" do
+    # This test reproduces the bug report scenario
+    defmodule Location do
+      use Ecto.Schema
+      import Ecto.Changeset
+
+      schema "locations" do
+        field(:slug, :string)
+        field(:parent_slug, :string)
+        field(:name, :string)
+
+        timestamps()
+      end
+
+      def changeset(location, attrs) do
+        location
+        |> cast(attrs, [:slug, :parent_slug, :name])
+        |> validate_required([:slug, :name])
+        |> unique_constraint([:slug, :parent_slug], name: :locations_slug_parent_index)
+      end
+    end
+
+    setup do
+      # Drop index and table to ensure clean state
+      Ecto.Adapters.SQL.query!(TestRepo, "DROP INDEX IF EXISTS locations_slug_parent_index")
+      Ecto.Adapters.SQL.query!(TestRepo, "DROP TABLE IF EXISTS locations")
+
+      # Create table with composite unique index
+      Ecto.Adapters.SQL.query!(TestRepo, """
+      CREATE TABLE locations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        slug TEXT NOT NULL,
+        parent_slug TEXT,
+        name TEXT NOT NULL,
+        inserted_at DATETIME,
+        updated_at DATETIME
+      )
+      """)
+
+      Ecto.Adapters.SQL.query!(
+        TestRepo,
+        "CREATE UNIQUE INDEX IF NOT EXISTS locations_slug_parent_index ON locations (slug, parent_slug)"
+      )
+
+      on_exit(fn ->
+        Ecto.Adapters.SQL.query!(TestRepo, "DROP INDEX IF EXISTS locations_slug_parent_index")
+        Ecto.Adapters.SQL.query!(TestRepo, "DROP TABLE IF EXISTS locations")
+      end)
+
+      :ok
+    end
+
+    test "insert with on_conflict: :nothing on composite unique index silently ignores duplicates" do
+      # First insert - should succeed
+      changeset1 =
+        %Location{}
+        |> Location.changeset(%{slug: "sydney", parent_slug: "au", name: "Sydney"})
+
+      {:ok, location1} =
+        TestRepo.insert(changeset1,
+          on_conflict: :nothing,
+          conflict_target: [:slug, :parent_slug]
+        )
+
+      assert location1.id != nil
+      assert location1.slug == "sydney"
+      assert location1.parent_slug == "au"
+
+      # Second insert with same slug and parent_slug - should be ignored, not raise
+      changeset2 =
+        %Location{}
+        |> Location.changeset(%{slug: "sydney", parent_slug: "au", name: "Sydney Updated"})
+
+      {:ok, _location2} =
+        TestRepo.insert(changeset2,
+          on_conflict: :nothing,
+          conflict_target: [:slug, :parent_slug]
+        )
+
+      # The insert returns a struct but without ID since it was ignored
+      # Query to verify only one record exists
+      count =
+        Ecto.Adapters.SQL.query!(
+          TestRepo,
+          "SELECT COUNT(*) FROM locations WHERE slug = ? AND parent_slug = ?",
+          ["sydney", "au"]
+        )
+
+      assert [[1]] = count.rows
+    end
+
+    test "insert with on_conflict: :replace_all on composite unique index updates existing record" do
+      # First insert
+      changeset1 =
+        %Location{}
+        |> Location.changeset(%{slug: "melbourne", parent_slug: "au", name: "Melbourne"})
+
+      {:ok, _location1} =
+        TestRepo.insert(changeset1,
+          on_conflict: :replace_all,
+          conflict_target: [:slug, :parent_slug]
+        )
+
+      # Second insert with same slug and parent_slug - should update
+      changeset2 =
+        %Location{}
+        |> Location.changeset(%{
+          slug: "melbourne",
+          parent_slug: "au",
+          name: "Melbourne Updated"
+        })
+
+      {:ok, _location2} =
+        TestRepo.insert(changeset2,
+          on_conflict: :replace_all,
+          conflict_target: [:slug, :parent_slug]
+        )
+
+      # Query to verify name was updated
+      result =
+        Ecto.Adapters.SQL.query!(
+          TestRepo,
+          "SELECT name FROM locations WHERE slug = ? AND parent_slug = ?",
+          ["melbourne", "au"]
+        )
+
+      assert [["Melbourne Updated"]] = result.rows
+    end
+
+    test "different parent_slug allows duplicate slug" do
+      # Insert with parent_slug "au"
+      changeset1 =
+        %Location{}
+        |> Location.changeset(%{slug: "portland", parent_slug: "au", name: "Portland AU"})
+
+      {:ok, location1} = TestRepo.insert(changeset1)
+      assert location1.id != nil
+
+      # Insert with parent_slug "us" - should succeed as composite key is different
+      changeset2 =
+        %Location{}
+        |> Location.changeset(%{slug: "portland", parent_slug: "us", name: "Portland US"})
+
+      {:ok, location2} = TestRepo.insert(changeset2)
+      assert location2.id != nil
+      assert location2.id != location1.id
+
+      # Verify both records exist
+      count =
+        Ecto.Adapters.SQL.query!(
+          TestRepo,
+          "SELECT COUNT(*) FROM locations WHERE slug = ?",
+          ["portland"]
+        )
+
+      assert [[2]] = count.rows
+    end
+  end
+
   # Helper function to extract errors from changeset
   defp errors_on(changeset) do
     Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->
