@@ -119,6 +119,25 @@ defmodule EctoLibSql.Native do
   @doc false
   def fetch_cursor(_cursor_id, _max_rows), do: :erlang.nif_error(:nif_not_loaded)
 
+  # Phase 1: Critical Production Features (v0.7.0)
+  @doc false
+  def set_busy_timeout(_conn_id, _timeout_ms), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc false
+  def reset_connection(_conn_id), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc false
+  def interrupt_connection(_conn_id), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc false
+  def pragma_query(_conn_id, _pragma_stmt), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc false
+  def execute_batch_native(_conn_id, _sql), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc false
+  def execute_transactional_batch_native(_conn_id, _sql), do: :erlang.nif_error(:nif_not_loaded)
+
   # High-level Elixir helper functions
 
   @doc """
@@ -651,6 +670,166 @@ defmodule EctoLibSql.Native do
           end)
 
         {:ok, parsed_results}
+
+      {:error, message} ->
+        {:error, message}
+    end
+  end
+
+  @doc """
+  Set the busy timeout for the connection.
+
+  This controls how long SQLite waits when a table is locked before returning
+  a SQLITE_BUSY error. By default, SQLite returns immediately when encountering
+  a lock. Setting a timeout allows for better concurrency handling.
+
+  ## Parameters
+    - state: The connection state
+    - timeout_ms: Timeout in milliseconds (default: 5000)
+
+  ## Example
+
+      # Set 5 second timeout (recommended default)
+      :ok = EctoLibSql.Native.busy_timeout(state, 5000)
+
+      # Set 10 second timeout for write-heavy workloads
+      :ok = EctoLibSql.Native.busy_timeout(state, 10_000)
+
+  ## Notes
+
+  - A value of 0 disables the busy handler (immediate SQLITE_BUSY on contention)
+  - Recommended production default is 5000ms (5 seconds)
+  - For write-heavy workloads, consider 10000ms or higher
+
+  """
+  def busy_timeout(%EctoLibSql.State{conn_id: conn_id} = _state, timeout_ms \\ 5000)
+      when is_integer(timeout_ms) and timeout_ms >= 0 do
+    set_busy_timeout(conn_id, timeout_ms)
+  end
+
+  @doc """
+  Reset the connection to a clean state.
+
+  This clears any cached state and resets the connection. Useful for:
+  - Connection pooling (ensuring clean state when returning to pool)
+  - Recovering from errors
+  - Clearing any uncommitted transaction state
+
+  ## Parameters
+    - state: The connection state
+
+  ## Example
+
+      :ok = EctoLibSql.Native.reset(state)
+
+  """
+  def reset(%EctoLibSql.State{conn_id: conn_id} = _state) do
+    reset_connection(conn_id)
+  end
+
+  @doc """
+  Interrupt any ongoing operation on this connection.
+
+  Causes the current database operation to abort and return at the earliest
+  opportunity. Useful for:
+  - Cancelling long-running queries
+  - Implementing query timeouts
+  - Graceful shutdown
+
+  ## Parameters
+    - state: The connection state
+
+  ## Example
+
+      # From another process, cancel a long query
+      :ok = EctoLibSql.Native.interrupt(state)
+
+  ## Notes
+
+  - This is safe to call from any thread/process
+  - The interrupted operation will return an error
+
+  """
+  def interrupt(%EctoLibSql.State{conn_id: conn_id} = _state) do
+    interrupt_connection(conn_id)
+  end
+
+  @doc """
+  Execute multiple SQL statements from a semicolon-separated string.
+
+  Uses LibSQL's native batch execution for optimal performance. This is more
+  efficient than executing statements one-by-one as it reduces round-trips
+  and allows LibSQL to optimize the execution.
+
+  Each statement is executed independently. If one fails, others may still
+  complete.
+
+  ## Parameters
+    - state: The connection state
+    - sql: Semicolon-separated SQL statements
+
+  ## Example
+
+      sql = \"""
+      CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY, name TEXT);
+      INSERT INTO users (name) VALUES ('Alice');
+      INSERT INTO users (name) VALUES ('Bob');
+      SELECT * FROM users;
+      \"""
+
+      {:ok, results} = EctoLibSql.Native.execute_batch_sql(state, sql)
+
+  ## Returns
+
+  A list of results, one for each statement. Each result is either:
+  - A map with columns/rows for SELECT statements
+  - `nil` for statements that don't return data
+
+  """
+  def execute_batch_sql(%EctoLibSql.State{conn_id: conn_id} = _state, sql)
+      when is_binary(sql) do
+    case execute_batch_native(conn_id, sql) do
+      results when is_list(results) ->
+        {:ok, results}
+
+      {:error, message} ->
+        {:error, message}
+    end
+  end
+
+  @doc """
+  Execute multiple SQL statements atomically in a transaction.
+
+  Uses LibSQL's native transactional batch execution. All statements execute
+  within a single transaction - if any statement fails, all changes are
+  rolled back.
+
+  ## Parameters
+    - state: The connection state
+    - sql: Semicolon-separated SQL statements
+
+  ## Example
+
+      sql = \"""
+      UPDATE accounts SET balance = balance - 100 WHERE id = 1;
+      UPDATE accounts SET balance = balance + 100 WHERE id = 2;
+      INSERT INTO transfers (from_id, to_id, amount) VALUES (1, 2, 100);
+      \"""
+
+      {:ok, results} = EctoLibSql.Native.execute_transactional_batch_sql(state, sql)
+
+  ## Notes
+
+  - All statements succeed or all are rolled back
+  - More efficient than manual transaction with multiple queries
+  - Ideal for migrations, data loading, and multi-statement operations
+
+  """
+  def execute_transactional_batch_sql(%EctoLibSql.State{conn_id: conn_id} = _state, sql)
+      when is_binary(sql) do
+    case execute_transactional_batch_native(conn_id, sql) do
+      results when is_list(results) ->
+        {:ok, results}
 
       {:error, message} ->
         {:error, message}
