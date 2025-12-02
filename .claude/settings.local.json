@@ -15,9 +15,18 @@
       "Bash(yamllint:*)",
       "Bash(mix help:*)",
       "Bash(MIX_ENV=test mix clean:*)",
-      "Bash(MIX_ENV=test mix compile:*)"
+      "Bash(MIX_ENV=test mix compile:*)",
+      "Bash(gh issue:*)",
+      "Bash(MIX_ENV=test mix test:*)",
+      "Bash(mix run:*)",
+      "Bash(cargo test:*)",
+      "Bash(cargo build:*)",
+      "Bash(cargo check:*)",
+      "WebFetch(domain:docs.turso.tech)"
     ],
     "deny": [],
     "ask": []
-  }
+  },
+  "enableAllProjectMcpServers": true,
+  "enabledMcpjsonServers": []
 }

@@ -439,4 +439,136 @@ defmodule Ecto.Adapters.LibSql.ConnectionTest do
       assert [] = constraints
     end
   end
+
+  describe "on_conflict insert" do
+    test "generates INSERT with ON CONFLICT DO NOTHING (no target)" do
+      sql =
+        Connection.insert(
+          nil,
+          "users",
+          [:name, :email],
+          [[:name, :email]],
+          {:nothing, [], []},
+          [],
+          []
+        )
+        |> IO.iodata_to_binary()
+
+      assert sql =~ ~s[INSERT INTO "users"]
+      assert sql =~ ~s[("name", "email")]
+      assert sql =~ "VALUES (?, ?)"
+      assert sql =~ "ON CONFLICT DO NOTHING"
+    end
+
+    test "generates INSERT with ON CONFLICT on single column target" do
+      sql =
+        Connection.insert(
+          nil,
+          "users",
+          [:name, :email],
+          [[:name, :email]],
+          {:nothing, nil, [:email]},
+          [],
+          []
+        )
+        |> IO.iodata_to_binary()
+
+      assert sql =~ ~s[INSERT INTO "users"]
+      assert sql =~ ~s[("name", "email")]
+      assert sql =~ "VALUES (?, ?)"
+      assert sql =~ ~s[ON CONFLICT ("email") DO NOTHING]
+    end
+
+    test "generates INSERT with ON CONFLICT on composite unique index" do
+      sql =
+        Connection.insert(
+          nil,
+          "locations",
+          [:slug, :parent_slug, :name],
+          [[:slug, :parent_slug, :name]],
+          {:nothing, nil, [:slug, :parent_slug]},
+          [],
+          []
+        )
+        |> IO.iodata_to_binary()
+
+      assert sql =~ ~s[INSERT INTO "locations"]
+      assert sql =~ ~s[("slug", "parent_slug", "name")]
+      assert sql =~ "VALUES (?, ?, ?)"
+      assert sql =~ ~s[ON CONFLICT ("slug", "parent_slug") DO NOTHING]
+    end
+
+    test "generates INSERT with ON CONFLICT DO UPDATE (replace_all)" do
+      sql =
+        Connection.insert(
+          nil,
+          "users",
+          [:name, :email],
+          [[:name, :email]],
+          {:replace_all, nil, [:email]},
+          [],
+          []
+        )
+        |> IO.iodata_to_binary()
+
+      assert sql =~ ~s[INSERT INTO "users"]
+      assert sql =~ ~s[("name", "email")]
+      assert sql =~ "VALUES (?, ?)"
+      assert sql =~ ~s[ON CONFLICT ("email") DO UPDATE SET]
+      assert sql =~ ~s["name" = excluded."name"]
+      assert sql =~ ~s["email" = excluded."email"]
+    end
+
+    test "generates INSERT with ON CONFLICT DO UPDATE (replace specific fields)" do
+      sql =
+        Connection.insert(
+          nil,
+          "users",
+          [:name, :email, :updated_at],
+          [[:name, :email, :updated_at]],
+          {[:name, :updated_at], nil, [:email]},
+          [],
+          []
+        )
+        |> IO.iodata_to_binary()
+
+      assert sql =~ ~s[INSERT INTO "users"]
+      assert sql =~ ~s[("name", "email", "updated_at")]
+      assert sql =~ "VALUES (?, ?, ?)"
+      assert sql =~ ~s[ON CONFLICT ("email") DO UPDATE SET]
+      assert sql =~ ~s["name" = excluded."name"]
+      assert sql =~ ~s["updated_at" = excluded."updated_at"]
+      refute sql =~ ~s["email" = excluded."email"]
+    end
+
+    test "generates INSERT without ON CONFLICT for :raise" do
+      sql =
+        Connection.insert(nil, "users", [:name, :email], [[:name, :email]], :raise, [], [])
+        |> IO.iodata_to_binary()
+
+      assert sql =~ ~s[INSERT INTO "users"]
+      assert sql =~ ~s[("name", "email")]
+      assert sql =~ "VALUES (?, ?)"
+      refute sql =~ "ON CONFLICT"
+    end
+
+    test "generates INSERT without ON CONFLICT for {:raise, [], []}" do
+      sql =
+        Connection.insert(
+          nil,
+          "users",
+          [:name, :email],
+          [[:name, :email]],
+          {:raise, [], []},
+          [],
+          []
+        )
+        |> IO.iodata_to_binary()
+
+      assert sql =~ ~s[INSERT INTO "users"]
+      assert sql =~ ~s[("name", "email")]
+      assert sql =~ "VALUES (?, ?)"
+      refute sql =~ "ON CONFLICT"
+    end
+  end
 end
