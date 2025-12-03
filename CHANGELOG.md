@@ -7,7 +7,56 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Connection Management Features**
+  - `busy_timeout/2` - Configure database busy timeout to handle locked databases (default: 5000ms)
+  - `reset/1` - Reset connection state without closing the connection
+  - `interrupt/1` - Interrupt long-running queries on a connection
+  - All features include comprehensive tests and integration with connection lifecycle
+
+- **PRAGMA Support (Complete SQLite Configuration)**
+  - New `EctoLibSql.Pragma` module with comprehensive PRAGMA helpers (396 lines)
+  - `query/2` - Execute arbitrary PRAGMA statements
+  - **Foreign Keys**: `enable_foreign_keys/1`, `disable_foreign_keys/1`, `foreign_keys/1`
+  - **Journal Mode**: `set_journal_mode/2`, `journal_mode/1` (supports :delete, :wal, :memory, :persist, :truncate, :off)
+  - **Synchronous Level**: `set_synchronous/2`, `synchronous/1` (supports :off, :normal, :full, :extra)
+  - **Cache Size**: `set_cache_size/2`, `cache_size/1` (in pages or KB with negative values)
+  - **Table Introspection**: `table_info/2`, `table_list/1`
+  - **User Version**: `user_version/1`, `set_user_version/2` (for schema versioning)
+  - Added 19 comprehensive tests covering all PRAGMA operations
+
+- **Native Batch Execution**
+  - `execute_batch_sql/2` - Execute multiple SQL statements in a single call (non-transactional)
+  - `execute_transactional_batch_sql/2` - Execute multiple SQL statements atomically in a transaction
+  - Improved performance for bulk operations (migrations, seeding, etc.)
+  - Added 3 comprehensive tests including atomic rollback verification
+
+- **Test Suite Reorganisation**
+  - Restructured tests from "missing vs implemented" to feature-based organisation
+  - New feature-focused test files:
+    - `test/connection_features_test.exs` (151 lines, 6 tests) - busy_timeout, reset, interrupt
+    - `test/batch_features_test.exs` (104 lines, 3 tests) - batch execution
+    - `test/pragma_test.exs` (278 lines, 19 tests) - PRAGMA operations
+    - `test/statement_features_test.exs` (305 lines, 11 tests) - prepared statement features (mostly skipped, awaiting implementation)
+    - `test/advanced_features_test.exs` (282 lines, 13 tests) - MVCC, cacheflush, replication, extensions, hooks (all skipped, awaiting implementation)
+  - Removed old organisational test files (`test/phase1_features_test.exs`, `test/turso_missing_features_test.exs`)
+  - All unimplemented features properly marked with `@describetag :skip` for easy enabling as features are added
+  - **New total**: 232 tests, 0 failures, 43 skipped (up from 162 tests in v0.6.0)
+
+- **Comprehensive Gap Analysis Documentation**
+  - `TURSO_COMPREHENSIVE_GAP_ANALYSIS.md` (805 lines) - Consolidated analysis of all Turso/LibSQL features
+  - Merged three separate gap analysis documents into single authoritative source
+  - Prioritised feature list (P0-P3) with implementation roadmap
+  - Complete source code references and Ecto integration details
+  - Updated `TURSO_IMPLEMENTATION_ROADMAP.md` with completed features and next steps
+
 ### Fixed
+
+- **Remote Test Stability**
+  - Fixed vector operations test to properly drop existing tables before recreation
+  - Removed `IF NOT EXISTS` from table creation to ensure correct schema
+  - Prevents "table has no column named X" errors from stale test data
 
 - **Upsert Operations with ON CONFLICT (Issue #25)**
   - Implemented full support for `on_conflict` options in INSERT operations

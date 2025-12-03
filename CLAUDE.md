@@ -393,6 +393,8 @@ cd native/ecto_libsql && cargo test
 
 #### Adding a New NIF Function
 
+**IMPORTANT**: Modern Rustler (used in this project) automatically detects all NIFs annotated with `#[rustler::nif]`. You do NOT need to manually list functions in `rustler::init!()`. The macro uses `rustler::init!("Elixir.EctoLibSql.Native");` without an explicit function list.
+
 1. **Define Rust NIF** in `native/ecto_libsql/src/lib.rs`:
 ```rust
 #[rustler::nif(schedule = "DirtyIo")]
@@ -401,29 +403,21 @@ pub fn my_new_function(conn_id: &str, param: &str) -> NifResult<String> {
     let client = conn_map
         .get(conn_id)
         .ok_or_else(|| rustler::Error::Term(Box::new("Connection not found")))?;
-    
+
     // Implementation here
-    
+
     Ok("result".to_string())
 }
 ```
 
-2. **Export in Rustler module** (in `rustler::init!` macro):
-```rust
-rustler::init!(
-    "Elixir.EctoLibSql.Native",
-    [
-        // ... existing functions ...
-        my_new_function,
-    ]
-)
-```
+**That's it for Rust!** The function is automatically exported because of the `#[rustler::nif]` annotation.
 
-3. **Add Elixir wrapper** in `lib/ecto_libsql/native.ex`:
+2. **Add Elixir NIF stub and wrapper** in `lib/ecto_libsql/native.ex`:
 ```elixir
+# NIF stub (will be replaced by the Rust NIF when loaded)
 def my_new_function(_conn, _param), do: :erlang.nif_error(:nif_not_loaded)
 
-# Add safe wrapper
+# Add safe wrapper that uses State
 def my_new_function_safe(%EctoLibSql.State{conn_id: conn_id} = _state, param) do
   case my_new_function(conn_id, param) do
     {:ok, result} -> {:ok, result}
@@ -432,11 +426,11 @@ def my_new_function_safe(%EctoLibSql.State{conn_id: conn_id} = _state, param) do
 end
 ```
 
-4. **Add tests**:
+3. **Add tests**:
    - Rust test in `native/ecto_libsql/src/tests.rs`
    - Elixir test in appropriate test file
 
-5. **Document** in `AGENTS.md` and update `CHANGELOG.md`
+4. **Document** in `AGENTS.md` and update `CHANGELOG.md`
 
 #### Adding a New Ecto Feature
 

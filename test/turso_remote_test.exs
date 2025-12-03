@@ -376,12 +376,15 @@ defmodule TursoRemoteTest do
     test "vector similarity search on remote database", %{table_name: table} do
       {:ok, state} = EctoLibSql.connect(uri: @turso_uri, auth_token: @turso_token)
 
+      # Drop table if it exists from a previous test run
+      EctoLibSql.handle_execute("DROP TABLE IF EXISTS #{table}", [], [], state)
+
       # Create table with vector column
       vector_type = EctoLibSql.Native.vector_type(3, :f32)
 
       {:ok, _, _, state} =
         EctoLibSql.handle_execute(
-          "CREATE TABLE IF NOT EXISTS #{table} (id INTEGER PRIMARY KEY, name TEXT, embedding #{vector_type})",
+          "CREATE TABLE #{table} (id INTEGER PRIMARY KEY, name TEXT, embedding #{vector_type})",
           [],
           [],
           state

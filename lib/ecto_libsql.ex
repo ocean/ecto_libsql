@@ -51,21 +51,50 @@ defmodule EctoLibSql do
 
   use DBConnection
 
+  # Default busy timeout in milliseconds (5 seconds)
+  @default_busy_timeout 5000
+
   @impl true
   @doc """
   Opens a connection to LibSQL using the native Rust layer.
 
-  Returns `{:ok, state}` on success or `{:error, reason}` on failure. Automatically using remote replica if the opts provided database, uri, and auth token.
+  Returns `{:ok, state}` on success or `{:error, reason}` on failure.
+  Automatically uses remote replica if the opts provided database, uri, and auth token.
+
+  ## Options
+
+  - `:database` - Path to local SQLite database file
+  - `:uri` - Remote LibSQL server URI (e.g., `"libsql://your-db.turso.io"`)
+  - `:auth_token` - Authentication token for remote connections
+  - `:sync` - Enable automatic sync for embedded replicas (boolean)
+  - `:encryption_key` - Encryption key for local database (min 32 characters)
+  - `:busy_timeout` - Busy timeout in milliseconds (default: 5000)
+                      Controls how long SQLite waits for locks before returning SQLITE_BUSY.
+                      Set to 0 to disable (not recommended for production).
+
   """
   def connect(opts) do
     case EctoLibSql.Native.connect(opts, EctoLibSql.State.detect_mode(opts)) do
       conn_id when is_binary(conn_id) ->
-        {:ok,
-         %EctoLibSql.State{
-           conn_id: conn_id,
-           mode: EctoLibSql.State.detect_mode(opts),
-           sync: EctoLibSql.State.detect_sync(opts)
-         }}
+        state = %EctoLibSql.State{
+          conn_id: conn_id,
+          mode: EctoLibSql.State.detect_mode(opts),
+          sync: EctoLibSql.State.detect_sync(opts)
+        }
+
+        # Set busy_timeout for better concurrency handling
+        busy_timeout = Keyword.get(opts, :busy_timeout, @default_busy_timeout)
+
+        case EctoLibSql.Native.set_busy_timeout(conn_id, busy_timeout) do
+          :ok ->
+            {:ok, state}
+
+          {:error, reason} ->
+            # Log warning but don't fail connection - busy_timeout is an optimization
+            require Logger
+            Logger.warning("Failed to set busy_timeout: #{inspect(reason)}")
+            {:ok, state}
+        end
 
       {:error, _} = err ->
         err

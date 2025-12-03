@@ -1288,6 +1288,221 @@ fn fetch_cursor<'a>(env: Env<'a>, cursor_id: &str, max_rows: usize) -> NifResult
     Ok(result.encode(env))
 }
 
+/// Set the busy timeout for the connection.
+/// This controls how long SQLite waits for locks before returning SQLITE_BUSY.
+/// Default SQLite behavior is to return immediately; setting a timeout allows
+/// for better concurrency handling.
+#[rustler::nif(schedule = "DirtyIo")]
+fn set_busy_timeout(conn_id: &str, timeout_ms: u64) -> NifResult<rustler::Atom> {
+    let conn_map = safe_lock(&CONNECTION_REGISTRY, "set_busy_timeout conn_map")?;
+
+    if let Some(client) = conn_map.get(conn_id) {
+        let client = client.clone();
+        drop(conn_map); // Release lock before blocking operation
+
+        let result = TOKIO_RUNTIME.block_on(async {
+            let client_guard = safe_lock_arc(&client, "set_busy_timeout client")?;
+            let conn_guard = safe_lock_arc(&client_guard.client, "set_busy_timeout conn")?;
+
+            conn_guard
+                .busy_timeout(Duration::from_millis(timeout_ms))
+                .map_err(|e| rustler::Error::Term(Box::new(format!("busy_timeout failed: {}", e))))
+        });
+
+        match result {
+            Ok(()) => Ok(rustler::types::atom::ok()),
+            Err(e) => Err(e),
+        }
+    } else {
+        Err(rustler::Error::Term(Box::new("Invalid connection ID")))
+    }
+}
+
+/// Reset the connection state.
+/// This clears any prepared statements and resets the connection to a clean state.
+/// Useful for connection pooling to ensure connections are clean when returned to pool.
+#[rustler::nif(schedule = "DirtyIo")]
+fn reset_connection(conn_id: &str) -> NifResult<rustler::Atom> {
+    let conn_map = safe_lock(&CONNECTION_REGISTRY, "reset_connection conn_map")?;
+
+    if let Some(client) = conn_map.get(conn_id) {
+        let client = client.clone();
+        drop(conn_map); // Release lock before blocking operation
+
+        TOKIO_RUNTIME.block_on(async {
+            let client_guard = safe_lock_arc(&client, "reset_connection client")?;
+            let conn_guard = safe_lock_arc(&client_guard.client, "reset_connection conn")?;
+
+            conn_guard.reset().await;
+            Ok::<(), rustler::Error>(())
+        })?;
+
+        Ok(rustler::types::atom::ok())
+    } else {
+        Err(rustler::Error::Term(Box::new("Invalid connection ID")))
+    }
+}
+
+/// Interrupt any ongoing operation on this connection.
+/// Causes the current operation to return at the earliest opportunity.
+/// Useful for cancelling long-running queries.
+#[rustler::nif(schedule = "DirtyIo")]
+fn interrupt_connection(conn_id: &str) -> NifResult<rustler::Atom> {
+    let conn_map = safe_lock(&CONNECTION_REGISTRY, "interrupt_connection conn_map")?;
+
+    if let Some(client) = conn_map.get(conn_id) {
+        let client = client.clone();
+        drop(conn_map); // Release lock before operation
+
+        let client_guard = safe_lock_arc(&client, "interrupt_connection client")?;
+        let conn_guard = safe_lock_arc(&client_guard.client, "interrupt_connection conn")?;
+
+        conn_guard
+            .interrupt()
+            .map_err(|e| rustler::Error::Term(Box::new(format!("interrupt failed: {}", e))))?;
+
+        Ok(rustler::types::atom::ok())
+    } else {
+        Err(rustler::Error::Term(Box::new("Invalid connection ID")))
+    }
+}
+
+/// Execute a PRAGMA statement and return the result.
+/// PRAGMA statements are SQLite's configuration mechanism.
+///
+/// Common PRAGMA statements:
+/// - `PRAGMA foreign_keys = ON` - Enable foreign key constraints
+/// - `PRAGMA journal_mode = WAL` - Set write-ahead logging mode
+/// - `PRAGMA synchronous = NORMAL` - Set synchronisation level
+/// - `PRAGMA busy_timeout = 5000` - Set busy timeout (though prefer set_busy_timeout NIF)
+///
+/// Some PRAGMAs return values (e.g., `PRAGMA foreign_keys`), others just set values.
+#[rustler::nif(schedule = "DirtyIo")]
+fn pragma_query<'a>(env: Env<'a>, conn_id: &str, pragma_stmt: &str) -> NifResult<Term<'a>> {
+    let conn_map = safe_lock(&CONNECTION_REGISTRY, "pragma_query conn_map")?;
+
+    if let Some(client) = conn_map.get(conn_id) {
+        let client = client.clone();
+        drop(conn_map); // Release lock before async operation
+
+        let result = TOKIO_RUNTIME.block_on(async {
+            let client_guard = safe_lock_arc(&client, "pragma_query client")?;
+            let conn_guard = safe_lock_arc(&client_guard.client, "pragma_query conn")?;
+
+            let rows = conn_guard.query(pragma_stmt, ()).await.map_err(|e| {
+                rustler::Error::Term(Box::new(format!("PRAGMA query failed: {}", e)))
+            })?;
+
+            collect_rows(env, rows).await
+        });
+
+        result
+    } else {
+        Err(rustler::Error::Term(Box::new("Invalid connection ID")))
+    }
+}
+
+/// Execute multiple SQL statements from a single string (semicolon-separated).
+/// Uses LibSQL's native batch execution for better performance.
+/// Each statement is executed independently - if one fails, others may still complete.
+#[rustler::nif(schedule = "DirtyIo")]
+fn execute_batch_native<'a>(env: Env<'a>, conn_id: &str, sql: &str) -> NifResult<Term<'a>> {
+    let conn_map = safe_lock(&CONNECTION_REGISTRY, "execute_batch_native conn_map")?;
+
+    if let Some(client) = conn_map.get(conn_id) {
+        let client = client.clone();
+        drop(conn_map); // Release lock before async operation
+
+        let result = TOKIO_RUNTIME.block_on(async {
+            let client_guard = safe_lock_arc(&client, "execute_batch_native client")?;
+            let conn_guard = safe_lock_arc(&client_guard.client, "execute_batch_native conn")?;
+
+            let mut batch_rows = conn_guard
+                .execute_batch(sql)
+                .await
+                .map_err(|e| rustler::Error::Term(Box::new(format!("batch failed: {}", e))))?;
+
+            // Collect all results
+            let mut results: Vec<Term<'a>> = Vec::new();
+            while let Some(maybe_rows) = batch_rows.next_stmt_row() {
+                match maybe_rows {
+                    Some(rows) => {
+                        // Collect rows from this statement
+                        let collected = collect_rows(env, rows).await?;
+                        results.push(collected);
+                    }
+                    None => {
+                        // Statement was not executed (conditional)
+                        results.push(nil().encode(env));
+                    }
+                }
+            }
+
+            Ok::<Term<'a>, rustler::Error>(results.encode(env))
+        });
+
+        result
+    } else {
+        Err(rustler::Error::Term(Box::new("Invalid connection ID")))
+    }
+}
+
+/// Execute multiple SQL statements atomically in a transaction.
+/// Uses LibSQL's native transactional batch execution.
+/// All statements succeed or all are rolled back.
+#[rustler::nif(schedule = "DirtyIo")]
+fn execute_transactional_batch_native<'a>(
+    env: Env<'a>,
+    conn_id: &str,
+    sql: &str,
+) -> NifResult<Term<'a>> {
+    let conn_map = safe_lock(
+        &CONNECTION_REGISTRY,
+        "execute_transactional_batch_native conn_map",
+    )?;
+
+    if let Some(client) = conn_map.get(conn_id) {
+        let client = client.clone();
+        drop(conn_map); // Release lock before async operation
+
+        let result = TOKIO_RUNTIME.block_on(async {
+            let client_guard = safe_lock_arc(&client, "execute_transactional_batch_native client")?;
+            let conn_guard = safe_lock_arc(
+                &client_guard.client,
+                "execute_transactional_batch_native conn",
+            )?;
+
+            let mut batch_rows =
+                conn_guard
+                    .execute_transactional_batch(sql)
+                    .await
+                    .map_err(|e| {
+                        rustler::Error::Term(Box::new(format!("transactional batch failed: {}", e)))
+                    })?;
+
+            // Collect all results
+            let mut results: Vec<Term<'a>> = Vec::new();
+            while let Some(maybe_rows) = batch_rows.next_stmt_row() {
+                match maybe_rows {
+                    Some(rows) => {
+                        let collected = collect_rows(env, rows).await?;
+                        results.push(collected);
+                    }
+                    None => {
+                        results.push(nil().encode(env));
+                    }
+                }
+            }
+
+            Ok::<Term<'a>, rustler::Error>(results.encode(env))
+        });
+
+        result
+    } else {
+        Err(rustler::Error::Term(Box::new("Invalid connection ID")))
+    }
+}
+
 rustler::init!("Elixir.EctoLibSql.Native");
 
 #[cfg(test)]
