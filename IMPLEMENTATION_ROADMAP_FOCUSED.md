@@ -4,7 +4,7 @@
 **Date**: 2025-12-04
 **Current Version**: ecto_libsql v0.6.0 (v0.8.0-rc1 ready)
 **Target Version**: v1.0.0
-**LibSQL Version**: 0.9.24
+**LibSQL Version**: 0.9.29
 
 ---
 

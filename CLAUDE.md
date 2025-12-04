@@ -1106,7 +1106,7 @@ config :my_app, MyApp.Repo,
 ```elixir
 # 1. Verify LibSQL version
 # Check native/ecto_libsql/Cargo.toml
-libsql = { version = "0.9.24", features = ["encryption"] }
+libsql = { version = "0.9.29", features = ["encryption"] }
 
 # 2. Use correct vector syntax
 vector_type = EctoLibSql.Native.vector_type(128, :f32)

@@ -3,7 +3,7 @@
 **Version**: 2.0.0 (Updated Analysis)
 **Date**: 2025-12-01
 **EctoLibSql Version**: 0.6.0 (Released 2025-11-30)
-**LibSQL Version**: 0.9.24
+**LibSQL Version**: 0.9.29
 
 ## Executive Summary
 
@@ -526,6 +526,6 @@ Focus on Phase 1 (busy_timeout, reset, interrupt, PRAGMA) for v0.7.0 to make the
 
 **Document Version**: 2.0.0 (Updated)
 **Analysis Date**: 2025-12-01
-**Based On**: ecto_libsql 0.6.0, libsql 0.9.24
+**Based On**: ecto_libsql 0.6.0, libsql 0.9.29
 **Next Review**: After 0.7.0 release
 

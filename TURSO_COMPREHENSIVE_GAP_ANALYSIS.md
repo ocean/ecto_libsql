@@ -3,14 +3,14 @@
 **Version**: 3.5.0 (Consolidated & Comprehensive)
 **Date**: 2025-12-02
 **EctoLibSql Version**: 0.6.0 (Released 2025-11-30)
-**LibSQL Version**: 0.9.24
+**LibSQL Version**: 0.9.29
 
 ## Executive Summary
 
 This comprehensive analysis consolidates three previous gap analyses to provide the complete picture of feature gaps between the Turso/LibSQL Rust API and the current `ecto_libsql` implementation.
 
 **Analysis Scope:**
-- Turso Rust bindings API (`libsql-rs` v0.9.24)
+- Turso Rust bindings API (`libsql-rs` v0.9.29)
 - SQLite compatibility features
 - Turso-specific enhancements
 - Performance and optimisation features
@@ -1225,7 +1225,7 @@ This analysis is based on multiple authoritative sources:
 
 ### 1. LibSQL Rust Source Code (Primary Authority)
 **Analysed**: 2025-12-01 to 2025-12-02
-**Version**: libsql 0.9.24
+**Version**: libsql 0.9.29
 
 - **Connection API**: [libsql/src/connection.rs](https://github.com/tursodatabase/libsql/blob/main/libsql/src/connection.rs)
   - `busy_timeout()`, `reset()`, `interrupt()`, `load_extension()`
@@ -1438,7 +1438,7 @@ let stmt = conn_guard
 
 **Document Version**: 3.5.0 (Consolidated & Comprehensive)
 **Analysis Date**: 2025-12-02
-**Based On**: ecto_libsql 0.6.0, libsql 0.9.24
+**Based On**: ecto_libsql 0.6.0, libsql 0.9.29
 **Consolidates**: Gap Analysis v1.0.0, v2.0.0, v3.2.0
 **Next Review**: After Phase 1 implementation (v0.7.0)
 **Maintained By**: AI Analysis + Community Input + Source Code Verification

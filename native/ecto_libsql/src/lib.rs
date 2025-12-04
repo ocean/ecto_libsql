@@ -1632,17 +1632,9 @@ fn statement_parameter_count(conn_id: &str, stmt_id: &str) -> NifResult<usize> {
     Ok(result)
 }
 
-/// Create a savepoint within a transaction.
-/// Savepoints allow partial rollback without aborting the entire transaction.
-#[rustler::nif(schedule = "DirtyIo")]
-fn savepoint(trx_id: &str, name: &str) -> NifResult<Atom> {
-    let mut txn_registry = safe_lock(&TXN_REGISTRY, "savepoint")?;
-
-    let trx = txn_registry
-        .get_mut(trx_id)
-        .ok_or_else(|| rustler::Error::Term(Box::new("Transaction not found")))?;
-
-    // Validate savepoint name is a valid SQL identifier (alphanumeric + underscore, not starting with digit)
+/// Validate that a savepoint name is a valid SQL identifier.
+/// Must be non-empty, alphanumeric + underscore, and not start with a digit.
+fn validate_savepoint_name(name: &str) -> Result<(), rustler::Error> {
     if name.is_empty()
         || !name.chars().all(|c| c.is_alphanumeric() || c == '_')
         || name.chars().next().map_or(true, |c| c.is_ascii_digit())
@@ -1651,6 +1643,20 @@ fn savepoint(trx_id: &str, name: &str) -> NifResult<Atom> {
             "Invalid savepoint name: must be a valid SQL identifier",
         )));
     }
+    Ok(())
+}
+
+/// Create a savepoint within a transaction.
+/// Savepoints allow partial rollback without aborting the entire transaction.
+#[rustler::nif(schedule = "DirtyIo")]
+fn savepoint(trx_id: &str, name: &str) -> NifResult<Atom> {
+    validate_savepoint_name(name)?;
+
+    let mut txn_registry = safe_lock(&TXN_REGISTRY, "savepoint")?;
+
+    let trx = txn_registry
+        .get_mut(trx_id)
+        .ok_or_else(|| rustler::Error::Term(Box::new("Transaction not found")))?;
 
     let sql = format!("SAVEPOINT {}", name);
 
@@ -1664,21 +1670,13 @@ fn savepoint(trx_id: &str, name: &str) -> NifResult<Atom> {
 /// Release (commit) a savepoint, making its changes permanent within the transaction.
 #[rustler::nif(schedule = "DirtyIo")]
 fn release_savepoint(trx_id: &str, name: &str) -> NifResult<Atom> {
+    validate_savepoint_name(name)?;
+
     let mut txn_registry = safe_lock(&TXN_REGISTRY, "release_savepoint")?;
 
     let trx = txn_registry
         .get_mut(trx_id)
         .ok_or_else(|| rustler::Error::Term(Box::new("Transaction not found")))?;
-
-    // Validate savepoint name is a valid SQL identifier (alphanumeric + underscore, not starting with digit)
-    if name.is_empty()
-        || !name.chars().all(|c| c.is_alphanumeric() || c == '_')
-        || name.chars().next().map_or(true, |c| c.is_ascii_digit())
-    {
-        return Err(rustler::Error::Term(Box::new(
-            "Invalid savepoint name: must be a valid SQL identifier",
-        )));
-    }
 
     let sql = format!("RELEASE SAVEPOINT {}", name);
 
@@ -1693,21 +1691,13 @@ fn release_savepoint(trx_id: &str, name: &str) -> NifResult<Atom> {
 /// The savepoint remains active and can be released or rolled back to again.
 #[rustler::nif(schedule = "DirtyIo")]
 fn rollback_to_savepoint(trx_id: &str, name: &str) -> NifResult<Atom> {
+    validate_savepoint_name(name)?;
+
     let mut txn_registry = safe_lock(&TXN_REGISTRY, "rollback_to_savepoint")?;
 
     let trx = txn_registry
         .get_mut(trx_id)
         .ok_or_else(|| rustler::Error::Term(Box::new("Transaction not found")))?;
-
-    // Validate savepoint name is a valid SQL identifier (alphanumeric + underscore, not starting with digit)
-    if name.is_empty()
-        || !name.chars().all(|c| c.is_alphanumeric() || c == '_')
-        || name.chars().next().map_or(true, |c| c.is_ascii_digit())
-    {
-        return Err(rustler::Error::Term(Box::new(
-            "Invalid savepoint name: must be a valid SQL identifier",
-        )));
-    }
 
     let sql = format!("ROLLBACK TO SAVEPOINT {}", name);
 
@@ -1720,19 +1710,36 @@ fn rollback_to_savepoint(trx_id: &str, name: &str) -> NifResult<Atom> {
     Ok(rustler::types::atom::ok())
 }
 
-/// Get the current frame number from a remote replica database.
-/// **Note**: This is currently a placeholder - libsql 0.9.27 doesn't expose the frame number API.
-/// Always returns 0. Will be implemented when the upstream API becomes available.
+/// Get the current replication index (frame number) from a remote replica database.
+/// Returns the frame number or 0 if not a replica or no frames have been applied yet.
+///
+/// **Note**: This function now uses the `replication_index()` API available in libsql 0.9.29+.
 #[rustler::nif(schedule = "DirtyIo")]
 fn get_frame_number(conn_id: &str) -> NifResult<u64> {
     let conn_map = safe_lock(&CONNECTION_REGISTRY, "get_frame_number conn_map")?;
-    let _client = conn_map
+    let client = conn_map
         .get(conn_id)
-        .ok_or_else(|| rustler::Error::Term(Box::new("Connection not found")))?;
+        .ok_or_else(|| rustler::Error::Term(Box::new("Connection not found")))?
+        .clone();
+    drop(conn_map);
 
-    // Frame number API not exposed in libsql 0.9.27
-    // Return 0 as placeholder - can be enhanced in future versions
-    Ok(0u64)
+    let result = TOKIO_RUNTIME.block_on(async {
+        let client_guard = safe_lock_arc(&client, "get_frame_number client")
+            .map_err(|e| format!("Failed to lock client: {:?}", e))?;
+
+        let frame_no = client_guard
+            .db
+            .replication_index()
+            .await
+            .map_err(|e| format!("replication_index failed: {}", e))?;
+
+        Ok::<_, String>(frame_no.unwrap_or(0))
+    });
+
+    match result {
+        Ok(frame_no) => Ok(frame_no),
+        Err(e) => Err(rustler::Error::Term(Box::new(e))),
+    }
 }
 
 /// Sync the remote replica until a specific frame number is reached.

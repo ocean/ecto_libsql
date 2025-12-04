@@ -3,7 +3,7 @@
 **Version**: 4.0.0 (Authoritative)
 **Date**: 2025-12-04
 **EctoLibSql Version**: 0.6.0
-**LibSQL Version**: 0.9.27 (Cargo), 0.9.24 (documented in code)
+**LibSQL Version**: 0.9.29
 **Based On**: Official libsql source code, docs, and crate API
 
 ---
@@ -758,7 +758,7 @@ Features available:
 **Maintained By**: AI Analysis + Source Code Verification + Official Documentation
 
 **Sources**:
-1. libsql Rust crate v0.9.24-0.9.27
+1. libsql Rust crate v0.9.29
 2. github.com/tursodatabase/libsql official documentation
 3. ecto_libsql v0.6.0 source code analysis
 4. ecto_libsql_development_guide.md requirements
