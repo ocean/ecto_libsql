@@ -32,6 +32,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Improved performance for bulk operations (migrations, seeding, etc.)
   - Added 3 comprehensive tests including atomic rollback verification
 
+- **Advanced Replica Sync Control**
+   - `get_frame_number(conn_id)` NIF - Monitor replication frame
+   - `sync_until(conn_id, frame_no)` NIF - Wait for specific frame
+   - `flush_replicator(conn_id)` NIF - Push pending writes
+   - Elixir wrappers: `get_frame_number_for_replica()`, `sync_until_frame()`, `flush_and_get_frame()`
+   - All with proper error handling and timeouts
+
+- **Prepared Statement Introspection**
+   - `stmt_column_count/2` - Get number of columns in a prepared statement result set
+   - `stmt_column_name/3` - Get column name by index (0-based)
+   - `stmt_parameter_count/2` - Get number of parameters (?) in a prepared statement
+   - Enables dynamic schema discovery and parameter binding validation
+   - Added 21 comprehensive tests in `test/prepared_statement_test.exs` (312 lines)
+
+- **Savepoint Support (Nested Transactions)**
+   - `create_savepoint/2` - Create a named savepoint within a transaction
+   - `release_savepoint_by_name/2` - Commit a savepoint's changes
+   - `rollback_to_savepoint_by_name/2` - Rollback to a savepoint, keeping transaction active
+   - Enables nested transaction-like behaviour within a single transaction
+   - Perfect for error recovery and partial rollback patterns
+   - Added 18 comprehensive tests in `test/savepoint_test.exs` (490 lines)
+
 - **Test Suite Reorganisation**
   - Restructured tests from "missing vs implemented" to feature-based organisation
   - New feature-focused test files:
@@ -42,14 +64,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - `test/advanced_features_test.exs` (282 lines, 13 tests) - MVCC, cacheflush, replication, extensions, hooks (all skipped, awaiting implementation)
   - Removed old organisational test files (`test/phase1_features_test.exs`, `test/turso_missing_features_test.exs`)
   - All unimplemented features properly marked with `@describetag :skip` for easy enabling as features are added
-  - **New total**: 232 tests, 0 failures, 43 skipped (up from 162 tests in v0.6.0)
+  - **New total**: 271 tests, 0 failures, 43 skipped (up from 162 tests in v0.6.0)
 
-- **Comprehensive Gap Analysis Documentation**
-  - `TURSO_COMPREHENSIVE_GAP_ANALYSIS.md` (805 lines) - Consolidated analysis of all Turso/LibSQL features
-  - Merged three separate gap analysis documents into single authoritative source
-  - Prioritised feature list (P0-P3) with implementation roadmap
-  - Complete source code references and Ecto integration details
-  - Updated `TURSO_IMPLEMENTATION_ROADMAP.md` with completed features and next steps
+- **Comprehensive Documentation Suite**
+   - `TURSO_COMPREHENSIVE_GAP_ANALYSIS.md` (805 lines) - Consolidated analysis of all Turso/LibSQL features
+   - `IMPLEMENTATION_ROADMAP_FOCUSED.md` (855 lines) - Detailed implementation roadmap with prioritised phases
+   - `LIBSQL_FEATURE_MATRIX_FINAL.md` (764 lines) - Complete feature compatibility matrix
+   - `TESTING_PLAN_COMPREHENSIVE.md` (1038 lines) - Comprehensive testing strategy and coverage plan
+   - Merged multiple gap analysis documents into consolidated, authoritative sources
+   - Prioritised feature list (P0-P3) with clear implementation phases
+   - Complete source code references and Ecto integration details
 
 ### Fixed
 

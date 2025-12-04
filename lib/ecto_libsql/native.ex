@@ -138,6 +138,41 @@ defmodule EctoLibSql.Native do
   @doc false
   def execute_transactional_batch_native(_conn_id, _sql), do: :erlang.nif_error(:nif_not_loaded)
 
+  # Phase 1: Statement Introspection & Savepoint Support (v0.7.0)
+  @doc false
+  def statement_column_count(_conn_id, _stmt_id), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc false
+  def statement_column_name(_conn_id, _stmt_id, _idx), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc false
+  def statement_parameter_count(_conn_id, _stmt_id), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc false
+  def savepoint(_trx_id, _name), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc false
+  def release_savepoint(_trx_id, _name), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc false
+  def rollback_to_savepoint(_trx_id, _name), do: :erlang.nif_error(:nif_not_loaded)
+
+  # Phase 2: Advanced Replica Features
+
+  @doc false
+  def get_frame_number(_conn_id), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc false
+  def sync_until(_conn_id, _frame_no), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc false
+  def flush_replicator(_conn_id), do: :erlang.nif_error(:nif_not_loaded)
+
+
+
+  @doc false
+  def freeze_database(_conn_id), do: :erlang.nif_error(:nif_not_loaded)
+
   # High-level Elixir helper functions
 
   @doc """
@@ -834,5 +869,334 @@ defmodule EctoLibSql.Native do
       {:error, message} ->
         {:error, message}
     end
+  end
+
+  # ============================================================================
+  # Phase 1: Statement Introspection & Savepoint Support (v0.7.0)
+  # ============================================================================
+
+  @doc """
+  Get the number of columns in a prepared statement's result set.
+
+  Returns the column count for statements that return rows (SELECT).
+  Returns 0 for statements that don't return rows (INSERT, UPDATE, DELETE).
+
+  ## Parameters
+    - state: The connection state
+    - stmt_id: The statement ID returned from `prepare/2`
+
+  ## Example
+
+      {:ok, stmt_id} = EctoLibSql.Native.prepare(state, "SELECT id, name, email FROM users")
+      {:ok, count} = EctoLibSql.Native.stmt_column_count(state, stmt_id)
+      # count = 3
+
+  """
+  def stmt_column_count(%EctoLibSql.State{conn_id: conn_id} = _state, stmt_id)
+      when is_binary(stmt_id) do
+    case statement_column_count(conn_id, stmt_id) do
+      count when is_integer(count) -> {:ok, count}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc """
+  Get the name of a column in a prepared statement by its index.
+
+  Index is 0-based. Returns an error if the index is out of bounds.
+
+  ## Parameters
+    - state: The connection state
+    - stmt_id: The statement ID returned from `prepare/2`
+    - idx: Column index (0-based)
+
+  ## Example
+
+      {:ok, stmt_id} = EctoLibSql.Native.prepare(state, "SELECT id, name FROM users")
+      {:ok, name} = EctoLibSql.Native.stmt_column_name(state, stmt_id, 0)
+      # name = "id"
+      {:ok, name} = EctoLibSql.Native.stmt_column_name(state, stmt_id, 1)
+      # name = "name"
+
+  """
+  def stmt_column_name(%EctoLibSql.State{conn_id: conn_id} = _state, stmt_id, idx)
+      when is_binary(stmt_id) and is_integer(idx) and idx >= 0 do
+    case statement_column_name(conn_id, stmt_id, idx) do
+      name when is_binary(name) -> {:ok, name}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc """
+  Get the number of parameters in a prepared statement.
+
+  Parameters are the placeholders (?) in the SQL statement.
+
+  ## Parameters
+    - state: The connection state
+    - stmt_id: The statement ID returned from `prepare/2`
+
+  ## Example
+
+      {:ok, stmt_id} = EctoLibSql.Native.prepare(state, "SELECT * FROM users WHERE id = ? AND name = ?")
+      {:ok, count} = EctoLibSql.Native.stmt_parameter_count(state, stmt_id)
+      # count = 2
+
+  """
+  def stmt_parameter_count(%EctoLibSql.State{conn_id: conn_id} = _state, stmt_id)
+      when is_binary(stmt_id) do
+    case statement_parameter_count(conn_id, stmt_id) do
+      count when is_integer(count) -> {:ok, count}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc """
+  Create a savepoint within a transaction.
+
+  Savepoints allow partial rollback without aborting the entire transaction.
+  They enable nested transaction-like behaviour.
+
+  ## Parameters
+    - state: The connection state with an active transaction
+    - name: The savepoint name (must be unique within the transaction)
+
+  ## Example
+
+      {:ok, trx_state} = EctoLibSql.Native.begin(state)
+      :ok = EctoLibSql.Native.create_savepoint(trx_state, "sp1")
+
+      # Do some work...
+      {:ok, _query, _result, trx_state} = EctoLibSql.Native.execute_with_trx(trx_state, "INSERT INTO users VALUES (?)", ["Alice"])
+
+      # Create nested savepoint
+      :ok = EctoLibSql.Native.create_savepoint(trx_state, "sp2")
+
+  ## Notes
+
+  - Savepoints must be created within an active transaction
+  - Savepoint names must be valid SQL identifiers
+  - You can create nested savepoints
+
+  """
+  def create_savepoint(%EctoLibSql.State{trx_id: trx_id} = _state, name)
+      when is_binary(trx_id) and is_binary(name) do
+    case savepoint(trx_id, name) do
+      {} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  def create_savepoint(%EctoLibSql.State{trx_id: nil}, _name) do
+    {:error, "No active transaction - cannot create savepoint outside transaction"}
+  end
+
+  @doc """
+  Release (commit) a savepoint, making its changes permanent within the transaction.
+
+  ## Parameters
+    - state: The connection state with an active transaction
+    - name: The savepoint name to release
+
+  ## Example
+
+      {:ok, trx_state} = EctoLibSql.Native.begin(state)
+      :ok = EctoLibSql.Native.create_savepoint(trx_state, "sp1")
+      # ... do work ...
+      :ok = EctoLibSql.Native.release_savepoint_by_name(trx_state, "sp1")
+
+  """
+  def release_savepoint_by_name(%EctoLibSql.State{trx_id: trx_id} = _state, name)
+      when is_binary(trx_id) and is_binary(name) do
+    case release_savepoint(trx_id, name) do
+      {} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  def release_savepoint_by_name(%EctoLibSql.State{trx_id: nil}, _name) do
+    {:error, "No active transaction"}
+  end
+
+  @doc """
+  Rollback to a savepoint, undoing all changes made after the savepoint was created.
+
+  The savepoint remains active after rollback and can be released or rolled back to again.
+  The transaction itself remains active.
+
+  ## Parameters
+    - state: The connection state with an active transaction
+    - name: The savepoint name to rollback to
+
+  ## Example
+
+      {:ok, trx_state} = EctoLibSql.Native.begin(state)
+      {:ok, _query, _result, trx_state} = EctoLibSql.Native.execute_with_trx(trx_state, "INSERT INTO users VALUES (?)", ["Alice"])
+
+      :ok = EctoLibSql.Native.create_savepoint(trx_state, "sp1")
+      {:ok, _query, _result, trx_state} = EctoLibSql.Native.execute_with_trx(trx_state, "INSERT INTO users VALUES (?)", ["Bob"])
+
+      # Rollback Bob insert, keep Alice
+      :ok = EctoLibSql.Native.rollback_to_savepoint_by_name(trx_state, "sp1")
+
+      # Transaction still active, can continue or commit
+      :ok = EctoLibSql.Native.commit(trx_state)
+
+  """
+  def rollback_to_savepoint_by_name(%EctoLibSql.State{trx_id: trx_id} = _state, name)
+      when is_binary(trx_id) and is_binary(name) do
+    case rollback_to_savepoint(trx_id, name) do
+      {} -> :ok
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  def rollback_to_savepoint_by_name(%EctoLibSql.State{trx_id: nil}, _name) do
+    {:error, "No active transaction"}
+  end
+
+  # Phase 2: Advanced Replica Features
+
+  @doc """
+  Get the current replication frame number from a remote replica.
+
+  This returns the current frame number at the local replica, useful for monitoring
+  replication progress. The frame number increases with each replication event.
+
+  ## Parameters
+    - conn_id: The connection ID (usually state.conn_id)
+
+  ## Returns
+    - `{:ok, frame_no}` - The current frame number (0 if not a replica)
+    - `{:error, reason}` - If the connection is invalid
+
+  ## Example
+
+      {:ok, frame_no} = EctoLibSql.Native.get_frame_number_for_replica(state.conn_id)
+      Logger.info("Current replication frame: " <> to_string(frame_no))
+
+  ## Notes
+    - Returns 0 if the database is not a remote replica
+    - For local databases, this is not applicable
+    - Useful for implementing replication lag monitoring
+
+  """
+  def get_frame_number_for_replica(conn_id) when is_binary(conn_id) do
+    case get_frame_number(conn_id) do
+      frame_no when is_integer(frame_no) -> {:ok, frame_no}
+      error -> {:error, error}
+    end
+  end
+
+  @doc """
+  Sync a remote replica until a specific frame number is reached.
+
+  Waits for the replica to catch up to the specified frame number,
+  which is useful after bulk writes to the primary database.
+
+  ## Parameters
+    - conn_id: The connection ID
+    - target_frame: The target frame number to sync until
+
+  ## Returns
+    - `:ok` - Successfully synced to the target frame
+    - `{:error, reason}` - If sync failed or connection is invalid
+
+  ## Example
+
+      # After bulk insert on primary, wait for replica to catch up
+      primary_frame = get_primary_frame_number()
+      :ok = EctoLibSql.Native.sync_until_frame(replica_conn_id, primary_frame)
+      # Replica is now up-to-date
+
+  ## Notes
+    - This blocks until the frame is reached (with internal timeout)
+    - Only works for remote replica connections
+    - Returns error if called on local or remote primary connections
+
+  """
+  def sync_until_frame(conn_id, target_frame)
+      when is_binary(conn_id) and is_integer(target_frame) do
+    case sync_until(conn_id, target_frame) do
+      :ok -> :ok
+      other -> {:error, other}
+    end
+  end
+
+  @doc """
+  Flush the replicator, pushing pending writes to the remote database.
+
+  This forces the local replica to synchronize with the remote database,
+  sending any pending local changes.
+
+  ## Parameters
+    - conn_id: The connection ID
+
+  ## Returns
+    - `{:ok, new_frame}` - Flush succeeded, returns new frame number
+    - `{:error, reason}` - If flush failed
+
+  ## Example
+
+      {:ok, frame} = EctoLibSql.Native.flush_and_get_frame(replica_conn_id)
+      Logger.info("Flushed to frame: " <> to_string(frame))
+
+  ## Notes
+    - This is useful before taking snapshots or backups
+    - Returns the frame number after the flush
+    - Only works for remote replica connections
+
+  """
+  def flush_and_get_frame(conn_id) when is_binary(conn_id) do
+    case flush_replicator(conn_id) do
+      frame_no when is_integer(frame_no) -> {:ok, frame_no}
+      error -> {:error, error}
+    end
+  end
+
+  @doc """
+  Freeze a remote replica, converting it to a standalone local database.
+
+  This is useful for disaster recovery, promoting a replica to a primary,
+  or taking a snapshot for offline use. After freezing, the database
+  can no longer sync with the remote.
+
+  ## Parameters
+    - state: The connection state (must be a remote replica)
+
+  ## Returns
+    - `{:ok, state}` - Freeze succeeded, connection is now standalone
+    - `{:error, reason}` - If freeze failed or not a replica
+
+  ## Example
+
+      # Disaster recovery: primary is down
+      case EctoLibSql.Native.freeze_replica(replica_state) do
+        {:ok, frozen_state} ->
+          # Replica is now an independent local database
+          # Can write to it independently
+          Logger.info("Replica promoted to standalone")
+          {:ok, frozen_state}
+        {:error, reason} ->
+          Logger.error("Freeze failed: " <> to_string(reason))
+          {:error, reason}
+      end
+
+  ## Notes
+    - Only works for remote replica connections
+    - After freezing, cannot sync with remote anymore
+    - All local data is preserved
+    - Useful for field deployment scenarios
+
+  """
+  def freeze_replica(%EctoLibSql.State{conn_id: conn_id} = state) when is_binary(conn_id) do
+    case freeze_database(conn_id) do
+      :ok -> {:ok, state}
+      error -> {:error, error}
+    end
+  end
+
+  def freeze_replica(_state) do
+    {:error, "Invalid state - cannot freeze"}
   end
 end

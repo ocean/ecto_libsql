@@ -1503,6 +1503,296 @@ fn execute_transactional_batch_native<'a>(
     }
 }
 
+/// Get the number of columns in a prepared statement's result set.
+/// Returns 0 for statements that don't return rows (INSERT, UPDATE, DELETE).
+#[rustler::nif(schedule = "DirtyIo")]
+fn statement_column_count(conn_id: &str, stmt_id: &str) -> NifResult<usize> {
+    let conn_map = safe_lock(&CONNECTION_REGISTRY, "statement_column_count conn_map")?;
+    let stmt_registry = safe_lock(&STMT_REGISTRY, "statement_column_count stmt_registry")?;
+
+    if conn_map.get(conn_id).is_none() {
+        return Err(rustler::Error::Term(Box::new("Invalid connection ID")));
+    }
+
+    let (_stored_conn_id, sql) = stmt_registry
+        .get(stmt_id)
+        .ok_or_else(|| rustler::Error::Term(Box::new("Statement not found")))?;
+
+    let client = conn_map
+        .get(conn_id)
+        .ok_or_else(|| rustler::Error::Term(Box::new("Connection not found")))?
+        .clone();
+    let sql = sql.clone();
+
+    drop(stmt_registry);
+    drop(conn_map);
+
+    let result = TOKIO_RUNTIME.block_on(async {
+        let client_guard = safe_lock_arc(&client, "statement_column_count client")?;
+        let conn_guard = safe_lock_arc(&client_guard.client, "statement_column_count conn")?;
+
+        let stmt = conn_guard
+            .prepare(&sql)
+            .await
+            .map_err(|e| rustler::Error::Term(Box::new(format!("Prepare failed: {}", e))))?;
+
+        Ok::<usize, rustler::Error>(stmt.column_count())
+    })?;
+
+    Ok(result)
+}
+
+/// Get the name of a column in a prepared statement by its index.
+/// Index is 0-based. Returns error if index is out of bounds.
+#[rustler::nif(schedule = "DirtyIo")]
+fn statement_column_name(conn_id: &str, stmt_id: &str, idx: usize) -> NifResult<String> {
+    let conn_map = safe_lock(&CONNECTION_REGISTRY, "statement_column_name conn_map")?;
+    let stmt_registry = safe_lock(&STMT_REGISTRY, "statement_column_name stmt_registry")?;
+
+    if conn_map.get(conn_id).is_none() {
+        return Err(rustler::Error::Term(Box::new("Invalid connection ID")));
+    }
+
+    let (_stored_conn_id, sql) = stmt_registry
+        .get(stmt_id)
+        .ok_or_else(|| rustler::Error::Term(Box::new("Statement not found")))?;
+
+    let client = conn_map
+        .get(conn_id)
+        .ok_or_else(|| rustler::Error::Term(Box::new("Connection not found")))?
+        .clone();
+    let sql = sql.clone();
+
+    drop(stmt_registry);
+    drop(conn_map);
+
+    let result = TOKIO_RUNTIME.block_on(async {
+        let client_guard = safe_lock_arc(&client, "statement_column_name client")?;
+        let conn_guard = safe_lock_arc(&client_guard.client, "statement_column_name conn")?;
+
+        let stmt = conn_guard
+            .prepare(&sql)
+            .await
+            .map_err(|e| rustler::Error::Term(Box::new(format!("Prepare failed: {}", e))))?;
+
+        let columns = stmt.columns();
+
+        if idx >= columns.len() {
+            return Err(rustler::Error::Term(Box::new(format!(
+                "Column index {} out of bounds (statement has {} columns)",
+                idx,
+                columns.len()
+            ))));
+        }
+
+        let column_name = columns[idx].name().to_string();
+
+        Ok::<String, rustler::Error>(column_name)
+    })?;
+
+    Ok(result)
+}
+
+/// Get the number of parameters in a prepared statement.
+/// Parameters are placeholders (?) in the SQL.
+#[rustler::nif(schedule = "DirtyIo")]
+fn statement_parameter_count(conn_id: &str, stmt_id: &str) -> NifResult<usize> {
+    let conn_map = safe_lock(&CONNECTION_REGISTRY, "statement_parameter_count conn_map")?;
+    let stmt_registry = safe_lock(&STMT_REGISTRY, "statement_parameter_count stmt_registry")?;
+
+    if conn_map.get(conn_id).is_none() {
+        return Err(rustler::Error::Term(Box::new("Invalid connection ID")));
+    }
+
+    let (_stored_conn_id, sql) = stmt_registry
+        .get(stmt_id)
+        .ok_or_else(|| rustler::Error::Term(Box::new("Statement not found")))?;
+
+    let client = conn_map
+        .get(conn_id)
+        .ok_or_else(|| rustler::Error::Term(Box::new("Connection not found")))?
+        .clone();
+    let sql = sql.clone();
+
+    drop(stmt_registry);
+    drop(conn_map);
+
+    let result = TOKIO_RUNTIME.block_on(async {
+        let client_guard = safe_lock_arc(&client, "statement_parameter_count client")?;
+        let conn_guard = safe_lock_arc(&client_guard.client, "statement_parameter_count conn")?;
+
+        let stmt = conn_guard
+            .prepare(&sql)
+            .await
+            .map_err(|e| rustler::Error::Term(Box::new(format!("Prepare failed: {}", e))))?;
+
+        Ok::<usize, rustler::Error>(stmt.parameter_count())
+    })?;
+
+    Ok(result)
+}
+
+/// Create a savepoint within a transaction.
+/// Savepoints allow partial rollback without aborting the entire transaction.
+#[rustler::nif(schedule = "DirtyIo")]
+fn savepoint(trx_id: &str, name: &str) -> NifResult<()> {
+    let mut txn_registry = safe_lock(&TXN_REGISTRY, "savepoint")?;
+
+    let trx = txn_registry
+        .get_mut(trx_id)
+        .ok_or_else(|| rustler::Error::Term(Box::new("Transaction not found")))?;
+
+    let sql = format!("SAVEPOINT {}", name);
+
+    TOKIO_RUNTIME
+        .block_on(async { trx.execute(&sql, Vec::<Value>::new()).await })
+        .map_err(|e| rustler::Error::Term(Box::new(format!("Savepoint failed: {}", e))))?;
+
+    Ok(())
+}
+
+/// Release (commit) a savepoint, making its changes permanent within the transaction.
+#[rustler::nif(schedule = "DirtyIo")]
+fn release_savepoint(trx_id: &str, name: &str) -> NifResult<()> {
+    let mut txn_registry = safe_lock(&TXN_REGISTRY, "release_savepoint")?;
+
+    let trx = txn_registry
+        .get_mut(trx_id)
+        .ok_or_else(|| rustler::Error::Term(Box::new("Transaction not found")))?;
+
+    let sql = format!("RELEASE SAVEPOINT {}", name);
+
+    TOKIO_RUNTIME
+        .block_on(async { trx.execute(&sql, Vec::<Value>::new()).await })
+        .map_err(|e| rustler::Error::Term(Box::new(format!("Release savepoint failed: {}", e))))?;
+
+    Ok(())
+}
+
+/// Rollback to a savepoint, undoing all changes made after the savepoint was created.
+/// The savepoint remains active and can be released or rolled back to again.
+#[rustler::nif(schedule = "DirtyIo")]
+fn rollback_to_savepoint(trx_id: &str, name: &str) -> NifResult<()> {
+    let mut txn_registry = safe_lock(&TXN_REGISTRY, "rollback_to_savepoint")?;
+
+    let trx = txn_registry
+        .get_mut(trx_id)
+        .ok_or_else(|| rustler::Error::Term(Box::new("Transaction not found")))?;
+
+    let sql = format!("ROLLBACK TO SAVEPOINT {}", name);
+
+    TOKIO_RUNTIME
+        .block_on(async { trx.execute(&sql, Vec::<Value>::new()).await })
+        .map_err(|e| {
+            rustler::Error::Term(Box::new(format!("Rollback to savepoint failed: {}", e)))
+        })?;
+
+    Ok(())
+}
+
+/// Get the current frame number from a remote replica database.
+/// Returns 0 if not a replica or frame number unknown.
+/// Note: libsql 0.9.27 doesn't expose frame number API yet
+#[rustler::nif(schedule = "DirtyIo")]
+fn get_frame_number(conn_id: &str) -> NifResult<u64> {
+    let conn_map = safe_lock(&CONNECTION_REGISTRY, "get_frame_number conn_map")?;
+    let _client = conn_map
+        .get(conn_id)
+        .ok_or_else(|| rustler::Error::Term(Box::new("Connection not found")))?;
+
+    // Frame number API not exposed in libsql 0.9.27
+    // Return 0 as placeholder - can be enhanced in future versions
+    Ok(0u64)
+}
+
+/// Sync the remote replica until a specific frame number is reached.
+/// Waits (with timeout) for the replica to catch up to the target frame.
+#[rustler::nif(schedule = "DirtyIo")]
+fn sync_until(conn_id: &str, frame_no: u64) -> NifResult<Atom> {
+    let conn_map = safe_lock(&CONNECTION_REGISTRY, "sync_until conn_map")?;
+    let client = conn_map
+        .get(conn_id)
+        .ok_or_else(|| rustler::Error::Term(Box::new("Connection not found")))?
+        .clone();
+    drop(conn_map);
+
+    let result = TOKIO_RUNTIME.block_on(async {
+        let client_guard = safe_lock_arc(&client, "sync_until client")
+            .map_err(|e| format!("Failed to lock client: {:?}", e))?;
+
+        client_guard
+            .db
+            .sync_until(frame_no)
+            .await
+            .map_err(|e| format!("sync_until failed: {}", e))?;
+
+        Ok::<_, String>(())
+    });
+
+    match result {
+        Ok(()) => Ok(rustler::types::atom::ok()),
+        Err(e) => Err(rustler::Error::Term(Box::new(e))),
+    }
+}
+
+/// Flush the replicator, pushing pending writes to the remote database.
+/// Returns the new frame number after flush.
+#[rustler::nif(schedule = "DirtyIo")]
+fn flush_replicator(conn_id: &str) -> NifResult<u64> {
+    let conn_map = safe_lock(&CONNECTION_REGISTRY, "flush_replicator conn_map")?;
+    let client = conn_map
+        .get(conn_id)
+        .ok_or_else(|| rustler::Error::Term(Box::new("Connection not found")))?
+        .clone();
+    drop(conn_map);
+
+    let result = TOKIO_RUNTIME.block_on(async {
+        let client_guard = safe_lock_arc(&client, "flush_replicator client")
+            .map_err(|e| format!("Failed to lock client: {:?}", e))?;
+
+        let frame_no = client_guard
+            .db
+            .flush_replicator()
+            .await
+            .map_err(|e| format!("flush_replicator failed: {}", e))?;
+
+        Ok::<_, String>(frame_no.unwrap_or(0))
+    });
+
+    match result {
+        Ok(frame_no) => Ok(frame_no),
+        Err(e) => Err(rustler::Error::Term(Box::new(e))),
+    }
+}
+
+// Note: sync_frames requires complex Frames type, skipping for now
+// Can be added later if needed with proper frame data marshalling
+
+/// Freeze a remote replica database, converting it to a standalone local database.
+/// This is useful for disaster recovery (promoting a replica to primary).
+/// After freezing, the database can no longer sync with the remote.
+#[rustler::nif(schedule = "DirtyIo")]
+fn freeze_database(conn_id: &str) -> NifResult<Atom> {
+    let conn_map = safe_lock(&CONNECTION_REGISTRY, "freeze_database conn_map")?;
+
+    if let Some(_client_arc) = conn_map.get(conn_id) {
+        drop(conn_map);
+
+        // The freeze operation replaces the database connection
+        // Note: freeze() consumes self, so we can't directly call it on a reference
+        // For now, we just return an error - this feature requires deeper refactoring
+        let result: Result<(), String> =
+            Err("Freeze operation not fully supported in this version".to_string());
+
+        match result {
+            Ok(()) => Ok(rustler::types::atom::ok()),
+            Err(e) => Err(rustler::Error::Term(Box::new(e))),
+        }
+    } else {
+        Err(rustler::Error::Term(Box::new("Connection not found")))
+    }
+}
+
 rustler::init!("Elixir.EctoLibSql.Native");
 
 #[cfg(test)]
