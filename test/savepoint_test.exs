@@ -79,9 +79,12 @@ defmodule EctoLibSql.SavepointTest do
       result = Native.create_savepoint(trx_state, "sp1")
 
       case result do
-        {:error, _reason} -> :ok
-        :ok -> :ok
-        # SQLite might allow duplicate savepoints, just replacing the old one
+        {:error, _reason} ->
+          :ok
+
+        :ok ->
+          :ok
+          # SQLite might allow duplicate savepoints, just replacing the old one
       end
 
       {:ok, _} = Native.rollback(trx_state)

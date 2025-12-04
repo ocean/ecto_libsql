@@ -1635,12 +1635,22 @@ fn statement_parameter_count(conn_id: &str, stmt_id: &str) -> NifResult<usize> {
 /// Create a savepoint within a transaction.
 /// Savepoints allow partial rollback without aborting the entire transaction.
 #[rustler::nif(schedule = "DirtyIo")]
-fn savepoint(trx_id: &str, name: &str) -> NifResult<()> {
+fn savepoint(trx_id: &str, name: &str) -> NifResult<Atom> {
     let mut txn_registry = safe_lock(&TXN_REGISTRY, "savepoint")?;
 
     let trx = txn_registry
         .get_mut(trx_id)
         .ok_or_else(|| rustler::Error::Term(Box::new("Transaction not found")))?;
+
+    // Validate savepoint name is a valid SQL identifier (alphanumeric + underscore, not starting with digit)
+    if name.is_empty()
+        || !name.chars().all(|c| c.is_alphanumeric() || c == '_')
+        || name.chars().next().map_or(true, |c| c.is_ascii_digit())
+    {
+        return Err(rustler::Error::Term(Box::new(
+            "Invalid savepoint name: must be a valid SQL identifier",
+        )));
+    }
 
     let sql = format!("SAVEPOINT {}", name);
 
@@ -1648,12 +1658,12 @@ fn savepoint(trx_id: &str, name: &str) -> NifResult<()> {
         .block_on(async { trx.execute(&sql, Vec::<Value>::new()).await })
         .map_err(|e| rustler::Error::Term(Box::new(format!("Savepoint failed: {}", e))))?;
 
-    Ok(())
+    Ok(rustler::types::atom::ok())
 }
 
 /// Release (commit) a savepoint, making its changes permanent within the transaction.
 #[rustler::nif(schedule = "DirtyIo")]
-fn release_savepoint(trx_id: &str, name: &str) -> NifResult<()> {
+fn release_savepoint(trx_id: &str, name: &str) -> NifResult<Atom> {
     let mut txn_registry = safe_lock(&TXN_REGISTRY, "release_savepoint")?;
 
     let trx = txn_registry
@@ -1666,13 +1676,13 @@ fn release_savepoint(trx_id: &str, name: &str) -> NifResult<()> {
         .block_on(async { trx.execute(&sql, Vec::<Value>::new()).await })
         .map_err(|e| rustler::Error::Term(Box::new(format!("Release savepoint failed: {}", e))))?;
 
-    Ok(())
+    Ok(rustler::types::atom::ok())
 }
 
 /// Rollback to a savepoint, undoing all changes made after the savepoint was created.
 /// The savepoint remains active and can be released or rolled back to again.
 #[rustler::nif(schedule = "DirtyIo")]
-fn rollback_to_savepoint(trx_id: &str, name: &str) -> NifResult<()> {
+fn rollback_to_savepoint(trx_id: &str, name: &str) -> NifResult<Atom> {
     let mut txn_registry = safe_lock(&TXN_REGISTRY, "rollback_to_savepoint")?;
 
     let trx = txn_registry
@@ -1687,7 +1697,7 @@ fn rollback_to_savepoint(trx_id: &str, name: &str) -> NifResult<()> {
             rustler::Error::Term(Box::new(format!("Rollback to savepoint failed: {}", e)))
         })?;
 
-    Ok(())
+    Ok(rustler::types::atom::ok())
 }
 
 /// Get the current frame number from a remote replica database.

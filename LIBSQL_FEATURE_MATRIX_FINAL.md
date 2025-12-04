@@ -16,17 +16,17 @@ This analysis is based on **authoritative sources**:
 3. ✅ Current ecto_libsql implementation audit (29 NIFs, 1,509 lines)
 4. ✅ Development guide requirements (`ecto_libsql_development_guide.md`)
 
-**Key Finding**: ecto_libsql implements **54% of libsql features** with **excellent coverage of production-critical features** (100% of P0) but **missing advanced features** needed for specific use cases.
+**Key Finding**: ecto_libsql implements **65% of libsql features** with **excellent coverage of production-critical features** (100% of P0) and **strong support for advanced features** including full transaction control, statement introspection, and replica monitoring.
 
 ### What's Implemented (Strong Foundation)
 
 ✅ **All 3 Connection Modes**: Local, Remote, Embedded Replica
-✅ **Full Transaction Support**: All 4 behaviours (Deferred, Immediate, Exclusive, Read-Only)
+✅ **Full Transaction Support**: All 4 behaviours (Deferred, Immediate, Exclusive, Read-Only) + Savepoints
 ✅ **Comprehensive Metadata**: last_insert_rowid, changes, total_changes, is_autocommit
 ✅ **Production Configuration**: busy_timeout, reset, interrupt, PRAGMA helpers
 ✅ **Batch Operations**: Native and manual, transactional and non-transactional
-✅ **Basic Replication**: Manual sync with timeout, auto-sync for writes
-✅ **Prepared Statements**: Prepare, execute, query (with re-prepare workaround)
+✅ **Advanced Replication**: Manual sync with timeout, auto-sync for writes, frame monitoring, sync_until, flush_replicator
+✅ **Prepared Statements**: Prepare, execute, query (with re-prepare workaround) + introspection (column_count, column_name, parameter_count)
 ✅ **Vector Search**: Helper functions for vector operations
 ✅ **Encryption**: AES-256 at rest
 
@@ -36,9 +36,6 @@ This analysis is based on **authoritative sources**:
 ❌ **No Custom Functions**: create_scalar_function, create_aggregate_function
 ❌ **No Extensions**: load_extension (FTS5, R-Tree, etc.)
 ❌ **Limited Streaming**: Cursors load all rows upfront (memory issue)
-❌ **No Savepoints**: Cannot nest transactions
-❌ **No Advanced Sync**: sync_until, flush_replicator, freeze, get_frame_no
-❌ **Limited Introspection**: No statement column_count, column_name
 
 ---
 
@@ -87,11 +84,11 @@ This analysis is based on **authoritative sources**:
 | READ_ONLY behaviour | ✅ | Line 130 | `TransactionBehavior::ReadOnly` | P0 |
 | Commit transaction | ✅ | `commit_or_rollback_transaction/5` (lib.rs:285) | `trx.commit()` | P0 |
 | Rollback transaction | ✅ | `commit_or_rollback_transaction/5` (lib.rs:285) | `trx.rollback()` | P0 |
-| Savepoints | ❌ | Not implemented | `trx.savepoint()` | P1 |
-| Release savepoint | ❌ | Not implemented | `trx.release_savepoint()` | P1 |
-| Rollback to savepoint | ❌ | Not implemented | `trx.rollback_to_savepoint()` | P1 |
+| Savepoints | ✅ | `savepoint/2` (lib.rs) | `SAVEPOINT` SQL | P1 |
+| Release savepoint | ✅ | `release_savepoint/1` (lib.rs) | `RELEASE SAVEPOINT` SQL | P1 |
+| Rollback to savepoint | ✅ | `rollback_to_savepoint/1` (lib.rs) | `ROLLBACK TO SAVEPOINT` SQL | P1 |
 
-**Assessment**: All basic transaction operations complete. Savepoints would enable nested transaction-like behaviour for complex operations.
+**Assessment**: All transaction operations complete, including savepoints for nested transaction-like behaviour. Savepoint support added in v0.6.0 (PR #27) enables complex error handling and partial rollbacks within transactions.
 
 **Why Savepoints Matter**:
 ```elixir
@@ -113,7 +110,7 @@ end)
 
 ---
 
-### 4. Prepared Statements (44% Coverage) ⚠️
+### 4. Prepared Statements (78% Coverage)
 
 | Feature | Status | Implementation | libsql API | Priority |
 |---------|--------|---------------|-----------|----------|
@@ -123,9 +120,9 @@ end)
 | Close statement | ✅ | `close/2` (lib.rs:336) | Registry cleanup | P0 |
 | Statement reset | ❌ | **Re-prepares!** | `stmt.reset()` | P0 |
 | Clear bindings | ❌ | Not implemented | `stmt.clear_bindings()` | P2 |
-| Column count | ❌ | Not implemented | `stmt.column_count()` | P1 |
-| Column name | ❌ | Not implemented | `stmt.column_name()` | P1 |
-| Parameter count | ❌ | Not implemented | `stmt.parameter_count()` | P1 |
+| Column count | ✅ | `get_statement_column_count/1` (lib.rs) | `stmt.column_count()` | P1 |
+| Column name | ✅ | `get_statement_column_name/2` (lib.rs) | `stmt.column_name()` | P1 |
+| Parameter count | ✅ | `get_statement_parameter_count/1` (lib.rs) | `stmt.parameter_count()` | P1 |
 
 **Critical Issue**: Lines 885-888 and 951-954 re-prepare statements on every execution, defeating the purpose of prepared statements.
 
@@ -140,7 +137,7 @@ let stmt = conn_guard.prepare(&sql).await  // ← Called EVERY time!
 
 ---
 
-### 5. Replica Sync Features (33% Coverage)
+### 5. Replica Sync Features (67% Coverage)
 
 | Feature | Status | Implementation | libsql API | Priority |
 |---------|--------|---------------|-----------|----------|
@@ -148,13 +145,13 @@ let stmt = conn_guard.prepare(&sql).await  // ← Called EVERY time!
 | Sync with timeout | ✅ | `sync_with_timeout` (lib.rs:44) | Custom wrapper | P0 |
 | Auto-sync on writes | ✅ | Built-in | libsql automatic | P0 |
 | Sync frames | ❌ | Not implemented | `db.sync_frames()` | P2 |
-| Sync until frame | ❌ | Not implemented | `db.sync_until()` | P2 |
-| Get frame number | ❌ | Not implemented | `db.get_frame_no()` | P2 |
-| Flush replicator | ❌ | Not implemented | `db.flush_replicator()` | P2 |
+| Sync until frame | ✅ | `sync_until/2` (lib.rs) | `db.sync_until()` | P2 |
+| Get frame number | ✅ | `get_frame_number/1` (lib.rs) | `db.get_frame_no()` | P2 |
+| Flush replicator | ✅ | `flush_replicator/1` (lib.rs) | `db.flush_replicator()` | P2 |
 | Freeze database | ❌ | Not implemented | `db.freeze()` | P2 |
 | Flush writes | ❌ | Not implemented | `db.flush()` | P2 |
 
-**Assessment**: Core sync functionality works. Advanced features needed for monitoring replication lag and fine-grained control.
+**Assessment**: Excellent replica sync support! Core sync functionality and advanced monitoring features are implemented (added in v0.6.0, PR #27). Can now monitor replication lag via frame numbers and fine-tune sync behaviour.
 
 **Important Note** (from code comments lines 507-513, 737-738):
 > libsql automatically syncs writes to remote for embedded replicas. Manual sync is for pulling remote changes locally.
@@ -166,14 +163,17 @@ let stmt = conn_guard.prepare(&sql).await  // ← Called EVERY time!
 - ✅ Monotonic reads guaranteed
 - ❌ No global ordering guarantees
 
-**Use Cases for Missing Features**:
+**Example Usage of Advanced Sync Features**:
 ```elixir
-# Monitor replication lag
-frame = EctoLibSql.get_frame_number(repo)
-:ok = EctoLibSql.sync_until(repo, frame + 100)  # Wait for specific frame
+# Monitor replication lag (now available!)
+{:ok, frame} = EctoLibSql.Native.get_frame_number(state)
+{:ok, new_state} = EctoLibSql.Native.sync_until(state, frame + 100)
 
-# Disaster recovery
-:ok = EctoLibSql.freeze(repo)  # Convert replica to standalone DB
+# Flush pending writes (now available!)
+{:ok, new_state} = EctoLibSql.Native.flush_replicator(state)
+
+# Still missing: Disaster recovery
+# :ok = EctoLibSql.freeze(repo)  # Convert replica to standalone DB
 ```
 
 ---
@@ -366,16 +366,16 @@ Repo.query("SELECT * FROM docs ORDER BY #{distance} LIMIT 10")
 |----------|------------|---------|----------|----------|
 | Connection Management | 6 | 2 | **75%** | P0 |
 | Query Execution | 4 | 1 | **80%** | P0 |
-| Transactions | 8 | 3 | **73%** | P0 |
-| Prepared Statements | 4 | 5 | **44%** ⚠️ | P0 |
-| Replica Sync | 3 | 6 | **33%** | P1 |
+| Transactions | 11 | 0 | **100%** ✅ | P0 |
+| Prepared Statements | 7 | 2 | **78%** | P0 |
+| Replica Sync | 6 | 3 | **67%** | P1 |
 | Metadata | 4 | 3 | **57%** | P1 |
 | Configuration | 4 | 4 | **50%** | P0 |
 | Batch Execution | 4 | 1 | **80%** | P1 |
 | Cursors/Streaming | 4 | 3 | **57%** | P1 |
 | Hooks/Extensions | 0 | 8 | **0%** ❌ | P2 |
 | Vector Search | 3 | 2 | **60%** | P2 |
-| **TOTAL** | **44** | **38** | **54%** | - |
+| **TOTAL** | **53** | **29** | **65%** | - |
 
 ### By Priority (Production Readiness)
 

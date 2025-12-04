@@ -990,7 +990,7 @@ mix test --only turso_remote
 
 - ✅ **Test Coverage Badge**: In README.md
 - ✅ **Performance Baselines**: Documented in PERFORMANCE.md
-- ✅ **Test Organization**: Clear file structure
+- ✅ **Test Organisation**: Clear file structure
 - ✅ **Example Usage**: Tests serve as examples
 
 ---

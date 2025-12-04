@@ -145,7 +145,9 @@ defmodule EctoLibSql.PreparedStatementTest do
       result = Native.query_stmt(state, stmt_id, [1])
 
       case result do
-        {:error, _reason} -> :ok
+        {:error, _reason} ->
+          :ok
+
         {:ok, result} ->
           # If it succeeds, it should return empty results (no matches)
           assert is_list(result.rows)

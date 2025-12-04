@@ -168,8 +168,6 @@ defmodule EctoLibSql.Native do
   @doc false
   def flush_replicator(_conn_id), do: :erlang.nif_error(:nif_not_loaded)
 
-
-
   @doc false
   def freeze_database(_conn_id), do: :erlang.nif_error(:nif_not_loaded)
 
@@ -982,8 +980,9 @@ defmodule EctoLibSql.Native do
   def create_savepoint(%EctoLibSql.State{trx_id: trx_id} = _state, name)
       when is_binary(trx_id) and is_binary(name) do
     case savepoint(trx_id, name) do
-      {} -> :ok
+      :ok -> :ok
       {:error, reason} -> {:error, reason}
+      other -> {:error, "Unexpected response: #{inspect(other)}"}
     end
   end
 
@@ -1009,8 +1008,9 @@ defmodule EctoLibSql.Native do
   def release_savepoint_by_name(%EctoLibSql.State{trx_id: trx_id} = _state, name)
       when is_binary(trx_id) and is_binary(name) do
     case release_savepoint(trx_id, name) do
-      {} -> :ok
+      :ok -> :ok
       {:error, reason} -> {:error, reason}
+      other -> {:error, "Unexpected response: #{inspect(other)}"}
     end
   end
 
@@ -1046,8 +1046,9 @@ defmodule EctoLibSql.Native do
   def rollback_to_savepoint_by_name(%EctoLibSql.State{trx_id: trx_id} = _state, name)
       when is_binary(trx_id) and is_binary(name) do
     case rollback_to_savepoint(trx_id, name) do
-      {} -> :ok
+      :ok -> :ok
       {:error, reason} -> {:error, reason}
+      other -> {:error, "Unexpected response: #{inspect(other)}"}
     end
   end
 
@@ -1084,7 +1085,8 @@ defmodule EctoLibSql.Native do
   def get_frame_number_for_replica(conn_id) when is_binary(conn_id) do
     case get_frame_number(conn_id) do
       frame_no when is_integer(frame_no) -> {:ok, frame_no}
-      error -> {:error, error}
+      {:error, reason} -> {:error, reason}
+      other -> {:error, "Unexpected response: #{inspect(other)}"}
     end
   end
 
@@ -1119,7 +1121,8 @@ defmodule EctoLibSql.Native do
       when is_binary(conn_id) and is_integer(target_frame) do
     case sync_until(conn_id, target_frame) do
       :ok -> :ok
-      other -> {:error, other}
+      {:error, reason} -> {:error, reason}
+      other -> {:error, "Unexpected response: #{inspect(other)}"}
     end
   end
 
@@ -1150,7 +1153,8 @@ defmodule EctoLibSql.Native do
   def flush_and_get_frame(conn_id) when is_binary(conn_id) do
     case flush_replicator(conn_id) do
       frame_no when is_integer(frame_no) -> {:ok, frame_no}
-      error -> {:error, error}
+      {:error, reason} -> {:error, reason}
+      other -> {:error, "Unexpected response: #{inspect(other)}"}
     end
   end
 
