@@ -325,16 +325,27 @@ pub fn commit_or_rollback_transaction(
     _syncx: Atom,
     param: &str,
 ) -> NifResult<(rustler::Atom, String)> {
-    let entry = safe_lock(&TXN_REGISTRY, "commit_or_rollback txn_registry")?
-        .remove(trx_id)
-        .ok_or_else(|| rustler::Error::Term(Box::new("Transaction not found")))?;
+    // First, lock the registry and verify ownership before removing
+    let entry = {
+        let mut registry = safe_lock(&TXN_REGISTRY, "commit_or_rollback txn_registry")?;
 
-    // Verify that the transaction belongs to the requesting connection
-    if entry.conn_id != conn_id {
-        return Err(rustler::Error::Term(Box::new(
-            "Transaction does not belong to this connection",
-        )));
-    }
+        // Peek at the entry to verify it exists and check ownership
+        let existing = registry
+            .get(trx_id)
+            .ok_or_else(|| rustler::Error::Term(Box::new("Transaction not found")))?;
+
+        // Verify that the transaction belongs to the requesting connection
+        if existing.conn_id != conn_id {
+            return Err(rustler::Error::Term(Box::new(
+                "Transaction does not belong to this connection",
+            )));
+        }
+
+        // Only remove after ownership is verified
+        registry
+            .remove(trx_id)
+            .expect("Transaction was just verified to exist")
+    };
 
     let result = TOKIO_RUNTIME.block_on(async {
         if param == "commit" {
