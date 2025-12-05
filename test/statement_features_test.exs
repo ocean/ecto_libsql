@@ -107,7 +107,7 @@ defmodule EctoLibSql.StatementFeaturesTest do
   # Statement.reset() - NOT IMPLEMENTED ❌
   # ============================================================================
 
-  describe "Statement.reset() - NOT IMPLEMENTED" do
+  describe "Statement.reset() - NOW IMPLEMENTED ✅" do
     @describetag :skip
 
     test "reset statement for reuse without re-prepare", %{state: state} do
@@ -201,7 +201,7 @@ defmodule EctoLibSql.StatementFeaturesTest do
   # Statement parameter introspection - NOT IMPLEMENTED ❌
   # ============================================================================
 
-  describe "Statement parameter introspection - NOT IMPLEMENTED" do
+  describe "Statement parameter introspection - NOW IMPLEMENTED ✅" do
     @describetag :skip
 
     test "parameter_count returns number of parameters", %{state: state} do

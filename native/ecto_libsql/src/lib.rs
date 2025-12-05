@@ -1,6 +1,8 @@
 use bytes::Bytes;
 use lazy_static::lazy_static;
-use libsql::{Builder, Cipher, EncryptionConfig, Rows, Transaction, TransactionBehavior, Value};
+use libsql::{
+    Builder, Cipher, EncryptionConfig, Rows, Statement, Transaction, TransactionBehavior, Value,
+};
 use once_cell::sync::Lazy;
 use rustler::atoms;
 use rustler::types::atom::nil;
@@ -79,7 +81,7 @@ pub struct CursorData {
 
 lazy_static! {
     static ref TXN_REGISTRY: Mutex<HashMap<String, Transaction>> = Mutex::new(HashMap::new());
-    static ref STMT_REGISTRY: Mutex<HashMap<String, (String, String)>> = Mutex::new(HashMap::new()); // (conn_id, sql)
+    static ref STMT_REGISTRY: Mutex<HashMap<String, (String, Arc<Mutex<Statement>>)>> = Mutex::new(HashMap::new()); // (conn_id, cached_statement)
     static ref CURSOR_REGISTRY: Mutex<HashMap<String, CursorData>> = Mutex::new(HashMap::new());
     pub static ref CONNECTION_REGISTRY: Mutex<HashMap<String, Arc<Mutex<LibSQLConn>>>> =
         Mutex::new(HashMap::new());
@@ -830,13 +832,31 @@ fn execute_transactional_batch<'a>(
 fn prepare_statement(conn_id: &str, sql: &str) -> NifResult<String> {
     let conn_map = safe_lock(&CONNECTION_REGISTRY, "prepare_statement conn_map")?;
 
-    if conn_map.get(conn_id).is_some() {
-        // Store the connection ID and SQL for later re-preparation
-        let stmt_id = Uuid::new_v4().to_string();
-        safe_lock(&STMT_REGISTRY, "prepare_statement stmt_registry")?
-            .insert(stmt_id.clone(), (conn_id.to_string(), sql.to_string()));
+    if let Some(client) = conn_map.get(conn_id) {
+        let client = client.clone();
+        let sql_to_prepare = sql.to_string();
 
-        Ok(stmt_id)
+        let stmt_result = TOKIO_RUNTIME.block_on(async {
+            let client_guard = safe_lock_arc(&client, "prepare_statement client")?;
+            let conn_guard = safe_lock_arc(&client_guard.client, "prepare_statement conn")?;
+
+            conn_guard
+                .prepare(&sql_to_prepare)
+                .await
+                .map_err(|e| rustler::Error::Term(Box::new(format!("Prepare failed: {}", e))))
+        });
+
+        match stmt_result {
+            Ok(stmt) => {
+                let stmt_id = Uuid::new_v4().to_string();
+                safe_lock(&STMT_REGISTRY, "prepare_statement stmt_registry")?.insert(
+                    stmt_id.clone(),
+                    (conn_id.to_string(), Arc::new(Mutex::new(stmt))),
+                );
+                Ok(stmt_id)
+            }
+            Err(e) => Err(e),
+        }
     } else {
         Err(rustler::Error::Term(Box::new("Invalid connection ID")))
     }
@@ -858,15 +878,11 @@ fn query_prepared<'a>(
         return Err(rustler::Error::Term(Box::new("Invalid connection ID")));
     }
 
-    let (_stored_conn_id, sql) = stmt_registry
+    let (_stored_conn_id, cached_stmt) = stmt_registry
         .get(stmt_id)
         .ok_or_else(|| rustler::Error::Term(Box::new("Statement not found")))?;
 
-    let client = conn_map
-        .get(conn_id)
-        .ok_or_else(|| rustler::Error::Term(Box::new("Connection not found")))?
-        .clone();
-    let sql = sql.clone();
+    let cached_stmt = cached_stmt.clone();
 
     let decoded_args: Vec<Value> = args
         .into_iter()
@@ -878,16 +894,13 @@ fn query_prepared<'a>(
     drop(conn_map); // Release lock before async operation
 
     let result = TOKIO_RUNTIME.block_on(async {
-        // Re-prepare the statement for each query to avoid parameter binding issues
-        let client_guard = safe_lock_arc(&client, "query_prepared client")?;
-        let conn_guard = safe_lock_arc(&client_guard.client, "query_prepared conn")?;
+        // Use cached statement with reset to clear bindings
+        let stmt_guard = safe_lock_arc(&cached_stmt, "query_prepared stmt")?;
 
-        let stmt = conn_guard
-            .prepare(&sql)
-            .await
-            .map_err(|e| rustler::Error::Term(Box::new(format!("Prepare failed: {}", e))))?;
+        // Reset clears any previous bindings
+        stmt_guard.reset();
 
-        let res = stmt.query(decoded_args).await;
+        let res = stmt_guard.query(decoded_args).await;
 
         match res {
             Ok(rows) => {
@@ -922,15 +935,11 @@ fn execute_prepared<'a>(
         return Err(rustler::Error::Term(Box::new("Invalid connection ID")));
     }
 
-    let client = conn_map
-        .get(conn_id)
-        .ok_or_else(|| rustler::Error::Term(Box::new("Connection not found")))?
-        .clone();
-    let (_stored_conn_id, sql) = stmt_registry
+    let (_stored_conn_id, cached_stmt) = stmt_registry
         .get(stmt_id)
         .ok_or_else(|| rustler::Error::Term(Box::new("Statement not found")))?;
 
-    let sql = sql.clone();
+    let cached_stmt = cached_stmt.clone();
 
     let decoded_args: Vec<Value> = args
         .into_iter()
@@ -944,16 +953,13 @@ fn execute_prepared<'a>(
     drop(conn_map); // Release lock before async operation
 
     let result = TOKIO_RUNTIME.block_on(async {
-        // Re-prepare the statement for each execute to avoid parameter binding issues
-        let client_guard = safe_lock_arc(&client, "execute_prepared client")?;
-        let conn_guard = safe_lock_arc(&client_guard.client, "execute_prepared conn")?;
+        // Use cached statement with reset to clear bindings
+        let stmt_guard = safe_lock_arc(&cached_stmt, "execute_prepared stmt")?;
 
-        let stmt = conn_guard
-            .prepare(&sql)
-            .await
-            .map_err(|e| rustler::Error::Term(Box::new(format!("Prepare failed: {}", e))))?;
+        // Reset clears any previous bindings
+        stmt_guard.reset();
 
-        let affected = stmt
+        let affected = stmt_guard
             .execute(decoded_args)
             .await
             .map_err(|e| rustler::Error::Term(Box::new(format!("Execute failed: {}", e))))?;
@@ -1514,32 +1520,19 @@ fn statement_column_count(conn_id: &str, stmt_id: &str) -> NifResult<usize> {
         return Err(rustler::Error::Term(Box::new("Invalid connection ID")));
     }
 
-    let (_stored_conn_id, sql) = stmt_registry
+    let (_stored_conn_id, cached_stmt) = stmt_registry
         .get(stmt_id)
         .ok_or_else(|| rustler::Error::Term(Box::new("Statement not found")))?;
 
-    let client = conn_map
-        .get(conn_id)
-        .ok_or_else(|| rustler::Error::Term(Box::new("Connection not found")))?
-        .clone();
-    let sql = sql.clone();
+    let cached_stmt = cached_stmt.clone();
 
     drop(stmt_registry);
     drop(conn_map);
 
-    let result = TOKIO_RUNTIME.block_on(async {
-        let client_guard = safe_lock_arc(&client, "statement_column_count client")?;
-        let conn_guard = safe_lock_arc(&client_guard.client, "statement_column_count conn")?;
+    let stmt_guard = safe_lock_arc(&cached_stmt, "statement_column_count stmt")?;
+    let count = stmt_guard.column_count();
 
-        let stmt = conn_guard
-            .prepare(&sql)
-            .await
-            .map_err(|e| rustler::Error::Term(Box::new(format!("Prepare failed: {}", e))))?;
-
-        Ok::<usize, rustler::Error>(stmt.column_count())
-    })?;
-
-    Ok(result)
+    Ok(count)
 }
 
 /// Get the name of a column in a prepared statement by its index.
@@ -1553,44 +1546,29 @@ fn statement_column_name(conn_id: &str, stmt_id: &str, idx: usize) -> NifResult<
         return Err(rustler::Error::Term(Box::new("Invalid connection ID")));
     }
 
-    let (_stored_conn_id, sql) = stmt_registry
+    let (_stored_conn_id, cached_stmt) = stmt_registry
         .get(stmt_id)
         .ok_or_else(|| rustler::Error::Term(Box::new("Statement not found")))?;
 
-    let client = conn_map
-        .get(conn_id)
-        .ok_or_else(|| rustler::Error::Term(Box::new("Connection not found")))?
-        .clone();
-    let sql = sql.clone();
+    let cached_stmt = cached_stmt.clone();
 
     drop(stmt_registry);
     drop(conn_map);
 
-    let result = TOKIO_RUNTIME.block_on(async {
-        let client_guard = safe_lock_arc(&client, "statement_column_name client")?;
-        let conn_guard = safe_lock_arc(&client_guard.client, "statement_column_name conn")?;
+    let stmt_guard = safe_lock_arc(&cached_stmt, "statement_column_name stmt")?;
+    let columns = stmt_guard.columns();
 
-        let stmt = conn_guard
-            .prepare(&sql)
-            .await
-            .map_err(|e| rustler::Error::Term(Box::new(format!("Prepare failed: {}", e))))?;
+    if idx >= columns.len() {
+        return Err(rustler::Error::Term(Box::new(format!(
+            "Column index {} out of bounds (statement has {} columns)",
+            idx,
+            columns.len()
+        ))));
+    }
 
-        let columns = stmt.columns();
+    let column_name = columns[idx].name().to_string();
 
-        if idx >= columns.len() {
-            return Err(rustler::Error::Term(Box::new(format!(
-                "Column index {} out of bounds (statement has {} columns)",
-                idx,
-                columns.len()
-            ))));
-        }
-
-        let column_name = columns[idx].name().to_string();
-
-        Ok::<String, rustler::Error>(column_name)
-    })?;
-
-    Ok(result)
+    Ok(column_name)
 }
 
 /// Get the number of parameters in a prepared statement.
@@ -1604,39 +1582,26 @@ fn statement_parameter_count(conn_id: &str, stmt_id: &str) -> NifResult<usize> {
         return Err(rustler::Error::Term(Box::new("Invalid connection ID")));
     }
 
-    let (_stored_conn_id, sql) = stmt_registry
+    let (_stored_conn_id, cached_stmt) = stmt_registry
         .get(stmt_id)
         .ok_or_else(|| rustler::Error::Term(Box::new("Statement not found")))?;
 
-    let client = conn_map
-        .get(conn_id)
-        .ok_or_else(|| rustler::Error::Term(Box::new("Connection not found")))?
-        .clone();
-    let sql = sql.clone();
+    let cached_stmt = cached_stmt.clone();
 
     drop(stmt_registry);
     drop(conn_map);
 
-    let result = TOKIO_RUNTIME.block_on(async {
-        let client_guard = safe_lock_arc(&client, "statement_parameter_count client")?;
-        let conn_guard = safe_lock_arc(&client_guard.client, "statement_parameter_count conn")?;
+    let stmt_guard = safe_lock_arc(&cached_stmt, "statement_parameter_count stmt")?;
+    let count = stmt_guard.parameter_count();
 
-        let stmt = conn_guard
-            .prepare(&sql)
-            .await
-            .map_err(|e| rustler::Error::Term(Box::new(format!("Prepare failed: {}", e))))?;
-
-        Ok::<usize, rustler::Error>(stmt.parameter_count())
-    })?;
-
-    Ok(result)
+    Ok(count)
 }
 
 /// Validate that a savepoint name is a valid SQL identifier.
-/// Must be non-empty, alphanumeric + underscore, and not start with a digit.
+/// Must be non-empty, ASCII alphanumeric + underscore, and not start with a digit.
 fn validate_savepoint_name(name: &str) -> Result<(), rustler::Error> {
     if name.is_empty()
-        || !name.chars().all(|c| c.is_alphanumeric() || c == '_')
+        || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
         || name.chars().next().map_or(true, |c| c.is_ascii_digit())
     {
         return Err(rustler::Error::Term(Box::new(

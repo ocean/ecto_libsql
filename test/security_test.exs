@@ -1,5 +1,5 @@
 defmodule EctoLibSql.SecurityTest do
-  use ExUnit.Case, async: true
+  use ExUnit.Case, async: false
 
   @moduledoc """
   Security tests for EctoLibSql focusing on:
@@ -26,7 +26,12 @@ defmodule EctoLibSql.SecurityTest do
       )
 
     on_exit(fn ->
-      EctoLibSql.disconnect([], state)
+      try do
+        EctoLibSql.disconnect([], state)
+      rescue
+        _ -> :ok
+      end
+
       File.rm(db_path)
     end)
 

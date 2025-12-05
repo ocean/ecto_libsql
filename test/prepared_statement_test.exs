@@ -60,15 +60,11 @@ defmodule EctoLibSql.PreparedStatementTest do
     end
 
     test "prepare invalid SQL returns error", %{state: state} do
-      # Note: prepare only stores SQL, actual validation happens on execute
-      {:ok, stmt_id} = Native.prepare(state, "INVALID SQL SYNTAX")
-      assert is_binary(stmt_id)
-
-      # But executing it should fail
-      assert {:error, _reason} = Native.query_stmt(state, stmt_id, [])
-
-      # Cleanup
-      Native.close_stmt(stmt_id)
+      # Note: prepare now validates SQL immediately (not deferred to execute)
+      # This is better - catch errors early
+      assert {:error, reason} = Native.prepare(state, "INVALID SQL SYNTAX")
+      assert reason =~ "Prepare failed"
+      assert reason =~ "syntax error"
     end
 
     test "prepare parameterised query with placeholders", %{state: state} do
