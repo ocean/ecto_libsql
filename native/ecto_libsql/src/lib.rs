@@ -875,10 +875,14 @@ fn execute_transactional_batch<'a>(
 // Prepared statement support
 #[rustler::nif(schedule = "DirtyIo")]
 fn prepare_statement(conn_id: &str, sql: &str) -> NifResult<String> {
-    let conn_map = safe_lock(&CONNECTION_REGISTRY, "prepare_statement conn_map")?;
-
-    if let Some(client) = conn_map.get(conn_id) {
-        let client = client.clone();
+    let client = {
+        let conn_map = safe_lock(&CONNECTION_REGISTRY, "prepare_statement conn_map")?;
+        conn_map
+            .get(conn_id)
+            .cloned()
+            .ok_or_else(|| rustler::Error::Term(Box::new("Invalid connection ID")))?
+    };
+    {
         let sql_to_prepare = sql.to_string();
 
         let stmt_result = TOKIO_RUNTIME.block_on(async {
@@ -902,8 +906,6 @@ fn prepare_statement(conn_id: &str, sql: &str) -> NifResult<String> {
             }
             Err(e) => Err(e),
         }
-    } else {
-        Err(rustler::Error::Term(Box::new("Invalid connection ID")))
     }
 }
 
