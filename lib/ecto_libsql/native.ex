@@ -170,6 +170,9 @@ defmodule EctoLibSql.Native do
   @doc false
   def flush_replicator(_conn_id), do: :erlang.nif_error(:nif_not_loaded)
 
+  @doc false
+  def max_write_replication_index(_conn_id), do: :erlang.nif_error(:nif_not_loaded)
+
   # Internal NIF function - not supported, marked for deprecation
   # Always returns :unsupported atom rather than implementing the operation
   @doc false
@@ -1162,6 +1165,47 @@ defmodule EctoLibSql.Native do
   """
   def flush_and_get_frame(conn_id) when is_binary(conn_id) do
     case flush_replicator(conn_id) do
+      frame_no when is_integer(frame_no) -> {:ok, frame_no}
+      {:error, reason} -> {:error, reason}
+      other -> {:error, "Unexpected response: #{inspect(other)}"}
+    end
+  end
+
+  @doc """
+  Get the highest frame number from write operations on this database.
+
+  This is useful for read-your-writes consistency across replicas. After
+  performing writes on one connection (typically a primary or another replica),
+  you can use this function to get the maximum write frame, then use
+  `sync_until_frame/2` on other replicas to ensure they've synced up to at
+  least that frame before reading.
+
+  ## Parameters
+    - conn_id: The connection ID
+
+  ## Returns
+    - `{:ok, frame_no}` - The highest frame number from write operations (0 if no writes tracked)
+    - `{:error, reason}` - If the connection is invalid
+
+  ## Example
+
+      # On primary/writer connection, after writes
+      {:ok, max_write_frame} = EctoLibSql.Native.get_max_write_frame(primary_conn_id)
+
+      # On replica connection, ensure it's synced to at least that frame
+      :ok = EctoLibSql.Native.sync_until_frame(replica_conn_id, max_write_frame)
+
+      # Now safe to read from replica - guaranteed to see writes from primary
+
+  ## Notes
+    - Returns 0 if the database doesn't track write replication index
+    - Different from `get_frame_number_for_replica/1` which returns current replication position
+    - This tracks the highest frame number from YOUR write operations
+    - Essential for read-your-writes consistency in multi-replica setups
+
+  """
+  def get_max_write_frame(conn_id) when is_binary(conn_id) do
+    case max_write_replication_index(conn_id) do
       frame_no when is_integer(frame_no) -> {:ok, frame_no}
       {:error, reason} -> {:error, reason}
       other -> {:error, "Unexpected response: #{inspect(other)}"}

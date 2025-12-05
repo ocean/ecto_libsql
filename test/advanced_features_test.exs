@@ -1,6 +1,6 @@
 defmodule EctoLibSql.AdvancedFeaturesTest do
   @moduledoc """
-  Tests for advanced features like MVCC mode, cacheflush, replication control, etc.
+  Tests for advanced features like extensions, cacheflush, replication control, etc.
 
   Most of these features are not yet implemented and are marked as skipped.
   """
@@ -14,7 +14,7 @@ defmodule EctoLibSql.AdvancedFeaturesTest do
   # ============================================================================
 
   # ============================================================================
-  # Replication control - NOT IMPLEMENTED ❌
+  # Replication control
   # ============================================================================
 
   describe "replication control - partially implemented" do
@@ -28,6 +28,58 @@ defmodule EctoLibSql.AdvancedFeaturesTest do
       # This would require a remote replica setup
       # Placeholder for future implementation
       assert true
+    end
+
+    test "max_write_replication_index returns frame number for local db" do
+      # Test with a local database (not a replica)
+      {:ok, state} = EctoLibSql.connect(database: ":memory:")
+
+      # For a local in-memory database, this should return 0 (no replication tracking)
+      {:ok, frame_no} = EctoLibSql.Native.get_max_write_frame(state.conn_id)
+      assert is_integer(frame_no)
+      assert frame_no >= 0
+
+      EctoLibSql.disconnect([], state)
+    end
+
+    test "max_write_replication_index after write operations" do
+      # Create a temporary database file
+      db_path = "test_max_write_#{:erlang.unique_integer([:positive])}.db"
+
+      {:ok, state} = EctoLibSql.connect(database: db_path)
+
+      # Create table and insert data
+      {:ok, _, _, state} =
+        EctoLibSql.handle_execute(
+          "CREATE TABLE test (id INTEGER PRIMARY KEY, data TEXT)",
+          [],
+          [],
+          state
+        )
+
+      {:ok, _, _, state} =
+        EctoLibSql.handle_execute(
+          "INSERT INTO test (data) VALUES (?)",
+          ["test_data"],
+          [],
+          state
+        )
+
+      # Get max write frame (may be 0 for local databases without replication)
+      {:ok, frame_no} = EctoLibSql.Native.get_max_write_frame(state.conn_id)
+      assert is_integer(frame_no)
+      assert frame_no >= 0
+
+      EctoLibSql.disconnect([], state)
+
+      # Cleanup
+      File.rm(db_path)
+    end
+
+    test "max_write_replication_index returns error for invalid connection" do
+      # Test error handling for non-existent connection
+      result = EctoLibSql.Native.get_max_write_frame("invalid-connection-id")
+      assert {:error, _reason} = result
     end
   end
 

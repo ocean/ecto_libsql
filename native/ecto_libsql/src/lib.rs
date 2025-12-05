@@ -1926,6 +1926,37 @@ fn flush_replicator(conn_id: &str) -> NifResult<u64> {
     }
 }
 
+/// Get the highest frame number from write operations on this database.
+/// This is useful for read-your-writes consistency across replicas.
+///
+/// Returns Some(frame_no) if write operations have occurred, None otherwise.
+/// Note: This returns None (mapped to 0) rather than an error for databases
+/// that don't track write replication index.
+#[rustler::nif(schedule = "DirtyIo")]
+fn max_write_replication_index(conn_id: &str) -> NifResult<u64> {
+    let conn_map = safe_lock(&CONNECTION_REGISTRY, "max_write_replication_index conn_map")?;
+    let client = conn_map
+        .get(conn_id)
+        .ok_or_else(|| rustler::Error::Term(Box::new("Connection not found")))?
+        .clone();
+    drop(conn_map);
+
+    let result = TOKIO_RUNTIME.block_on(async {
+        let client_guard = safe_lock_arc(&client, "max_write_replication_index client")
+            .map_err(|e| format!("Failed to lock client: {:?}", e))?;
+
+        // Call max_write_replication_index() which returns Option<FrameNo>
+        let max_write_frame = client_guard.db.max_write_replication_index();
+
+        Ok::<_, String>(max_write_frame.unwrap_or(0))
+    });
+
+    match result {
+        Ok(frame_no) => Ok(frame_no),
+        Err(e) => Err(rustler::Error::Term(Box::new(e))),
+    }
+}
+
 // Note: sync_frames requires complex Frames type, skipping for now
 // Can be added later if needed with proper frame data marshalling
 
