@@ -1103,6 +1103,10 @@ defmodule EctoLibSql.Native do
     end
   end
 
+  def get_frame_number_for_replica(%EctoLibSql.State{conn_id: conn_id}) do
+    get_frame_number_for_replica(conn_id)
+  end
+
   @doc """
   Sync a remote replica until a specific frame number is reached.
 
@@ -1139,6 +1143,11 @@ defmodule EctoLibSql.Native do
     end
   end
 
+  def sync_until_frame(%EctoLibSql.State{conn_id: conn_id}, target_frame)
+      when is_integer(target_frame) do
+    sync_until_frame(conn_id, target_frame)
+  end
+
   @doc """
   Flush the replicator, pushing pending writes to the remote database.
 
@@ -1159,8 +1168,8 @@ defmodule EctoLibSql.Native do
 
   ## Notes
     - This is useful before taking snapshots or backups
-    - Returns the frame number after the flush
-    - Only works for remote replica connections
+    - Returns the frame number after the flush (0 if not a replica)
+    - For local or remote primary connections, returns 0
 
   """
   def flush_and_get_frame(conn_id) when is_binary(conn_id) do
@@ -1169,6 +1178,10 @@ defmodule EctoLibSql.Native do
       {:error, reason} -> {:error, reason}
       other -> {:error, "Unexpected response: #{inspect(other)}"}
     end
+  end
+
+  def flush_and_get_frame(%EctoLibSql.State{conn_id: conn_id}) do
+    flush_and_get_frame(conn_id)
   end
 
   @doc """
@@ -1210,6 +1223,10 @@ defmodule EctoLibSql.Native do
       {:error, reason} -> {:error, reason}
       other -> {:error, "Unexpected response: #{inspect(other)}"}
     end
+  end
+
+  def get_max_write_frame(%EctoLibSql.State{conn_id: conn_id}) do
+    get_max_write_frame(conn_id)
   end
 
   @doc """

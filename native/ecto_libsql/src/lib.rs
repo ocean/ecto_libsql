@@ -1906,7 +1906,7 @@ fn flush_replicator(conn_id: &str) -> NifResult<u64> {
         .clone();
     drop(conn_map);
 
-    let result = TOKIO_RUNTIME.block_on(async {
+    let result: Result<u64, String> = TOKIO_RUNTIME.block_on(async {
         let client_guard = safe_lock_arc(&client, "flush_replicator client")
             .map_err(|e| format!("Failed to lock client: {:?}", e))?;
 
@@ -1921,10 +1921,8 @@ fn flush_replicator(conn_id: &str) -> NifResult<u64> {
             })?
             .map_err(|e| format!("flush_replicator failed: {}", e))?;
 
-        frame_no.ok_or_else(|| {
-            "Flush replicator returned no frame number (not a replica or no frames applied)"
-                .to_string()
-        })
+        // Return 0 if not a replica (consistent with get_frame_number behavior)
+        Ok(frame_no.unwrap_or(0))
     });
 
     match result {
