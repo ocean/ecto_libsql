@@ -311,8 +311,14 @@ pub struct CursorData {
     pub position: usize,
 }
 
+// Transaction entry with ownership tracking
+pub struct TransactionEntry {
+    pub conn_id: String,        // Which connection owns this transaction
+    pub transaction: Transaction,
+}
+
 // Global registries (thread-safe)
-static ref TXN_REGISTRY: Mutex<HashMap<String, Transaction>>
+static ref TXN_REGISTRY: Mutex<HashMap<String, TransactionEntry>>  // Now tracks transaction ownership
 static ref STMT_REGISTRY: Mutex<HashMap<String, (String, String)>>
 static ref CURSOR_REGISTRY: Mutex<HashMap<String, CursorData>>
 static ref CONNECTION_REGISTRY: Mutex<HashMap<String, Arc<Mutex<LibSQLConn>>>>
@@ -766,7 +772,58 @@ test "CREATE INDEX IF NOT EXISTS" do
 end
 ```
 
-### Task 5: Debug a Failing Test
+### Task 5: Working with Transaction Ownership
+
+**Context**: Transactions are now tracked with their owning connection using `TransactionEntry` struct. All savepoint and transaction operations validate ownership.
+
+1. **Understanding TransactionEntry**:
+```rust
+pub struct TransactionEntry {
+    pub conn_id: String,        // Connection that owns this transaction
+    pub transaction: Transaction, // The actual LibSQL transaction
+}
+```
+
+2. **When accessing transactions from registry**:
+```rust
+let entry = txn_registry
+    .get_mut(trx_id)
+    .ok_or_else(|| rustler::Error::Term(Box::new("Transaction not found")))?;
+
+// Access the transaction via entry.transaction
+entry.transaction.execute(&sql, args).await
+```
+
+3. **Validating transaction ownership** (savepoint example):
+```rust
+if entry.conn_id != conn_id {
+    return Err(rustler::Error::Term(Box::new(
+        "Transaction does not belong to this connection",
+    )));
+}
+```
+
+4. **NIF signature updates**:
+   - `savepoint(conn_id, trx_id, name)` - Added conn_id parameter for consistency
+   - `release_savepoint(conn_id, trx_id, name)` - Validates ownership
+   - `rollback_to_savepoint(conn_id, trx_id, name)` - Validates ownership
+   - `commit_or_rollback_transaction(trx_id, conn_id, ...)` - Validates ownership
+
+5. **Testing transaction ownership**:
+```elixir
+test "rejects savepoint from wrong connection" do
+  {:ok, conn1} = EctoLibSql.connect([database: "test1.db"])
+  {:ok, conn2} = EctoLibSql.connect([database: "test2.db"])
+  
+  {:ok, trx_id} = EctoLibSql.Native.begin_transaction(conn1.conn_id)
+  
+  # This should fail - transaction belongs to conn1, not conn2
+  assert {:error, msg} = EctoLibSql.Native.savepoint(conn2.conn_id, trx_id, "sp1")
+  assert msg =~ "does not belong to this connection"
+end
+```
+
+### Task 6: Debug a Failing Test
 
 1. **Run with trace**: `mix test test/file.exs:123 --trace`
 2. **Check logs**: Tests configure logger to `:info` level
@@ -777,6 +834,104 @@ IO.inspect(result, label: "Result")
 ```
 4. **Check Rust output**: `cd native/ecto_libsql && cargo test -- --nocapture`
 5. **Verify NIF loading**: `File.exists?("priv/native/ecto_libsql.so")`
+
+### Task 7: Marking Functions as Explicitly Unsupported
+
+**Pattern**: When a function promised in the public API cannot be implemented due to architectural constraints, explicitly mark it as unsupported rather than hiding it or returning vague errors.
+
+**Example**: The `freeze_database` NIF (promoting a replica to primary) cannot be implemented without deep refactoring of the connection pool architecture.
+
+**Steps**:
+
+1. **Update Rust NIF** to return a clear `:unsupported` atom error:
+```rust
+#[rustler::nif(schedule = "DirtyIo")]
+fn freeze_database(conn_id: &str) -> NifResult<Atom> {
+    // Verify connection exists (basic validation)
+    let conn_map = safe_lock(&CONNECTION_REGISTRY, "freeze_database")?;
+    let _exists = conn_map
+        .get(conn_id)
+        .ok_or_else(|| rustler::Error::Term(Box::new("Connection not found")))?;
+    drop(conn_map);
+
+    // Return typed error: :unsupported atom
+    Err(rustler::Error::Atom("unsupported"))
+}
+```
+
+2. **Update Elixir wrapper** to document unsupported status clearly:
+```elixir
+@doc """
+Freeze a remote replica, converting it to a standalone local database.
+
+⚠️ **NOT SUPPORTED** - This function is currently not implemented.
+
+Freeze is intended to ... However, this operation requires deep refactoring of the
+connection pool architecture and remains unimplemented. Instead, you can:
+
+- **Option 1**: Backup the replica database file and use it independently
+- **Option 2**: Replicate all data to a new local database
+- **Option 3**: Keep the replica and manage failover at the application level
+
+Always returns `{:error, :unsupported}`.
+
+## Implementation Status
+
+- **Blocker**: Requires taking ownership of the `Database` instance
+- **Work Required**: Refactoring connection pool architecture
+- **Timeline**: Uncertain - marked for future refactoring
+
+See CLAUDE.md for technical details on why this is not currently supported.
+"""
+def freeze_replica(%EctoLibSql.State{conn_id: conn_id} = _state) when is_binary(conn_id) do
+  {:error, :unsupported}
+end
+```
+
+3. **Add comprehensive tests** asserting unsupported behavior:
+```elixir
+describe "freeze_replica - NOT SUPPORTED" do
+  test "returns :unsupported atom for any valid connection" do
+    {:ok, state} = EctoLibSql.connect(database: ":memory:")
+    result = EctoLibSql.Native.freeze_replica(state)
+    assert result == {:error, :unsupported}
+    EctoLibSql.disconnect([], state)
+  end
+
+  test "freeze does not modify database" do
+    {:ok, state} = EctoLibSql.connect(database: ":memory:")
+    
+    # Create and populate table
+    {:ok, _, _, state} = EctoLibSql.handle_execute(
+      "CREATE TABLE test (id INTEGER PRIMARY KEY, data TEXT)",
+      [], [], state
+    )
+    {:ok, _, _, state} = EctoLibSql.handle_execute(
+      "INSERT INTO test (data) VALUES (?)", ["value"], [], state
+    )
+    
+    # Call freeze - should fail gracefully
+    assert EctoLibSql.Native.freeze_replica(state) == {:error, :unsupported}
+    
+    # Verify data is still accessible
+    {:ok, _, result, _state} = EctoLibSql.handle_execute(
+      "SELECT data FROM test WHERE id = 1", [], [], state
+    )
+    assert result.rows == [["value"]]
+    
+    EctoLibSql.disconnect([], state)
+  end
+end
+```
+
+4. **Verify tests pass**: `mix test test/file_test.exs`
+
+**Why This Pattern?**:
+- **Honest API**: Users know the operation is unsupported rather than failing mysteriously
+- **Clear error codes**: `:unsupported` atom is unambiguous (not a generic string error)
+- **Future-proof docs**: Documentation explains why and what workarounds exist
+- **No hidden behavior**: Function is a no-op that doesn't corrupt state
+- **Comprehensive tests**: Prevent accidental "fixes" that break in production
 
 ---
 
@@ -1106,7 +1261,7 @@ config :my_app, MyApp.Repo,
 ```elixir
 # 1. Verify LibSQL version
 # Check native/ecto_libsql/Cargo.toml
-libsql = { version = "0.9.24", features = ["encryption"] }
+libsql = { version = "0.9.29", features = ["encryption"] }
 
 # 2. Use correct vector syntax
 vector_type = EctoLibSql.Native.vector_type(128, :f32)

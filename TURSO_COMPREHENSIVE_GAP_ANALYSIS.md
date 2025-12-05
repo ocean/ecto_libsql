@@ -3,14 +3,14 @@
 **Version**: 3.5.0 (Consolidated & Comprehensive)
 **Date**: 2025-12-02
 **EctoLibSql Version**: 0.6.0 (Released 2025-11-30)
-**LibSQL Version**: 0.9.24
+**LibSQL Version**: 0.9.29
 
 ## Executive Summary
 
 This comprehensive analysis consolidates three previous gap analyses to provide the complete picture of feature gaps between the Turso/LibSQL Rust API and the current `ecto_libsql` implementation.
 
 **Analysis Scope:**
-- Turso Rust bindings API (`libsql-rs` v0.9.24)
+- Turso Rust bindings API (`libsql-rs` v0.9.29)
 - SQLite compatibility features
 - Turso-specific enhancements
 - Performance and optimisation features
@@ -597,38 +597,50 @@ EctoLibSql.load_extension(state, "/path/to/extension.so")
 ---
 
 #### 15. Replication Control (Advanced)
-**Status**: ❌ Missing
+**Status**: ✅ **MOSTLY IMPLEMENTED** (3 of 4 features complete as of v0.7.0)
 **LibSQL API**:
-- `pub async fn sync_until(&self, replication_index: FrameNo) -> Result<Replicated>`
-- `pub async fn flush_replicator(&self) -> Result<Option<FrameNo>>`
-- `pub async fn freeze(self) -> Result<Database>`
+- ✅ `pub async fn replication_index(&self) -> Result<Option<FrameNo>>` - **IMPLEMENTED** as `get_frame_number/1`
+- ✅ `pub async fn sync_until(&self, replication_index: FrameNo) -> Result<Replicated>` - **IMPLEMENTED**
+- ✅ `pub async fn flush_replicator(&self) -> Result<Option<FrameNo>>` - **IMPLEMENTED**
+- ⚠️ `pub fn max_write_replication_index(&self) -> Option<FrameNo>` - **NOT YET IMPLEMENTED** (discovered Dec 4, 2025)
+- 🔄 `pub fn freeze(self) -> Result<Database>` - **STUBBED** (needs architecture work)
 
-**Estimated Usage**: Low (10% of applications)
-**Impact**: **LOW** - Advanced replication scenarios.
+**Estimated Usage**: Low-Medium (15% of applications)
+**Impact**: **MEDIUM** - Production replication monitoring and consistency.
 
 **Why Important**:
-- Precise replication control
-- Wait for specific replication point
-- Disaster recovery (freeze replica to standalone)
-- Offline mode
+- ✅ Monitor replication lag in real-time
+- ✅ Wait for specific replication point
+- ⭐ Track highest write frame for read-your-writes consistency
+- 🔄 Disaster recovery (freeze replica to standalone)
 
-**Use Cases**:
+**Implemented Use Cases**:
 ```elixir
-# Wait for specific replication point
-EctoLibSql.sync_until(state, frame_number)
+# Get current replication frame (WORKING)
+{:ok, frame} = EctoLibSql.Native.get_frame_number_for_replica(state)
 
-# Force flush replicator
-{:ok, frame} = EctoLibSql.flush_replicator(state)
+# Wait for specific replication point (WORKING)
+:ok = EctoLibSql.Native.sync_until_frame(state, target_frame)
 
-# Convert replica to standalone (disaster recovery)
-EctoLibSql.freeze(state)
+# Force flush replicator (WORKING)
+{:ok, frame} = EctoLibSql.Native.flush_and_get_frame(state)
+
+# Track max write frame (COMING IN v0.8.0)
+{:ok, max_write} = EctoLibSql.Native.max_write_replication_index(state)
+:ok = EctoLibSql.Native.sync_until_frame(replica_state, max_write)
+
+# Convert replica to standalone (STUBBED, needs work)
+# :ok = EctoLibSql.Native.freeze_database(state)
 ```
 
-**Implementation Notes**:
-- **Estimated Effort**: 4 days total
+**Implementation Status**:
+- ✅ **Phase 1 Complete**: All monitoring and sync functions working (v0.6.0-v0.7.0)
+- ⚠️ **Phase 2 Pending**: `max_write_replication_index()` - 2-3 hours work
+- 🔄 **Phase 3 Deferred**: `freeze()` - needs Arc<Mutex<>> architecture refactor
 
 **References**:
-- LibSQL Source: `libsql/src/database.rs` - sync methods
+- LibSQL Source: `libsql/src/database.rs` - sync methods (lines 414-483)
+- EctoLibSql: `native/ecto_libsql/src/lib.rs` (lines 1718-1831)
 
 ---
 
@@ -1225,7 +1237,7 @@ This analysis is based on multiple authoritative sources:
 
 ### 1. LibSQL Rust Source Code (Primary Authority)
 **Analysed**: 2025-12-01 to 2025-12-02
-**Version**: libsql 0.9.24
+**Version**: libsql 0.9.29
 
 - **Connection API**: [libsql/src/connection.rs](https://github.com/tursodatabase/libsql/blob/main/libsql/src/connection.rs)
   - `busy_timeout()`, `reset()`, `interrupt()`, `load_extension()`
@@ -1438,7 +1450,7 @@ let stmt = conn_guard
 
 **Document Version**: 3.5.0 (Consolidated & Comprehensive)
 **Analysis Date**: 2025-12-02
-**Based On**: ecto_libsql 0.6.0, libsql 0.9.24
+**Based On**: ecto_libsql 0.6.0, libsql 0.9.29
 **Consolidates**: Gap Analysis v1.0.0, v2.0.0, v3.2.0
 **Next Review**: After Phase 1 implementation (v0.7.0)
 **Maintained By**: AI Analysis + Community Input + Source Code Verification

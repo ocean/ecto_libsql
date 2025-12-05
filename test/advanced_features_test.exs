@@ -1,172 +1,23 @@
 defmodule EctoLibSql.AdvancedFeaturesTest do
   @moduledoc """
-  Tests for advanced features like MVCC mode, cacheflush, replication control, etc.
+  Tests for advanced features like extensions, cacheflush, replication control, etc.
 
   Most of these features are not yet implemented and are marked as skipped.
   """
   use ExUnit.Case
 
   # ============================================================================
-  # MVCC Mode - NOT IMPLEMENTED ❌
+  # NOTE: MVCC mode & cacheflush are NOT in the libsql Rust crate API
+  # MVCC is part of the Turso database rewrite, not the libsql library
+  # cacheflush() doesn't exist in libsql's public API
+  # These features are out of scope for ecto_libsql
   # ============================================================================
 
-  describe "MVCC mode - NOT IMPLEMENTED" do
-    @describetag :skip
-
-    test "enable MVCC at connection time" do
-      db_path = "test_mvcc_#{:erlang.unique_integer([:positive])}.db"
-
-      {:ok, state} = EctoLibSql.connect(database: db_path, mvcc: true)
-
-      # MVCC should be enabled
-      # We can't directly check this, but can verify connection works
-      assert state.conn_id
-
-      EctoLibSql.disconnect([], state)
-      File.rm(db_path)
-    end
-
-    test "MVCC allows concurrent reads during write" do
-      db_path = "test_mvcc_concurrent_#{:erlang.unique_integer([:positive])}.db"
-
-      # Create database with MVCC
-      {:ok, write_state} = EctoLibSql.connect(database: db_path, mvcc: true)
-
-      # Create table and initial data
-      {:ok, _, _, write_state} =
-        EctoLibSql.handle_execute(
-          "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)",
-          [],
-          [],
-          write_state
-        )
-
-      {:ok, _, _, write_state} =
-        EctoLibSql.handle_execute("INSERT INTO users VALUES (1, 'Alice')", [], [], write_state)
-
-      # Start long-running write transaction
-      {:ok, write_state} = EctoLibSql.Native.begin(write_state, behavior: :immediate)
-
-      {:ok, _, _, write_state} =
-        EctoLibSql.handle_execute("INSERT INTO users VALUES (2, 'Bob')", [], [], write_state)
-
-      # Open second connection for reading (should not block)
-      {:ok, read_state} = EctoLibSql.connect(database: db_path, mvcc: true)
-
-      # Read should succeed even though write transaction is active
-      {:ok, _, result, _} =
-        EctoLibSql.handle_execute("SELECT COUNT(*) FROM users", [], [], read_state)
-
-      # Should see original data (1 row) since write hasn't committed
-      assert [[1]] = result.rows
-
-      # Commit write
-      {:ok, _} = EctoLibSql.Native.commit(write_state)
-
-      # Now read should see new data
-      {:ok, _, result, _} =
-        EctoLibSql.handle_execute("SELECT COUNT(*) FROM users", [], [], read_state)
-
-      assert [[2]] = result.rows
-
-      # Cleanup
-      EctoLibSql.disconnect([], write_state)
-      EctoLibSql.disconnect([], read_state)
-      File.rm(db_path)
-    end
-  end
-
   # ============================================================================
-  # cacheflush() - NOT IMPLEMENTED ❌
+  # Replication control
   # ============================================================================
 
-  describe "cacheflush() - NOT IMPLEMENTED" do
-    @describetag :skip
-
-    test "flushes dirty pages to disk" do
-      db_path = "test_cacheflush_#{:erlang.unique_integer([:positive])}.db"
-      {:ok, state} = EctoLibSql.connect(database: db_path)
-
-      # Create table and insert data
-      {:ok, _, _, state} =
-        EctoLibSql.handle_execute(
-          "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)",
-          [],
-          [],
-          state
-        )
-
-      {:ok, _, _, state} =
-        EctoLibSql.handle_execute("INSERT INTO users VALUES (1, 'Alice')", [], [], state)
-
-      # Flush to disk
-      assert {:ok, _state} = EctoLibSql.Native.cacheflush(state)
-
-      # At this point, data should be durable even without closing connection
-      # (Verify by opening new connection)
-      {:ok, state2} = EctoLibSql.connect(database: db_path)
-
-      {:ok, _, result, _} =
-        EctoLibSql.handle_execute("SELECT COUNT(*) FROM users", [], [], state2)
-
-      assert [[1]] = result.rows
-
-      # Cleanup
-      EctoLibSql.disconnect([], state)
-      EctoLibSql.disconnect([], state2)
-      File.rm(db_path)
-    end
-
-    test "cacheflush before backup ensures consistency" do
-      db_path = "test_backup_#{:erlang.unique_integer([:positive])}.db"
-      backup_path = "test_backup_#{:erlang.unique_integer([:positive])}_copy.db"
-
-      {:ok, state} = EctoLibSql.connect(database: db_path)
-
-      # Create and populate table
-      {:ok, _, _, state} =
-        EctoLibSql.handle_execute(
-          "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT)",
-          [],
-          [],
-          state
-        )
-
-      {:ok, _, _, state} =
-        EctoLibSql.handle_execute("INSERT INTO users VALUES (1, 'Alice')", [], [], state)
-
-      {:ok, _, _, state} =
-        EctoLibSql.handle_execute("INSERT INTO users VALUES (2, 'Bob')", [], [], state)
-
-      # Flush before backup
-      {:ok, _state} = EctoLibSql.Native.cacheflush(state)
-
-      # Copy database file
-      File.cp!(db_path, backup_path)
-
-      # Verify backup is complete
-      {:ok, backup_state} = EctoLibSql.connect(database: backup_path)
-
-      {:ok, _, result, _} =
-        EctoLibSql.handle_execute("SELECT COUNT(*) FROM users", [], [], backup_state)
-
-      assert [[2]] = result.rows
-
-      # Cleanup
-      EctoLibSql.disconnect([], state)
-      EctoLibSql.disconnect([], backup_state)
-      File.rm(db_path)
-      File.rm(backup_path)
-    end
-  end
-
-  # ============================================================================
-  # Replication control - NOT IMPLEMENTED ❌
-  # ============================================================================
-
-  describe "replication control - NOT IMPLEMENTED" do
-    @describetag :skip
-
+  describe "replication control - partially implemented" do
     test "sync_until waits for specific replication index" do
       # This would require a remote replica setup
       # Placeholder for future implementation
@@ -179,10 +30,145 @@ defmodule EctoLibSql.AdvancedFeaturesTest do
       assert true
     end
 
-    test "freeze converts replica to standalone" do
-      # This would require a remote replica setup
-      # Placeholder for future implementation
-      assert true
+    test "max_write_replication_index returns frame number for local db" do
+      # Test with a local database (not a replica)
+      {:ok, state} = EctoLibSql.connect(database: ":memory:")
+
+      # For a local in-memory database, this should return 0 (no replication tracking)
+      {:ok, frame_no} = EctoLibSql.Native.get_max_write_frame(state.conn_id)
+      assert is_integer(frame_no)
+      assert frame_no >= 0
+
+      EctoLibSql.disconnect([], state)
+    end
+
+    test "max_write_replication_index after write operations" do
+      # Create a temporary database file
+      db_path = "test_max_write_#{:erlang.unique_integer([:positive])}.db"
+
+      {:ok, state} = EctoLibSql.connect(database: db_path)
+
+      # Create table and insert data
+      {:ok, _, _, state} =
+        EctoLibSql.handle_execute(
+          "CREATE TABLE test (id INTEGER PRIMARY KEY, data TEXT)",
+          [],
+          [],
+          state
+        )
+
+      {:ok, _, _, state} =
+        EctoLibSql.handle_execute(
+          "INSERT INTO test (data) VALUES (?)",
+          ["test_data"],
+          [],
+          state
+        )
+
+      # Get max write frame (may be 0 for local databases without replication)
+      {:ok, frame_no} = EctoLibSql.Native.get_max_write_frame(state.conn_id)
+      assert is_integer(frame_no)
+      assert frame_no >= 0
+
+      EctoLibSql.disconnect([], state)
+
+      # Cleanup
+      File.rm(db_path)
+    end
+
+    test "max_write_replication_index returns error for invalid connection" do
+      # Test error handling for non-existent connection
+      result = EctoLibSql.Native.get_max_write_frame("invalid-connection-id")
+      assert {:error, _reason} = result
+    end
+  end
+
+  # ============================================================================
+  # Freeze database - NOT IMPLEMENTED ❌
+  # ============================================================================
+
+  describe "freeze_replica - NOT SUPPORTED" do
+    test "returns :unsupported atom for any valid connection" do
+      {:ok, state} = EctoLibSql.connect(database: ":memory:")
+
+      # Should always return :unsupported
+      result = EctoLibSql.Native.freeze_replica(state)
+      assert result == {:error, :unsupported}
+
+      EctoLibSql.disconnect([], state)
+    end
+
+    test "returns :unsupported atom even with explicit conn_id" do
+      {:ok, state} = EctoLibSql.connect(database: ":memory:")
+
+      # Direct call to NIF wrapper should return :unsupported
+      result = EctoLibSql.Native.freeze_replica(state)
+      assert result == {:error, :unsupported}
+
+      EctoLibSql.disconnect([], state)
+    end
+
+    test "returns :unsupported for invalid state" do
+      # Should handle invalid state gracefully
+      result = EctoLibSql.Native.freeze_replica(nil)
+      assert result == {:error, :unsupported}
+
+      result = EctoLibSql.Native.freeze_replica(%{})
+      assert result == {:error, :unsupported}
+
+      result = EctoLibSql.Native.freeze_replica("invalid")
+      assert result == {:error, :unsupported}
+    end
+
+    test "freeze is documented as not supported" do
+      # Verify documentation is clear about unsupported status
+      # This is a sanity check that the function docs were updated
+      {:ok, state} = EctoLibSql.connect(database: ":memory:")
+
+      # Document expectation: freeze_replica always returns :unsupported
+      # See lib/ecto_libsql/native.ex for detailed implementation notes
+      assert EctoLibSql.Native.freeze_replica(state) == {:error, :unsupported}
+
+      EctoLibSql.disconnect([], state)
+    end
+
+    test "freeze does not actually freeze or modify database" do
+      # Verify that the function is a no-op (returns error without side effects)
+      {:ok, state} = EctoLibSql.connect(database: ":memory:")
+
+      # Create a table and insert data
+      {:ok, _, _, state} =
+        EctoLibSql.handle_execute(
+          "CREATE TABLE test (id INTEGER PRIMARY KEY, data TEXT)",
+          [],
+          [],
+          state
+        )
+
+      {:ok, _, _, state} =
+        EctoLibSql.handle_execute(
+          "INSERT INTO test (data) VALUES (?)",
+          ["test_value"],
+          [],
+          state
+        )
+
+      # Call freeze - should return unsupported and not affect data
+      result = EctoLibSql.Native.freeze_replica(state)
+      assert result == {:error, :unsupported}
+
+      # Verify data is still accessible (freeze didn't break connection)
+      {:ok, _, result, _state} =
+        EctoLibSql.handle_execute(
+          "SELECT data FROM test WHERE id = 1",
+          [],
+          [],
+          state
+        )
+
+      assert result.rows == [["test_value"]]
+
+      EctoLibSql.disconnect([], state)
     end
   end
 

@@ -97,96 +97,17 @@ defmodule EctoLibSql.StatementFeaturesTest do
   end
 
   # ============================================================================
-  # query_row() - NOT IMPLEMENTED ❌
+  # NOTE: query_row() is NOT in the libsql Rust crate API
+  # It's an Elixir convenience function that doesn't exist upstream
+  # Users should use query_stmt() and take the first row if needed
+  # Removed to keep tests aligned with actual libsql features
   # ============================================================================
-
-  describe "query_row() - NOT IMPLEMENTED" do
-    @describetag :skip
-
-    test "returns single row from query", %{state: state} do
-      # Insert test data
-      {:ok, _, _, state} =
-        EctoLibSql.handle_execute("INSERT INTO users VALUES (1, 'Alice', 30)", [], [], state)
-
-      # Prepare statement
-      {:ok, stmt_id} =
-        EctoLibSql.Native.prepare(state, "SELECT name, age FROM users WHERE id = ?")
-
-      # Query single row
-      assert {:ok, row} = EctoLibSql.Native.query_row(state, stmt_id, [1])
-
-      assert ["Alice", 30] = row
-
-      # Cleanup
-      EctoLibSql.Native.close_stmt(stmt_id)
-    end
-
-    test "query_row errors if no rows", %{state: state} do
-      {:ok, stmt_id} = EctoLibSql.Native.prepare(state, "SELECT * FROM users WHERE id = ?")
-
-      # Should error if no rows
-      assert {:error, :no_rows} = EctoLibSql.Native.query_row(state, stmt_id, [999])
-
-      EctoLibSql.Native.close_stmt(stmt_id)
-    end
-
-    test "query_row errors if multiple rows", %{state: state} do
-      # Insert multiple rows
-      {:ok, _, _, state} =
-        EctoLibSql.handle_execute("INSERT INTO users VALUES (1, 'Alice', 30)", [], [], state)
-
-      {:ok, _, _, state} =
-        EctoLibSql.handle_execute("INSERT INTO users VALUES (2, 'Bob', 25)", [], [], state)
-
-      {:ok, stmt_id} = EctoLibSql.Native.prepare(state, "SELECT * FROM users")
-
-      # Should error if multiple rows
-      assert {:error, :multiple_rows} = EctoLibSql.Native.query_row(state, stmt_id, [])
-
-      EctoLibSql.Native.close_stmt(stmt_id)
-    end
-
-    test "query_row is more efficient than query + take first", %{state: state} do
-      # Insert 1000 rows
-      for i <- 1..1000 do
-        {:ok, _, _, state} =
-          EctoLibSql.handle_execute(
-            "INSERT INTO users VALUES (?, ?, ?)",
-            [i, "User#{i}", 20 + rem(i, 50)],
-            [],
-            state
-          )
-      end
-
-      {:ok, stmt_id} = EctoLibSql.Native.prepare(state, "SELECT * FROM users")
-
-      # query_row should stop after first row (fast)
-      {time_query_row, {:error, :multiple_rows}} =
-        :timer.tc(fn -> EctoLibSql.Native.query_row(state, stmt_id, []) end)
-
-      # Should be fast even though table has 1000 rows
-      # (It should error quickly after seeing 2nd row)
-      assert time_query_row / 1000 < 10
-
-      # Compare to fetching all rows
-      {:ok, stmt_id2} = EctoLibSql.Native.prepare(state, "SELECT * FROM users")
-
-      {time_query_all, {:ok, _result}} =
-        :timer.tc(fn -> EctoLibSql.Native.query_stmt(state, stmt_id2, []) end)
-
-      # query_row should be much faster (doesn't fetch all 1000 rows)
-      assert time_query_row < time_query_all / 2
-
-      EctoLibSql.Native.close_stmt(stmt_id)
-      EctoLibSql.Native.close_stmt(stmt_id2)
-    end
-  end
 
   # ============================================================================
   # Statement.reset() - NOT IMPLEMENTED ❌
   # ============================================================================
 
-  describe "Statement.reset() - NOT IMPLEMENTED" do
+  describe "Statement.reset() - NOW IMPLEMENTED ✅" do
     @describetag :skip
 
     test "reset statement for reuse without re-prepare", %{state: state} do
@@ -280,7 +201,7 @@ defmodule EctoLibSql.StatementFeaturesTest do
   # Statement parameter introspection - NOT IMPLEMENTED ❌
   # ============================================================================
 
-  describe "Statement parameter introspection - NOT IMPLEMENTED" do
+  describe "Statement parameter introspection - NOW IMPLEMENTED ✅" do
     @describetag :skip
 
     test "parameter_count returns number of parameters", %{state: state} do

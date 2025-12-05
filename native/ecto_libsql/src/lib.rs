@@ -1,6 +1,8 @@
 use bytes::Bytes;
 use lazy_static::lazy_static;
-use libsql::{Builder, Cipher, EncryptionConfig, Rows, Transaction, TransactionBehavior, Value};
+use libsql::{
+    Builder, Cipher, EncryptionConfig, Rows, Statement, Transaction, TransactionBehavior, Value,
+};
 use once_cell::sync::Lazy;
 use rustler::atoms;
 use rustler::types::atom::nil;
@@ -72,14 +74,21 @@ pub struct LibSQLConn {
 
 #[derive(Debug)]
 pub struct CursorData {
+    pub conn_id: String,
     pub columns: Vec<String>,
     pub rows: Vec<Vec<Value>>,
     pub position: usize,
 }
 
+/// Transaction with ownership tracking
+pub struct TransactionEntry {
+    pub conn_id: String,
+    pub transaction: Transaction,
+}
+
 lazy_static! {
-    static ref TXN_REGISTRY: Mutex<HashMap<String, Transaction>> = Mutex::new(HashMap::new());
-    static ref STMT_REGISTRY: Mutex<HashMap<String, (String, String)>> = Mutex::new(HashMap::new()); // (conn_id, sql)
+    static ref TXN_REGISTRY: Mutex<HashMap<String, TransactionEntry>> = Mutex::new(HashMap::new());
+    static ref STMT_REGISTRY: Mutex<HashMap<String, (String, Arc<Mutex<Statement>>)>> = Mutex::new(HashMap::new()); // (conn_id, cached_statement)
     static ref CURSOR_REGISTRY: Mutex<HashMap<String, CursorData>> = Mutex::new(HashMap::new());
     pub static ref CONNECTION_REGISTRY: Mutex<HashMap<String, Arc<Mutex<LibSQLConn>>>> =
         Mutex::new(HashMap::new());
@@ -136,6 +145,45 @@ fn decode_transaction_behavior(atom: Atom) -> Option<TransactionBehavior> {
     }
 }
 
+/// Helper function to verify transaction ownership.
+///
+/// Returns an error if the transaction does not belong to the specified connection.
+fn verify_transaction_ownership(
+    entry: &TransactionEntry,
+    conn_id: &str,
+) -> Result<(), rustler::Error> {
+    if entry.conn_id != conn_id {
+        return Err(rustler::Error::Term(Box::new(
+            "Transaction does not belong to this connection",
+        )));
+    }
+    Ok(())
+}
+
+/// Helper function to verify statement ownership.
+///
+/// Returns an error if the statement does not belong to the specified connection.
+fn verify_statement_ownership(stmt_conn_id: &str, conn_id: &str) -> Result<(), rustler::Error> {
+    if stmt_conn_id != conn_id {
+        return Err(rustler::Error::Term(Box::new(
+            "Statement does not belong to connection",
+        )));
+    }
+    Ok(())
+}
+
+/// Helper function to verify cursor ownership.
+///
+/// Returns an error if the cursor does not belong to the specified connection.
+fn verify_cursor_ownership(cursor: &CursorData, conn_id: &str) -> Result<(), rustler::Error> {
+    if cursor.conn_id != conn_id {
+        return Err(rustler::Error::Term(Box::new(
+            "Cursor does not belong to connection",
+        )));
+    }
+    Ok(())
+}
+
 #[rustler::nif(schedule = "DirtyIo")]
 pub fn begin_transaction(conn_id: &str) -> NifResult<String> {
     let conn_map = safe_lock(&CONNECTION_REGISTRY, "begin_transaction conn_map")?;
@@ -148,7 +196,11 @@ pub fn begin_transaction(conn_id: &str) -> NifResult<String> {
             .map_err(|e| rustler::Error::Term(Box::new(format!("Begin failed: {}", e))))?;
 
         let trx_id = Uuid::new_v4().to_string();
-        safe_lock(&TXN_REGISTRY, "begin_transaction txn_registry")?.insert(trx_id.clone(), trx);
+        let entry = TransactionEntry {
+            conn_id: conn_id.to_string(),
+            transaction: trx,
+        };
+        safe_lock(&TXN_REGISTRY, "begin_transaction txn_registry")?.insert(trx_id.clone(), entry);
 
         Ok(trx_id)
     } else {
@@ -179,11 +231,15 @@ pub fn begin_transaction_with_behavior(conn_id: &str, behavior: Atom) -> NifResu
             .map_err(|e| rustler::Error::Term(Box::new(format!("Begin failed: {}", e))))?;
 
         let trx_id = Uuid::new_v4().to_string();
+        let entry = TransactionEntry {
+            conn_id: conn_id.to_string(),
+            transaction: trx,
+        };
         safe_lock(
             &TXN_REGISTRY,
             "begin_transaction_with_behavior txn_registry",
         )?
-        .insert(trx_id.clone(), trx);
+        .insert(trx_id.clone(), entry);
 
         Ok(trx_id)
     } else {
@@ -198,14 +254,19 @@ pub fn begin_transaction_with_behavior(conn_id: &str, behavior: Atom) -> NifResu
 #[rustler::nif(schedule = "DirtyIo")]
 pub fn execute_with_transaction<'a>(
     trx_id: &str,
+    conn_id: &str,
     query: &str,
     args: Vec<Term<'a>>,
 ) -> NifResult<u64> {
     let mut txn_registry = safe_lock(&TXN_REGISTRY, "execute_with_transaction")?;
 
-    let trx = txn_registry
+    let entry = txn_registry
         .get_mut(trx_id)
         .ok_or_else(|| rustler::Error::Term(Box::new("Transaction not found")))?;
+
+    // Verify transaction belongs to this connection
+    verify_transaction_ownership(entry, conn_id)?;
+
     let decoded_args: Vec<Value> = args
         .into_iter()
         .map(|t| decode_term_to_value(t))
@@ -213,7 +274,7 @@ pub fn execute_with_transaction<'a>(
         .map_err(|e| rustler::Error::Term(Box::new(e)))?;
 
     let result = TOKIO_RUNTIME
-        .block_on(async { trx.execute(&query, decoded_args).await })
+        .block_on(async { entry.transaction.execute(&query, decoded_args).await })
         .map_err(|e| rustler::Error::Term(Box::new(format!("Execute failed: {}", e))))?;
 
     Ok(result)
@@ -223,14 +284,19 @@ pub fn execute_with_transaction<'a>(
 pub fn query_with_trx_args<'a>(
     env: Env<'a>,
     trx_id: &str,
+    conn_id: &str,
     query: &str,
     args: Vec<Term<'a>>,
 ) -> NifResult<Term<'a>> {
     let mut txn_registry = safe_lock(&TXN_REGISTRY, "query_with_trx_args")?;
 
-    let trx = txn_registry
+    let entry = txn_registry
         .get_mut(trx_id)
         .ok_or_else(|| rustler::Error::Term(Box::new("Transaction not found")))?;
+
+    // Verify transaction belongs to this connection
+    verify_transaction_ownership(entry, conn_id)?;
+
     let decoded_args: Vec<Value> = args
         .into_iter()
         .map(|t| decode_term_to_value(t))
@@ -238,7 +304,8 @@ pub fn query_with_trx_args<'a>(
         .map_err(|e| rustler::Error::Term(Box::new(e)))?;
 
     TOKIO_RUNTIME.block_on(async {
-        let res_rows = trx
+        let res_rows = entry
+            .transaction
             .query(&query, decoded_args)
             .await
             .map_err(|e| rustler::Error::Term(Box::new(format!("Query failed: {}", e))))?;
@@ -284,22 +351,44 @@ pub fn do_sync(conn_id: &str, mode: Atom) -> NifResult<(rustler::Atom, String)> 
 #[rustler::nif(schedule = "DirtyIo")]
 pub fn commit_or_rollback_transaction(
     trx_id: &str,
-    _conn_id: &str,
+    conn_id: &str,
     _mode: Atom,
     _syncx: Atom,
     param: &str,
 ) -> NifResult<(rustler::Atom, String)> {
-    let trx = safe_lock(&TXN_REGISTRY, "commit_or_rollback txn_registry")?
-        .remove(trx_id)
-        .ok_or_else(|| rustler::Error::Term(Box::new("Transaction not found")))?;
+    // First, lock the registry and verify ownership before removing
+    let entry = {
+        let mut registry = safe_lock(&TXN_REGISTRY, "commit_or_rollback txn_registry")?;
+
+        // Peek at the entry to verify it exists and check ownership
+        let existing = registry
+            .get(trx_id)
+            .ok_or_else(|| rustler::Error::Term(Box::new("Transaction not found")))?;
+
+        // Verify that the transaction belongs to the requesting connection
+        if existing.conn_id != conn_id {
+            return Err(rustler::Error::Term(Box::new(
+                "Transaction does not belong to this connection",
+            )));
+        }
+
+        // Only remove after ownership is verified
+        registry
+            .remove(trx_id)
+            .expect("Transaction was just verified to exist")
+    };
 
     let result = TOKIO_RUNTIME.block_on(async {
         if param == "commit" {
-            trx.commit()
+            entry
+                .transaction
+                .commit()
                 .await
                 .map_err(|e| format!("Commit error: {}", e))?;
         } else {
-            trx.rollback()
+            entry
+                .transaction
+                .rollback()
                 .await
                 .map_err(|e| format!("Rollback error: {}", e))?;
         }
@@ -828,17 +917,37 @@ fn execute_transactional_batch<'a>(
 // Prepared statement support
 #[rustler::nif(schedule = "DirtyIo")]
 fn prepare_statement(conn_id: &str, sql: &str) -> NifResult<String> {
-    let conn_map = safe_lock(&CONNECTION_REGISTRY, "prepare_statement conn_map")?;
+    let client = {
+        let conn_map = safe_lock(&CONNECTION_REGISTRY, "prepare_statement conn_map")?;
+        conn_map
+            .get(conn_id)
+            .cloned()
+            .ok_or_else(|| rustler::Error::Term(Box::new("Invalid connection ID")))?
+    };
+    {
+        let sql_to_prepare = sql.to_string();
 
-    if conn_map.get(conn_id).is_some() {
-        // Store the connection ID and SQL for later re-preparation
-        let stmt_id = Uuid::new_v4().to_string();
-        safe_lock(&STMT_REGISTRY, "prepare_statement stmt_registry")?
-            .insert(stmt_id.clone(), (conn_id.to_string(), sql.to_string()));
+        let stmt_result = TOKIO_RUNTIME.block_on(async {
+            let client_guard = safe_lock_arc(&client, "prepare_statement client")?;
+            let conn_guard = safe_lock_arc(&client_guard.client, "prepare_statement conn")?;
 
-        Ok(stmt_id)
-    } else {
-        Err(rustler::Error::Term(Box::new("Invalid connection ID")))
+            conn_guard
+                .prepare(&sql_to_prepare)
+                .await
+                .map_err(|e| rustler::Error::Term(Box::new(format!("Prepare failed: {}", e))))
+        });
+
+        match stmt_result {
+            Ok(stmt) => {
+                let stmt_id = Uuid::new_v4().to_string();
+                safe_lock(&STMT_REGISTRY, "prepare_statement stmt_registry")?.insert(
+                    stmt_id.clone(),
+                    (conn_id.to_string(), Arc::new(Mutex::new(stmt))),
+                );
+                Ok(stmt_id)
+            }
+            Err(e) => Err(e),
+        }
     }
 }
 
@@ -858,15 +967,14 @@ fn query_prepared<'a>(
         return Err(rustler::Error::Term(Box::new("Invalid connection ID")));
     }
 
-    let (_stored_conn_id, sql) = stmt_registry
+    let (stored_conn_id, cached_stmt) = stmt_registry
         .get(stmt_id)
         .ok_or_else(|| rustler::Error::Term(Box::new("Statement not found")))?;
 
-    let client = conn_map
-        .get(conn_id)
-        .ok_or_else(|| rustler::Error::Term(Box::new("Connection not found")))?
-        .clone();
-    let sql = sql.clone();
+    // Verify statement belongs to this connection
+    verify_statement_ownership(stored_conn_id, conn_id)?;
+
+    let cached_stmt = cached_stmt.clone();
 
     let decoded_args: Vec<Value> = args
         .into_iter()
@@ -878,16 +986,13 @@ fn query_prepared<'a>(
     drop(conn_map); // Release lock before async operation
 
     let result = TOKIO_RUNTIME.block_on(async {
-        // Re-prepare the statement for each query to avoid parameter binding issues
-        let client_guard = safe_lock_arc(&client, "query_prepared client")?;
-        let conn_guard = safe_lock_arc(&client_guard.client, "query_prepared conn")?;
+        // Use cached statement with reset to clear bindings
+        let stmt_guard = safe_lock_arc(&cached_stmt, "query_prepared stmt")?;
 
-        let stmt = conn_guard
-            .prepare(&sql)
-            .await
-            .map_err(|e| rustler::Error::Term(Box::new(format!("Prepare failed: {}", e))))?;
+        // Reset clears any previous bindings
+        stmt_guard.reset();
 
-        let res = stmt.query(decoded_args).await;
+        let res = stmt_guard.query(decoded_args).await;
 
         match res {
             Ok(rows) => {
@@ -922,15 +1027,14 @@ fn execute_prepared<'a>(
         return Err(rustler::Error::Term(Box::new("Invalid connection ID")));
     }
 
-    let client = conn_map
-        .get(conn_id)
-        .ok_or_else(|| rustler::Error::Term(Box::new("Connection not found")))?
-        .clone();
-    let (_stored_conn_id, sql) = stmt_registry
+    let (stored_conn_id, cached_stmt) = stmt_registry
         .get(stmt_id)
         .ok_or_else(|| rustler::Error::Term(Box::new("Statement not found")))?;
 
-    let sql = sql.clone();
+    // Verify statement belongs to this connection
+    verify_statement_ownership(stored_conn_id, conn_id)?;
+
+    let cached_stmt = cached_stmt.clone();
 
     let decoded_args: Vec<Value> = args
         .into_iter()
@@ -944,16 +1048,13 @@ fn execute_prepared<'a>(
     drop(conn_map); // Release lock before async operation
 
     let result = TOKIO_RUNTIME.block_on(async {
-        // Re-prepare the statement for each execute to avoid parameter binding issues
-        let client_guard = safe_lock_arc(&client, "execute_prepared client")?;
-        let conn_guard = safe_lock_arc(&client_guard.client, "execute_prepared conn")?;
+        // Use cached statement with reset to clear bindings
+        let stmt_guard = safe_lock_arc(&cached_stmt, "execute_prepared stmt")?;
 
-        let stmt = conn_guard
-            .prepare(&sql)
-            .await
-            .map_err(|e| rustler::Error::Term(Box::new(format!("Prepare failed: {}", e))))?;
+        // Reset clears any previous bindings
+        stmt_guard.reset();
 
-        let affected = stmt
+        let affected = stmt_guard
             .execute(decoded_args)
             .await
             .map_err(|e| rustler::Error::Term(Box::new(format!("Execute failed: {}", e))))?;
@@ -1104,6 +1205,7 @@ fn declare_cursor(conn_id: &str, sql: &str, args: Vec<Term>) -> NifResult<String
 
         let cursor_id = Uuid::new_v4().to_string();
         let cursor_data = CursorData {
+            conn_id: conn_id.to_string(),
             columns,
             rows,
             position: 0,
@@ -1131,15 +1233,20 @@ fn declare_cursor_with_context(
         .collect::<Result<_, _>>()
         .map_err(|e| rustler::Error::Term(Box::new(e)))?;
 
-    let (columns, rows) = if id_type == transaction() {
-        // Use transaction registry
+    let (conn_id, columns, rows) = if id_type == transaction() {
+        // CONSOLIDATED LOCK SCOPE: Prevent TOCTOU by holding lock for both conn_id lookup and query execution
         let mut txn_registry = safe_lock(&TXN_REGISTRY, "declare_cursor_with_context txn")?;
-        let trx = txn_registry
+        let entry = txn_registry
             .get_mut(id)
             .ok_or_else(|| rustler::Error::Term(Box::new("Transaction not found")))?;
 
-        TOKIO_RUNTIME.block_on(async {
-            let mut result_rows = trx
+        // Capture conn_id while we hold the lock
+        let conn_id_for_cursor = entry.conn_id.clone();
+
+        // Execute query without releasing the lock
+        let (cols, rows) = TOKIO_RUNTIME.block_on(async {
+            let mut result_rows = entry
+                .transaction
                 .query(sql, decoded_args)
                 .await
                 .map_err(|e| rustler::Error::Term(Box::new(format!("Query failed: {}", e))))?;
@@ -1171,9 +1278,12 @@ fn declare_cursor_with_context(
             }
 
             Ok::<_, rustler::Error>((columns, rows))
-        })?
-    } else {
-        // Use connection registry
+        })?;
+
+        (conn_id_for_cursor, cols, rows)
+    } else if id_type == connection() {
+        // For connection, use the id directly
+        let conn_id_for_cursor = id.to_string();
         let conn_map = safe_lock(&CONNECTION_REGISTRY, "declare_cursor_with_context conn")?;
         let client = conn_map
             .get(id)
@@ -1182,7 +1292,7 @@ fn declare_cursor_with_context(
 
         drop(conn_map);
 
-        TOKIO_RUNTIME.block_on(async {
+        let (cols, rows) = TOKIO_RUNTIME.block_on(async {
             let client_guard = safe_lock_arc(&client, "declare_cursor_with_context client")?;
             let conn_guard =
                 safe_lock_arc(&client_guard.client, "declare_cursor_with_context conn")?;
@@ -1219,11 +1329,16 @@ fn declare_cursor_with_context(
             }
 
             Ok::<_, rustler::Error>((columns, rows))
-        })?
+        })?;
+
+        (conn_id_for_cursor, cols, rows)
+    } else {
+        return Err(rustler::Error::Term(Box::new("Invalid id_type for cursor")));
     };
 
     let cursor_id = Uuid::new_v4().to_string();
     let cursor_data = CursorData {
+        conn_id,
         columns,
         rows,
         position: 0,
@@ -1236,12 +1351,20 @@ fn declare_cursor_with_context(
 }
 
 #[rustler::nif]
-fn fetch_cursor<'a>(env: Env<'a>, cursor_id: &str, max_rows: usize) -> NifResult<Term<'a>> {
+fn fetch_cursor<'a>(
+    env: Env<'a>,
+    conn_id: &str,
+    cursor_id: &str,
+    max_rows: usize,
+) -> NifResult<Term<'a>> {
     let mut cursor_registry = safe_lock(&CURSOR_REGISTRY, "fetch_cursor cursor_registry")?;
 
     let cursor = cursor_registry
         .get_mut(cursor_id)
         .ok_or_else(|| rustler::Error::Term(Box::new("Cursor not found")))?;
+
+    // Verify cursor belongs to this connection
+    verify_cursor_ownership(cursor, conn_id)?;
 
     let remaining = cursor.rows.len().saturating_sub(cursor.position);
     let fetch_count = remaining.min(max_rows);
@@ -1501,6 +1624,369 @@ fn execute_transactional_batch_native<'a>(
     } else {
         Err(rustler::Error::Term(Box::new("Invalid connection ID")))
     }
+}
+
+/// Get the number of columns in a prepared statement's result set.
+/// Returns 0 for statements that don't return rows (INSERT, UPDATE, DELETE).
+#[rustler::nif(schedule = "DirtyIo")]
+fn statement_column_count(conn_id: &str, stmt_id: &str) -> NifResult<usize> {
+    let conn_map = safe_lock(&CONNECTION_REGISTRY, "statement_column_count conn_map")?;
+    let stmt_registry = safe_lock(&STMT_REGISTRY, "statement_column_count stmt_registry")?;
+
+    if conn_map.get(conn_id).is_none() {
+        return Err(rustler::Error::Term(Box::new("Invalid connection ID")));
+    }
+
+    let (stored_conn_id, cached_stmt) = stmt_registry
+        .get(stmt_id)
+        .ok_or_else(|| rustler::Error::Term(Box::new("Statement not found")))?;
+
+    // Verify statement belongs to this connection
+    verify_statement_ownership(stored_conn_id, conn_id)?;
+
+    let cached_stmt = cached_stmt.clone();
+
+    drop(stmt_registry);
+    drop(conn_map);
+
+    let stmt_guard = safe_lock_arc(&cached_stmt, "statement_column_count stmt")?;
+    let count = stmt_guard.column_count();
+
+    Ok(count)
+}
+
+/// Get the name of a column in a prepared statement by its index.
+/// Index is 0-based. Returns error if index is out of bounds.
+#[rustler::nif(schedule = "DirtyIo")]
+fn statement_column_name(conn_id: &str, stmt_id: &str, idx: usize) -> NifResult<String> {
+    let conn_map = safe_lock(&CONNECTION_REGISTRY, "statement_column_name conn_map")?;
+    let stmt_registry = safe_lock(&STMT_REGISTRY, "statement_column_name stmt_registry")?;
+
+    if conn_map.get(conn_id).is_none() {
+        return Err(rustler::Error::Term(Box::new("Invalid connection ID")));
+    }
+
+    let (stored_conn_id, cached_stmt) = stmt_registry
+        .get(stmt_id)
+        .ok_or_else(|| rustler::Error::Term(Box::new("Statement not found")))?;
+
+    // Verify statement belongs to this connection
+    verify_statement_ownership(stored_conn_id, conn_id)?;
+
+    let cached_stmt = cached_stmt.clone();
+
+    drop(stmt_registry);
+    drop(conn_map);
+
+    let stmt_guard = safe_lock_arc(&cached_stmt, "statement_column_name stmt")?;
+    let columns = stmt_guard.columns();
+
+    if idx >= columns.len() {
+        return Err(rustler::Error::Term(Box::new(format!(
+            "Column index {} out of bounds (statement has {} columns)",
+            idx,
+            columns.len()
+        ))));
+    }
+
+    let column_name = columns[idx].name().to_string();
+
+    Ok(column_name)
+}
+
+/// Get the number of parameters in a prepared statement.
+/// Parameters are placeholders (?) in the SQL.
+#[rustler::nif(schedule = "DirtyIo")]
+fn statement_parameter_count(conn_id: &str, stmt_id: &str) -> NifResult<usize> {
+    let conn_map = safe_lock(&CONNECTION_REGISTRY, "statement_parameter_count conn_map")?;
+    let stmt_registry = safe_lock(&STMT_REGISTRY, "statement_parameter_count stmt_registry")?;
+
+    if conn_map.get(conn_id).is_none() {
+        return Err(rustler::Error::Term(Box::new("Invalid connection ID")));
+    }
+
+    let (stored_conn_id, cached_stmt) = stmt_registry
+        .get(stmt_id)
+        .ok_or_else(|| rustler::Error::Term(Box::new("Statement not found")))?;
+
+    // Verify statement belongs to this connection
+    verify_statement_ownership(stored_conn_id, conn_id)?;
+
+    let cached_stmt = cached_stmt.clone();
+
+    drop(stmt_registry);
+    drop(conn_map);
+
+    let stmt_guard = safe_lock_arc(&cached_stmt, "statement_parameter_count stmt")?;
+    let count = stmt_guard.parameter_count();
+
+    Ok(count)
+}
+
+/// Validate that a savepoint name is a valid SQL identifier.
+/// Must be non-empty, ASCII alphanumeric + underscore, and not start with a digit.
+fn validate_savepoint_name(name: &str) -> Result<(), rustler::Error> {
+    if name.is_empty()
+        || !name.chars().all(|c| c.is_ascii_alphanumeric() || c == '_')
+        || name.chars().next().map_or(true, |c| c.is_ascii_digit())
+    {
+        return Err(rustler::Error::Term(Box::new(
+            "Invalid savepoint name: must be a valid SQL identifier",
+        )));
+    }
+    Ok(())
+}
+
+/// Create a savepoint within a transaction.
+/// Savepoints allow partial rollback without aborting the entire transaction.
+///
+/// NOTE: Validates that the transaction belongs to the requesting connection.
+#[rustler::nif(schedule = "DirtyIo")]
+fn savepoint(conn_id: &str, trx_id: &str, name: &str) -> NifResult<Atom> {
+    validate_savepoint_name(name)?;
+
+    let mut txn_registry = safe_lock(&TXN_REGISTRY, "savepoint")?;
+
+    let entry = txn_registry
+        .get_mut(trx_id)
+        .ok_or_else(|| rustler::Error::Term(Box::new("Transaction not found")))?;
+
+    // Verify that the transaction belongs to the requesting connection
+    if entry.conn_id != conn_id {
+        return Err(rustler::Error::Term(Box::new(
+            "Transaction does not belong to this connection",
+        )));
+    }
+
+    let sql = format!("SAVEPOINT {}", name);
+
+    TOKIO_RUNTIME
+        .block_on(async { entry.transaction.execute(&sql, Vec::<Value>::new()).await })
+        .map_err(|e| rustler::Error::Term(Box::new(format!("Savepoint failed: {}", e))))?;
+
+    Ok(rustler::types::atom::ok())
+}
+
+/// Release (commit) a savepoint, making its changes permanent within the transaction.
+///
+/// Security: Validates that the transaction belongs to the requesting connection.
+#[rustler::nif(schedule = "DirtyIo")]
+fn release_savepoint(conn_id: &str, trx_id: &str, name: &str) -> NifResult<Atom> {
+    validate_savepoint_name(name)?;
+
+    let mut txn_registry = safe_lock(&TXN_REGISTRY, "release_savepoint")?;
+
+    let entry = txn_registry
+        .get_mut(trx_id)
+        .ok_or_else(|| rustler::Error::Term(Box::new("Transaction not found")))?;
+
+    // Verify that the transaction belongs to the requesting connection
+    if entry.conn_id != conn_id {
+        return Err(rustler::Error::Term(Box::new(
+            "Transaction does not belong to this connection",
+        )));
+    }
+
+    let sql = format!("RELEASE SAVEPOINT {}", name);
+
+    TOKIO_RUNTIME
+        .block_on(async { entry.transaction.execute(&sql, Vec::<Value>::new()).await })
+        .map_err(|e| rustler::Error::Term(Box::new(format!("Release savepoint failed: {}", e))))?;
+
+    Ok(rustler::types::atom::ok())
+}
+
+/// Rollback to a savepoint, undoing all changes made after the savepoint was created.
+/// The savepoint remains active and can be released or rolled back to again.
+///
+/// Security: Validates that the transaction belongs to the requesting connection.
+#[rustler::nif(schedule = "DirtyIo")]
+fn rollback_to_savepoint(conn_id: &str, trx_id: &str, name: &str) -> NifResult<Atom> {
+    validate_savepoint_name(name)?;
+
+    let mut txn_registry = safe_lock(&TXN_REGISTRY, "rollback_to_savepoint")?;
+
+    let entry = txn_registry
+        .get_mut(trx_id)
+        .ok_or_else(|| rustler::Error::Term(Box::new("Transaction not found")))?;
+
+    // Verify that the transaction belongs to the requesting connection
+    if entry.conn_id != conn_id {
+        return Err(rustler::Error::Term(Box::new(
+            "Transaction does not belong to this connection",
+        )));
+    }
+
+    let sql = format!("ROLLBACK TO SAVEPOINT {}", name);
+
+    TOKIO_RUNTIME
+        .block_on(async { entry.transaction.execute(&sql, Vec::<Value>::new()).await })
+        .map_err(|e| {
+            rustler::Error::Term(Box::new(format!("Rollback to savepoint failed: {}", e)))
+        })?;
+
+    Ok(rustler::types::atom::ok())
+}
+
+/// Get the current replication index (frame number) from a remote replica database.
+/// Returns the frame number or 0 if not a replica or no frames have been applied yet.
+///
+/// **Note**: This function now uses the `replication_index()` API available in libsql 0.9.29+.
+#[rustler::nif(schedule = "DirtyIo")]
+fn get_frame_number(conn_id: &str) -> NifResult<u64> {
+    let conn_map = safe_lock(&CONNECTION_REGISTRY, "get_frame_number conn_map")?;
+    let client = conn_map
+        .get(conn_id)
+        .ok_or_else(|| rustler::Error::Term(Box::new("Connection not found")))?
+        .clone();
+    drop(conn_map);
+
+    let result = TOKIO_RUNTIME.block_on(async {
+        let client_guard = safe_lock_arc(&client, "get_frame_number client")
+            .map_err(|e| format!("Failed to lock client: {:?}", e))?;
+
+        let frame_no = client_guard
+            .db
+            .replication_index()
+            .await
+            .map_err(|e| format!("replication_index failed: {}", e))?;
+
+        Ok::<_, String>(frame_no.unwrap_or(0))
+    });
+
+    match result {
+        Ok(frame_no) => Ok(frame_no),
+        Err(e) => Err(rustler::Error::Term(Box::new(e))),
+    }
+}
+
+/// Sync the remote replica until a specific frame number is reached.
+/// Waits (with timeout) for the replica to catch up to the target frame.
+#[rustler::nif(schedule = "DirtyIo")]
+fn sync_until(conn_id: &str, frame_no: u64) -> NifResult<Atom> {
+    let conn_map = safe_lock(&CONNECTION_REGISTRY, "sync_until conn_map")?;
+    let client = conn_map
+        .get(conn_id)
+        .ok_or_else(|| rustler::Error::Term(Box::new("Connection not found")))?
+        .clone();
+    drop(conn_map);
+
+    let result = TOKIO_RUNTIME.block_on(async {
+        let client_guard = safe_lock_arc(&client, "sync_until client")
+            .map_err(|e| format!("Failed to lock client: {:?}", e))?;
+
+        let timeout_duration = tokio::time::Duration::from_secs(DEFAULT_SYNC_TIMEOUT_SECS);
+        tokio::time::timeout(timeout_duration, client_guard.db.sync_until(frame_no))
+            .await
+            .map_err(|_| {
+                format!(
+                    "sync_until timed out after {} seconds",
+                    DEFAULT_SYNC_TIMEOUT_SECS
+                )
+            })?
+            .map_err(|e| format!("sync_until failed: {}", e))?;
+
+        Ok::<_, String>(())
+    });
+
+    match result {
+        Ok(()) => Ok(rustler::types::atom::ok()),
+        Err(e) => Err(rustler::Error::Term(Box::new(e))),
+    }
+}
+
+/// Flush the replicator, pushing pending writes to the remote database.
+/// Returns the new frame number after flush.
+#[rustler::nif(schedule = "DirtyIo")]
+fn flush_replicator(conn_id: &str) -> NifResult<u64> {
+    let conn_map = safe_lock(&CONNECTION_REGISTRY, "flush_replicator conn_map")?;
+    let client = conn_map
+        .get(conn_id)
+        .ok_or_else(|| rustler::Error::Term(Box::new("Connection not found")))?
+        .clone();
+    drop(conn_map);
+
+    let result: Result<u64, String> = TOKIO_RUNTIME.block_on(async {
+        let client_guard = safe_lock_arc(&client, "flush_replicator client")
+            .map_err(|e| format!("Failed to lock client: {:?}", e))?;
+
+        let timeout_duration = tokio::time::Duration::from_secs(DEFAULT_SYNC_TIMEOUT_SECS);
+        let frame_no = tokio::time::timeout(timeout_duration, client_guard.db.flush_replicator())
+            .await
+            .map_err(|_| {
+                format!(
+                    "flush_replicator timed out after {} seconds",
+                    DEFAULT_SYNC_TIMEOUT_SECS
+                )
+            })?
+            .map_err(|e| format!("flush_replicator failed: {}", e))?;
+
+        // Return 0 if not a replica (consistent with get_frame_number behavior)
+        Ok(frame_no.unwrap_or(0))
+    });
+
+    match result {
+        Ok(frame_no) => Ok(frame_no),
+        Err(e) => Err(rustler::Error::Term(Box::new(e))),
+    }
+}
+
+/// Get the highest frame number from write operations on this database.
+/// This is useful for read-your-writes consistency across replicas.
+///
+/// Returns Some(frame_no) if write operations have occurred, None otherwise.
+/// Note: This returns None (mapped to 0) rather than an error for databases
+/// that don't track write replication index.
+#[rustler::nif(schedule = "DirtyIo")]
+fn max_write_replication_index(conn_id: &str) -> NifResult<u64> {
+    let conn_map = safe_lock(&CONNECTION_REGISTRY, "max_write_replication_index conn_map")?;
+    let client = conn_map
+        .get(conn_id)
+        .ok_or_else(|| rustler::Error::Term(Box::new("Connection not found")))?
+        .clone();
+    drop(conn_map);
+
+    let result = TOKIO_RUNTIME.block_on(async {
+        let client_guard = safe_lock_arc(&client, "max_write_replication_index client")
+            .map_err(|e| format!("Failed to lock client: {:?}", e))?;
+
+        // Call max_write_replication_index() which returns Option<FrameNo>
+        let max_write_frame = client_guard.db.max_write_replication_index();
+
+        Ok::<_, String>(max_write_frame.unwrap_or(0))
+    });
+
+    match result {
+        Ok(frame_no) => Ok(frame_no),
+        Err(e) => Err(rustler::Error::Term(Box::new(e))),
+    }
+}
+
+// Note: sync_frames requires complex Frames type, skipping for now
+// Can be added later if needed with proper frame data marshalling
+
+/// **NOT SUPPORTED** - Freeze database operation is not implemented.
+///
+/// Freeze is intended to convert a remote replica to a standalone local database
+/// for disaster recovery. However, this operation requires deep refactoring of
+/// the connection pool architecture (taking ownership of the Database instance,
+/// which is held in an Arc within connection state, etc.) and is not currently
+/// supported.
+///
+/// Returns: `:unsupported` atom error via NIF
+#[rustler::nif(schedule = "DirtyIo")]
+fn freeze_database(conn_id: &str) -> NifResult<Atom> {
+    // Verify connection exists (basic validation)
+    let conn_map = safe_lock(&CONNECTION_REGISTRY, "freeze_database conn_map")?;
+    let _exists = conn_map
+        .get(conn_id)
+        .ok_or_else(|| rustler::Error::Term(Box::new("Connection not found")))?;
+    drop(conn_map);
+
+    // Always return :unsupported atom - this feature requires architectural changes
+    // that have not been completed. See CLAUDE.md for implementation details.
+    // Note: We return this as a string error that Elixir will convert to :unsupported atom
+    Err(rustler::Error::Atom("unsupported"))
 }
 
 rustler::init!("Elixir.EctoLibSql.Native");

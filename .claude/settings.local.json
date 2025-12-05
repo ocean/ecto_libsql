@@ -24,7 +24,11 @@
       "Bash(cargo check:*)",
       "WebFetch(domain:docs.turso.tech)",
       "Bash(git --no-pager show:*)",
-      "Bash(git --no-pager diff:*)"
+      "Bash(git --no-pager diff:*)",
+      "WebFetch(domain:docs.rs)",
+      "Bash(grep:*)",
+      "Bash(gh pr view:*)",
+      "Bash(cargo clippy:*)"
     ],
     "deny": [],
     "ask": []
