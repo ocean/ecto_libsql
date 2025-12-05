@@ -252,10 +252,15 @@ defmodule EctoLibSql do
   into memory at once. Automatically deallocates the cursor when no more rows
   are available.
   """
-  def handle_fetch(%EctoLibSql.Query{} = _query, cursor, opts, %EctoLibSql.State{} = state) do
+  def handle_fetch(
+        %EctoLibSql.Query{} = _query,
+        cursor,
+        opts,
+        %EctoLibSql.State{conn_id: conn_id} = state
+      ) do
     max_rows = Keyword.get(opts, :max_rows, 500)
 
-    case EctoLibSql.Native.fetch_cursor(cursor.ref, max_rows) do
+    case EctoLibSql.Native.fetch_cursor(conn_id, cursor.ref, max_rows) do
       {columns, rows, _count} when is_list(rows) ->
         result = %EctoLibSql.Result{
           command: :select,

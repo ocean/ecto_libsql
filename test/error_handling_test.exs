@@ -86,10 +86,12 @@ defmodule EctoLibSql.ErrorHandlingTest do
 
     test "execute with invalid transaction returns error (not panic)" do
       fake_trx_id = "nonexistent-transaction"
+      fake_conn_id = "nonexistent-connection"
 
       result =
         EctoLibSql.Native.execute_with_transaction(
           fake_trx_id,
+          fake_conn_id,
           "INSERT INTO test VALUES (1)",
           []
         )
@@ -153,9 +155,10 @@ defmodule EctoLibSql.ErrorHandlingTest do
       # Before: Would unwrap() None when cursor not in registry
       # After: Returns proper error
 
+      fake_conn_id = "nonexistent-connection"
       fake_cursor_id = "nonexistent-cursor"
 
-      result = EctoLibSql.Native.fetch_cursor(fake_cursor_id, 100)
+      result = EctoLibSql.Native.fetch_cursor(fake_conn_id, fake_cursor_id, 100)
 
       assert {:error, error_msg} = result
       assert error_msg =~ "Cursor not found"

@@ -40,6 +40,7 @@ Welcome to ecto_libsql! This guide provides comprehensive documentation, API ref
   - [Transactions](#transactions)
   - [Phoenix Integration](#phoenix-integration)
   - [Production Deployment](#production-deployment-with-turso)
+  - [Limitations and Known Issues](#limitations-and-known-issues)
 - [API Reference](#api-reference)
 - [Real-World Examples](#real-world-examples)
 - [Performance Guide](#performance-guide)
@@ -1457,6 +1458,48 @@ export TURSO_AUTH_TOKEN="eyJ..."
 - ☁️ **Automatic cloud sync** to Turso
 - 🌍 **Global distribution** via Turso edge
 - 💪 **Offline capability** - works without network
+
+### Limitations and Known Issues
+
+#### freeze_replica/1 - NOT SUPPORTED
+
+The `EctoLibSql.Native.freeze_replica/1` function is **not implemented**. This function was intended to convert a remote replica into a standalone local database (useful for disaster recovery or field deployments).
+
+**Status**: ⛔ Not supported - returns `{:error, :unsupported}`
+
+**Why**: Converting a replica to primary requires taking ownership of the database connection, which is held in a shared `Arc<Mutex<>>` within the connection pool. This requires deep refactoring of the connection pool architecture that hasn't been completed.
+
+**Workarounds** for disaster recovery scenarios:
+
+1. **Backup and restore**: Copy the replica database file and use it independently
+   ```bash
+   cp replica.db standalone.db
+   # Configure your app to use standalone.db directly
+   ```
+
+2. **Data replication**: Replicate all data to a new local database
+   ```elixir
+   # In your application, read from replica and write to new local database
+   source_state = EctoLibSql.connect(database: "replica.db")
+   target_state = EctoLibSql.connect(database: "new_primary.db")
+   
+   {:ok, _, result, _} = EctoLibSql.handle_execute(
+     "SELECT * FROM table_name", [], [], source_state
+   )
+   # ... transfer rows to target_state
+   ```
+
+3. **Application-level failover**: Keep the replica and manage failover at the application level
+   ```elixir
+   defmodule MyApp.DatabaseFailover do
+     def connect_with_fallback(replica_opts, backup_opts) do
+       case EctoLibSql.connect(replica_opts) do
+         {:ok, state} -> {:ok, state}
+         {:error, _} -> EctoLibSql.connect(backup_opts)  # Fall back to backup DB
+       end
+     end
+   end
+   ```
 
 ### Type Mappings
 

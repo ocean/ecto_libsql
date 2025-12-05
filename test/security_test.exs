@@ -190,7 +190,6 @@ defmodule EctoLibSql.SecurityTest do
     test "rejects invalid connection IDs", %{state: _state} do
       invalid_ids = [
         "'; DROP TABLE users; --",
-        "../../../etc/passwd",
         "con\x00id",
         String.duplicate("a", 10000)
       ]

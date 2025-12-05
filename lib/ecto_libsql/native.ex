@@ -62,10 +62,12 @@ defmodule EctoLibSql.Native do
   def begin_transaction_with_behavior(_conn, _behavior), do: :erlang.nif_error(:nif_not_loaded)
 
   @doc false
-  def execute_with_transaction(_trx_id, _query, _args), do: :erlang.nif_error(:nif_not_loaded)
+  def execute_with_transaction(_trx_id, _conn_id, _query, _args),
+    do: :erlang.nif_error(:nif_not_loaded)
 
   @doc false
-  def query_with_trx_args(_trx_id, _query, _args), do: :erlang.nif_error(:nif_not_loaded)
+  def query_with_trx_args(_trx_id, _conn_id, _query, _args),
+    do: :erlang.nif_error(:nif_not_loaded)
 
   @doc false
   def handle_status_transaction(_trx_id), do: :erlang.nif_error(:nif_not_loaded)
@@ -117,7 +119,7 @@ defmodule EctoLibSql.Native do
   def declare_cursor(_conn, _sql, _args), do: :erlang.nif_error(:nif_not_loaded)
 
   @doc false
-  def fetch_cursor(_cursor_id, _max_rows), do: :erlang.nif_error(:nif_not_loaded)
+  def fetch_cursor(_conn_id, _cursor_id, _max_rows), do: :erlang.nif_error(:nif_not_loaded)
 
   # Phase 1: Critical Production Features (v0.7.0)
   @doc false
@@ -168,6 +170,8 @@ defmodule EctoLibSql.Native do
   @doc false
   def flush_replicator(_conn_id), do: :erlang.nif_error(:nif_not_loaded)
 
+  # Internal NIF function - not supported, marked for deprecation
+  # Always returns :unsupported atom rather than implementing the operation
   @doc false
   def freeze_database(_conn_id), do: :erlang.nif_error(:nif_not_loaded)
 
@@ -288,7 +292,7 @@ defmodule EctoLibSql.Native do
 
   @doc false
   def execute_with_trx(
-        %EctoLibSql.State{conn_id: _conn_id, trx_id: trx_id} = state,
+        %EctoLibSql.State{conn_id: conn_id, trx_id: trx_id} = state,
         %EctoLibSql.Query{statement: statement} = query,
         args
       ) do
@@ -297,7 +301,7 @@ defmodule EctoLibSql.Native do
 
     if has_returning do
       # Use query_with_trx_args for statements with RETURNING
-      case query_with_trx_args(trx_id, statement, args) do
+      case query_with_trx_args(trx_id, conn_id, statement, args) do
         %{
           "columns" => columns,
           "rows" => rows,
@@ -317,7 +321,7 @@ defmodule EctoLibSql.Native do
       end
     else
       # Use execute for statements without RETURNING
-      case execute_with_transaction(trx_id, statement, args) do
+      case execute_with_transaction(trx_id, conn_id, statement, args) do
         num_rows when is_integer(num_rows) ->
           result = %EctoLibSql.Result{
             command: detect_command(statement),
@@ -1167,46 +1171,53 @@ defmodule EctoLibSql.Native do
   @doc """
   Freeze a remote replica, converting it to a standalone local database.
 
-  This is useful for disaster recovery, promoting a replica to a primary,
-  or taking a snapshot for offline use. After freezing, the database
-  can no longer sync with the remote.
+  ⚠️ **NOT SUPPORTED** - This function is currently not implemented.
+
+  Freeze is intended to convert a remote replica to a standalone local database
+  for disaster recovery. However, this operation requires deep refactoring of the
+  connection pool architecture and remains unimplemented. Instead, you can:
+
+  - **Option 1**: Backup the replica database file and use it independently
+  - **Option 2**: Replicate all data to a new local database
+  - **Option 3**: Keep the replica and manage failover at the application level
+
+  Always returns `{:error, :unsupported}`.
 
   ## Parameters
-    - state: The connection state (must be a remote replica)
+    - state: The connection state
 
   ## Returns
-    - `{:ok, state}` - Freeze succeeded, connection is now standalone
-    - `{:error, reason}` - If freeze failed or not a replica
+    - `{:error, :unsupported}` - Always (not implemented)
 
   ## Example
 
-      # Disaster recovery: primary is down
       case EctoLibSql.Native.freeze_replica(replica_state) do
-        {:ok, frozen_state} ->
-          # Replica is now an independent local database
-          # Can write to it independently
-          Logger.info("Replica promoted to standalone")
-          {:ok, frozen_state}
-        {:error, reason} ->
-          Logger.error("Freeze failed: " <> to_string(reason))
-          {:error, reason}
+        {:ok, _frozen_state} ->
+          # This will never succeed
+          :unreachable
+
+        {:error, :unsupported} ->
+          Logger.error("Freeze is not supported. Use manual backup strategy instead.")
+          {:error, :unsupported}
       end
 
-  ## Notes
-    - Only works for remote replica connections
-    - After freezing, cannot sync with remote anymore
-    - All local data is preserved
-    - Useful for field deployment scenarios
+  ## Implementation Status
+
+  - **Blocker**: Requires taking ownership of the `Database` instance, which is
+    held in `Arc<Mutex<LibSQLConn>>` within connection pool state
+  - **Work Required**: Refactoring connection pool architecture to support
+    consuming connections
+  - **Timeline**: Uncertain - marked for future refactoring
+
+  See CLAUDE.md for technical details on why this is not currently supported.
 
   """
-  def freeze_replica(%EctoLibSql.State{conn_id: conn_id} = state) when is_binary(conn_id) do
-    case freeze_database(conn_id) do
-      :ok -> {:ok, state}
-      error -> {:error, error}
-    end
+  def freeze_replica(%EctoLibSql.State{conn_id: conn_id} = _state) when is_binary(conn_id) do
+    # Always return unsupported - this feature is not implemented
+    {:error, :unsupported}
   end
 
   def freeze_replica(_state) do
-    {:error, "Invalid state - cannot freeze"}
+    {:error, :unsupported}
   end
 end

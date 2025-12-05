@@ -74,6 +74,7 @@ pub struct LibSQLConn {
 
 #[derive(Debug)]
 pub struct CursorData {
+    pub conn_id: String,
     pub columns: Vec<String>,
     pub rows: Vec<Vec<Value>>,
     pub position: usize,
@@ -214,6 +215,7 @@ pub fn begin_transaction_with_behavior(conn_id: &str, behavior: Atom) -> NifResu
 #[rustler::nif(schedule = "DirtyIo")]
 pub fn execute_with_transaction<'a>(
     trx_id: &str,
+    conn_id: &str,
     query: &str,
     args: Vec<Term<'a>>,
 ) -> NifResult<u64> {
@@ -222,6 +224,14 @@ pub fn execute_with_transaction<'a>(
     let entry = txn_registry
         .get_mut(trx_id)
         .ok_or_else(|| rustler::Error::Term(Box::new("Transaction not found")))?;
+
+    // Verify transaction belongs to this connection
+    if entry.conn_id != conn_id {
+        return Err(rustler::Error::Term(Box::new(
+            "Transaction does not belong to this connection",
+        )));
+    }
+
     let decoded_args: Vec<Value> = args
         .into_iter()
         .map(|t| decode_term_to_value(t))
@@ -239,6 +249,7 @@ pub fn execute_with_transaction<'a>(
 pub fn query_with_trx_args<'a>(
     env: Env<'a>,
     trx_id: &str,
+    conn_id: &str,
     query: &str,
     args: Vec<Term<'a>>,
 ) -> NifResult<Term<'a>> {
@@ -247,6 +258,14 @@ pub fn query_with_trx_args<'a>(
     let entry = txn_registry
         .get_mut(trx_id)
         .ok_or_else(|| rustler::Error::Term(Box::new("Transaction not found")))?;
+
+    // Verify transaction belongs to this connection
+    if entry.conn_id != conn_id {
+        return Err(rustler::Error::Term(Box::new(
+            "Transaction does not belong to this connection",
+        )));
+    }
+
     let decoded_args: Vec<Value> = args
         .into_iter()
         .map(|t| decode_term_to_value(t))
@@ -319,11 +338,15 @@ pub fn commit_or_rollback_transaction(
 
     let result = TOKIO_RUNTIME.block_on(async {
         if param == "commit" {
-            entry.transaction.commit()
+            entry
+                .transaction
+                .commit()
                 .await
                 .map_err(|e| format!("Commit error: {}", e))?;
         } else {
-            entry.transaction.rollback()
+            entry
+                .transaction
+                .rollback()
                 .await
                 .map_err(|e| format!("Rollback error: {}", e))?;
         }
@@ -900,9 +923,16 @@ fn query_prepared<'a>(
         return Err(rustler::Error::Term(Box::new("Invalid connection ID")));
     }
 
-    let (_stored_conn_id, cached_stmt) = stmt_registry
+    let (stored_conn_id, cached_stmt) = stmt_registry
         .get(stmt_id)
         .ok_or_else(|| rustler::Error::Term(Box::new("Statement not found")))?;
+
+    // Verify statement belongs to this connection
+    if stored_conn_id != conn_id {
+        return Err(rustler::Error::Term(Box::new(
+            "Statement does not belong to connection",
+        )));
+    }
 
     let cached_stmt = cached_stmt.clone();
 
@@ -957,9 +987,16 @@ fn execute_prepared<'a>(
         return Err(rustler::Error::Term(Box::new("Invalid connection ID")));
     }
 
-    let (_stored_conn_id, cached_stmt) = stmt_registry
+    let (stored_conn_id, cached_stmt) = stmt_registry
         .get(stmt_id)
         .ok_or_else(|| rustler::Error::Term(Box::new("Statement not found")))?;
+
+    // Verify statement belongs to this connection
+    if stored_conn_id != conn_id {
+        return Err(rustler::Error::Term(Box::new(
+            "Statement does not belong to connection",
+        )));
+    }
 
     let cached_stmt = cached_stmt.clone();
 
@@ -1132,6 +1169,7 @@ fn declare_cursor(conn_id: &str, sql: &str, args: Vec<Term>) -> NifResult<String
 
         let cursor_id = Uuid::new_v4().to_string();
         let cursor_data = CursorData {
+            conn_id: conn_id.to_string(),
             columns,
             rows,
             position: 0,
@@ -1158,6 +1196,21 @@ fn declare_cursor_with_context(
         .map(|t| decode_term_to_value(t))
         .collect::<Result<_, _>>()
         .map_err(|e| rustler::Error::Term(Box::new(e)))?;
+
+    // Determine conn_id for cursor ownership tracking
+    let conn_id = if id_type == transaction() {
+        // For transaction, get conn_id from TransactionEntry
+        let txn_registry = safe_lock(&TXN_REGISTRY, "declare_cursor_with_context txn")?;
+        let entry = txn_registry
+            .get(id)
+            .ok_or_else(|| rustler::Error::Term(Box::new("Transaction not found")))?;
+        entry.conn_id.clone()
+    } else if id_type == connection() {
+        // For connection, use the id directly
+        id.to_string()
+    } else {
+        return Err(rustler::Error::Term(Box::new("Invalid id_type for cursor")));
+    };
 
     let (columns, rows) = if id_type == transaction() {
         // Use transaction registry
@@ -1253,6 +1306,7 @@ fn declare_cursor_with_context(
 
     let cursor_id = Uuid::new_v4().to_string();
     let cursor_data = CursorData {
+        conn_id,
         columns,
         rows,
         position: 0,
@@ -1265,12 +1319,24 @@ fn declare_cursor_with_context(
 }
 
 #[rustler::nif]
-fn fetch_cursor<'a>(env: Env<'a>, cursor_id: &str, max_rows: usize) -> NifResult<Term<'a>> {
+fn fetch_cursor<'a>(
+    env: Env<'a>,
+    conn_id: &str,
+    cursor_id: &str,
+    max_rows: usize,
+) -> NifResult<Term<'a>> {
     let mut cursor_registry = safe_lock(&CURSOR_REGISTRY, "fetch_cursor cursor_registry")?;
 
     let cursor = cursor_registry
         .get_mut(cursor_id)
         .ok_or_else(|| rustler::Error::Term(Box::new("Cursor not found")))?;
+
+    // Verify cursor belongs to this connection
+    if cursor.conn_id != conn_id {
+        return Err(rustler::Error::Term(Box::new(
+            "Cursor does not belong to connection",
+        )));
+    }
 
     let remaining = cursor.rows.len().saturating_sub(cursor.position);
     let fetch_count = remaining.min(max_rows);
@@ -1543,9 +1609,16 @@ fn statement_column_count(conn_id: &str, stmt_id: &str) -> NifResult<usize> {
         return Err(rustler::Error::Term(Box::new("Invalid connection ID")));
     }
 
-    let (_stored_conn_id, cached_stmt) = stmt_registry
+    let (stored_conn_id, cached_stmt) = stmt_registry
         .get(stmt_id)
         .ok_or_else(|| rustler::Error::Term(Box::new("Statement not found")))?;
+
+    // Verify statement belongs to this connection
+    if stored_conn_id != conn_id {
+        return Err(rustler::Error::Term(Box::new(
+            "Statement does not belong to connection",
+        )));
+    }
 
     let cached_stmt = cached_stmt.clone();
 
@@ -1569,9 +1642,16 @@ fn statement_column_name(conn_id: &str, stmt_id: &str, idx: usize) -> NifResult<
         return Err(rustler::Error::Term(Box::new("Invalid connection ID")));
     }
 
-    let (_stored_conn_id, cached_stmt) = stmt_registry
+    let (stored_conn_id, cached_stmt) = stmt_registry
         .get(stmt_id)
         .ok_or_else(|| rustler::Error::Term(Box::new("Statement not found")))?;
+
+    // Verify statement belongs to this connection
+    if stored_conn_id != conn_id {
+        return Err(rustler::Error::Term(Box::new(
+            "Statement does not belong to connection",
+        )));
+    }
 
     let cached_stmt = cached_stmt.clone();
 
@@ -1605,9 +1685,16 @@ fn statement_parameter_count(conn_id: &str, stmt_id: &str) -> NifResult<usize> {
         return Err(rustler::Error::Term(Box::new("Invalid connection ID")));
     }
 
-    let (_stored_conn_id, cached_stmt) = stmt_registry
+    let (stored_conn_id, cached_stmt) = stmt_registry
         .get(stmt_id)
         .ok_or_else(|| rustler::Error::Term(Box::new("Statement not found")))?;
+
+    // Verify statement belongs to this connection
+    if stored_conn_id != conn_id {
+        return Err(rustler::Error::Term(Box::new(
+            "Statement does not belong to connection",
+        )));
+    }
 
     let cached_stmt = cached_stmt.clone();
 
@@ -1833,29 +1920,28 @@ fn flush_replicator(conn_id: &str) -> NifResult<u64> {
 // Note: sync_frames requires complex Frames type, skipping for now
 // Can be added later if needed with proper frame data marshalling
 
-/// Freeze a remote replica database, converting it to a standalone local database.
-/// This is useful for disaster recovery (promoting a replica to primary).
-/// After freezing, the database can no longer sync with the remote.
+/// **NOT SUPPORTED** - Freeze database operation is not implemented.
+///
+/// Freeze is intended to convert a remote replica to a standalone local database
+/// for disaster recovery. However, this operation requires deep refactoring of
+/// the connection pool architecture (taking ownership of the Database instance,
+/// which is held in an Arc within connection state, etc.) and is not currently
+/// supported.
+///
+/// Returns: `:unsupported` atom error via NIF
 #[rustler::nif(schedule = "DirtyIo")]
 fn freeze_database(conn_id: &str) -> NifResult<Atom> {
+    // Verify connection exists (basic validation)
     let conn_map = safe_lock(&CONNECTION_REGISTRY, "freeze_database conn_map")?;
+    let _exists = conn_map
+        .get(conn_id)
+        .ok_or_else(|| rustler::Error::Term(Box::new("Connection not found")))?;
+    drop(conn_map);
 
-    if let Some(_client_arc) = conn_map.get(conn_id) {
-        drop(conn_map);
-
-        // The freeze operation replaces the database connection
-        // Note: freeze() consumes self, so we can't directly call it on a reference
-        // For now, we just return an error - this feature requires deeper refactoring
-        let result: Result<(), String> =
-            Err("Freeze operation not fully supported in this version".to_string());
-
-        match result {
-            Ok(()) => Ok(rustler::types::atom::ok()),
-            Err(e) => Err(rustler::Error::Term(Box::new(e))),
-        }
-    } else {
-        Err(rustler::Error::Term(Box::new("Connection not found")))
-    }
+    // Always return :unsupported atom - this feature requires architectural changes
+    // that have not been completed. See CLAUDE.md for implementation details.
+    // Note: We return this as a string error that Elixir will convert to :unsupported atom
+    Err(rustler::Error::Atom("unsupported"))
 }
 
 rustler::init!("Elixir.EctoLibSql.Native");

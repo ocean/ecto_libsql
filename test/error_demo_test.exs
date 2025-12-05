@@ -28,6 +28,7 @@ defmodule EctoLibSql.ErrorDemoTest do
 
     test "❌ BEFORE: invalid transaction would crash VM | ✅ AFTER: returns error tuple" do
       fake_trx_id = "nonexistent-transaction-id"
+      fake_conn_id = "nonexistent-connection-id"
 
       # BEFORE: TXN_REGISTRY.lock().unwrap().get_mut(trx_id).unwrap()
       #         Would panic on None → VM crash
@@ -35,6 +36,7 @@ defmodule EctoLibSql.ErrorDemoTest do
       result =
         EctoLibSql.Native.execute_with_transaction(
           fake_trx_id,
+          fake_conn_id,
           "SELECT 1",
           []
         )
@@ -62,7 +64,7 @@ defmodule EctoLibSql.ErrorDemoTest do
           # Try multiple invalid operations
           _result1 = EctoLibSql.Native.ping("invalid-conn")
           _result2 = EctoLibSql.Native.close("invalid-stmt", :stmt_id)
-          _result3 = EctoLibSql.Native.fetch_cursor("invalid-cursor", 100)
+          _result3 = EctoLibSql.Native.fetch_cursor("invalid-conn", "invalid-cursor", 100)
 
           # Sleep to keep process alive
           Process.sleep(100)
