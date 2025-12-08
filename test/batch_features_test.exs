@@ -127,6 +127,8 @@ defmodule EctoLibSql.BatchFeaturesTest do
       # Extract the actual count value from the result rows
       [[count]] = count_result.rows
       assert count >= 3
+
+      EctoLibSql.disconnect([], state)
     end
 
     test "batch operations - transactional atomicity with floats", state do
@@ -169,6 +171,8 @@ defmodule EctoLibSql.BatchFeaturesTest do
 
       [[balance]] = result.rows
       assert balance == 100.50
+
+      EctoLibSql.disconnect([], state)
     end
 
     test "batch with mixed operations", state do
@@ -205,6 +209,8 @@ defmodule EctoLibSql.BatchFeaturesTest do
       # Last result should show count of 1 (one deleted)
       count_result = List.last(results)
       assert hd(hd(count_result.rows)) == 1
+
+      EctoLibSql.disconnect([], state)
     end
 
     test "large result set handling with batch insert", state do
@@ -239,6 +245,8 @@ defmodule EctoLibSql.BatchFeaturesTest do
 
       [[count]] = result.rows
       assert count == 50
+
+      EctoLibSql.disconnect([], state)
     end
   end
 end
