@@ -67,11 +67,11 @@ defmodule EctoLibSql.ErrorDemoTest do
           _result3 = EctoLibSql.Native.fetch_cursor("invalid-conn", "invalid-cursor", 100)
 
           # Sleep to keep process alive
-          Process.sleep(100)
+          Process.sleep(500)
         end)
 
       # Give it time to execute
-      Process.sleep(50)
+      Process.sleep(100)
 
       # BEFORE: Process (and possibly VM) would have crashed
       # AFTER:  Process is still alive
