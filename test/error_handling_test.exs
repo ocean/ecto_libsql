@@ -202,7 +202,12 @@ defmodule EctoLibSql.ErrorHandlingTest do
 
               2 ->
                 # Invalid transaction
-                EctoLibSql.Native.execute_with_transaction("invalid-trx-#{i}", "SELECT 1", [])
+                EctoLibSql.Native.execute_with_transaction(
+                  "invalid-trx-#{i}",
+                  real_conn_id,
+                  "SELECT 1",
+                  []
+                )
             end
           end)
         end)

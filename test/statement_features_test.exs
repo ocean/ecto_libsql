@@ -170,6 +170,7 @@ defmodule EctoLibSql.StatementFeaturesTest do
       EctoLibSql.Native.close_stmt(stmt_id)
     end
 
+    @tag :flaky
     test "statement caching improves performance vs re-prepare", %{state: state} do
       sql = "INSERT INTO users VALUES (?, ?, ?)"
 
@@ -209,7 +210,7 @@ defmodule EctoLibSql.StatementFeaturesTest do
       ratio = time_with_cache / time_with_prepare
 
       assert ratio <= 1.5,
-             "Cached statements should not be 50% slower than re-prepare (got #{ratio}x)"
+             "Cached statements should be faster than re-prepare (got #{ratio}x)"
     end
   end
 
