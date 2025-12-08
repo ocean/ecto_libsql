@@ -99,8 +99,8 @@ defmodule EctoLibSql.BatchFeaturesTest do
       EctoLibSql.disconnect([], state)
     end
 
-    test "batch operations - non-transactional", state do
-      {:ok, state} = EctoLibSql.connect(state[:opts])
+    test "batch operations - non-transactional", %{database: database} do
+      {:ok, state} = EctoLibSql.connect(database: database)
 
       # Create table
       create_table = %EctoLibSql.Query{
@@ -126,13 +126,13 @@ defmodule EctoLibSql.BatchFeaturesTest do
       count_result = List.last(results)
       # Extract the actual count value from the result rows
       [[count]] = count_result.rows
-      assert count >= 3
+      assert count == 3
 
       EctoLibSql.disconnect([], state)
     end
 
-    test "batch operations - transactional atomicity with floats", state do
-      {:ok, state} = EctoLibSql.connect(state[:opts])
+    test "batch operations - transactional atomicity with floats", %{database: database} do
+      {:ok, state} = EctoLibSql.connect(database: database)
 
       # Create table with REAL balance (floats now supported!)
       create_table = %EctoLibSql.Query{
@@ -175,8 +175,8 @@ defmodule EctoLibSql.BatchFeaturesTest do
       EctoLibSql.disconnect([], state)
     end
 
-    test "batch with mixed operations", state do
-      {:ok, state} = EctoLibSql.connect(state[:opts])
+    test "batch with mixed operations", %{database: database} do
+      {:ok, state} = EctoLibSql.connect(database: database)
 
       # Create table
       {:ok, _, _, state} =
@@ -208,13 +208,14 @@ defmodule EctoLibSql.BatchFeaturesTest do
 
       # Last result should show count of 1 (one deleted)
       count_result = List.last(results)
-      assert hd(hd(count_result.rows)) == 1
+      [[count]] = count_result.rows
+      assert count == 1
 
       EctoLibSql.disconnect([], state)
     end
 
-    test "large result set handling with batch insert", state do
-      {:ok, state} = EctoLibSql.connect(state[:opts])
+    test "large result set handling with batch insert", %{database: database} do
+      {:ok, state} = EctoLibSql.connect(database: database)
 
       # Create table
       {:ok, _, _, state} =
