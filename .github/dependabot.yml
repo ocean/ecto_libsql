@@ -30,8 +30,3 @@ updates:
     directory: "/"
     schedule:
       interval: "monthly"
-  # Enable version updates for Rust toolchain.
-  - package-ecosystem: "rust-toolchain"
-    directory: "/"
-    schedule:
-      interval: "weekly"
