@@ -3,7 +3,7 @@
 > **Purpose**: Guide for AI agents helping developers **USE** ecto_libsql in their applications
 >
 > **⚠️ IMPORTANT**: This guide is for **using ecto_libsql in your applications**.  
-> **🔧 For developing/maintaining the ecto_libsql library itself**, see [CLAUDE.md](CLAUDE.md) instead.
+> **🔧 For developing/maintaining the ecto_libsql library itself**, see [CLAUDE.md](https://github.com/ocean/ecto_libsql/blob/main/CLAUDE.md) instead.
 
 Welcome to ecto_libsql! This guide provides comprehensive documentation, API reference, and practical examples for building applications with LibSQL/Turso in Elixir using the Ecto adapter.
 
@@ -17,7 +17,7 @@ Welcome to ecto_libsql! This guide provides comprehensive documentation, API ref
 - Real-world usage examples and patterns
 - Performance optimisation for your applications
 
-**If you're working ON the ecto_libsql codebase itself** (contributing, fixing bugs, adding features), see [CLAUDE.md](CLAUDE.md) for internal development documentation.
+**If you're working ON the ecto_libsql codebase itself** (contributing, fixing bugs, adding features), see [CLAUDE.md](https://github.com/ocean/ecto_libsql/blob/main/CLAUDE.md) for internal development documentation.
 
 ## Table of Contents
 
@@ -29,6 +29,8 @@ Welcome to ecto_libsql! This guide provides comprehensive documentation, API ref
   - [Prepared Statements](#prepared-statements)
   - [Batch Operations](#batch-operations)
   - [Cursor Streaming](#cursor-streaming)
+  - [Connection Management](#connection-management)
+  - [PRAGMA Configuration](#pragma-configuration)
   - [Vector Search](#vector-search)
   - [Encryption](#encryption)
 - [Ecto Integration](#ecto-integration)
@@ -58,7 +60,7 @@ Add to your `mix.exs`:
 ```elixir
 def deps do
   [
-    {:ecto_libsql, "~> 0.4.0"}
+    {:ecto_libsql, "~> 0.7.0"}
   ]
 end
 ```
@@ -381,6 +383,59 @@ defmodule MyApp.Transfer do
 end
 ```
 
+#### Savepoints (Nested Transactions)
+
+Savepoints enable partial rollback within a transaction, perfect for error recovery patterns:
+
+```elixir
+# Begin transaction
+{:ok, :begin, state} = EctoLibSql.handle_begin([], state)
+
+# Create savepoint
+{:ok, state} = EctoLibSql.Native.create_savepoint(state, "sp1")
+
+{:ok, _, _, state} = EctoLibSql.handle_execute(
+  "INSERT INTO users (name) VALUES (?)",
+  ["Alice"],
+  [],
+  state
+)
+
+# If something goes wrong, rollback to savepoint (transaction stays active)
+{:ok, state} = EctoLibSql.Native.rollback_to_savepoint_by_name(state, "sp1")
+
+# Or release savepoint to commit its changes
+{:ok, state} = EctoLibSql.Native.release_savepoint_by_name(state, "sp1")
+
+# Commit the whole transaction
+{:ok, _, state} = EctoLibSql.handle_commit([], state)
+```
+
+**Use case - Batch import with error recovery:**
+
+```elixir
+{:ok, :begin, state} = EctoLibSql.handle_begin([], state)
+
+Enum.reduce(records, state, fn record, state ->
+  # Create savepoint for this record
+  {:ok, state} = EctoLibSql.Native.create_savepoint(state, "record_#{record.id}")
+  
+  case insert_record(record, state) do
+    {:ok, _, _, state} ->
+      # Success - release savepoint
+      {:ok, state} = EctoLibSql.Native.release_savepoint_by_name(state, "record_#{record.id}")
+      state
+    {:error, _, _, state} ->
+      # Failure - rollback this record, continue with others
+      {:ok, state} = EctoLibSql.Native.rollback_to_savepoint_by_name(state, "record_#{record.id}")
+      Logger.warn("Failed to import record #{record.id}")
+      state
+  end
+end)
+
+{:ok, _, state} = EctoLibSql.handle_commit([], state)
+```
+
 ### Prepared Statements
 
 Prepared statements offer significant performance improvements for repeated queries and prevent SQL injection. As of v0.7.0, statement caching is automatic and highly optimised.
@@ -477,7 +532,7 @@ IO.puts("Inserted #{rows2} rows")
 
 #### Statement Introspection (Query Structure Inspection)
 
-Prepared statements allow you to inspect the structure of results before execution:
+Inspect prepared statement structure before execution (v0.7.0+):
 
 ```elixir
 # Prepare a statement
@@ -487,17 +542,17 @@ Prepared statements allow you to inspect the structure of results before executi
 )
 
 # Get parameter count (how many ? placeholders)
-{:ok, param_count} = EctoLibSql.Native.statement_parameter_count(state, stmt_id)
+{:ok, param_count} = EctoLibSql.Native.stmt_parameter_count(state, stmt_id)
 IO.puts("Statement expects #{param_count} parameter(s)")  # Prints: 1
 
 # Get column count (how many columns in result set)
-{:ok, col_count} = EctoLibSql.Native.statement_column_count(state, stmt_id)
+{:ok, col_count} = EctoLibSql.Native.stmt_column_count(state, stmt_id)
 IO.puts("Result will have #{col_count} column(s)")  # Prints: 4
 
 # Get column names
 col_names =
   Enum.map(0..(col_count - 1), fn i ->
-    {:ok, name} = EctoLibSql.Native.statement_column_name(state, stmt_id, i)
+    {:ok, name} = EctoLibSql.Native.stmt_column_name(state, stmt_id, i)
     name
   end)
 IO.inspect(col_names)  # Prints: ["id", "name", "email", "created_at"]
@@ -591,6 +646,30 @@ statements = [
 ]
 
 {:ok, results} = EctoLibSql.Native.batch_transactional(state, statements)
+```
+
+#### Raw SQL Batch Execution
+
+Execute multiple SQL statements as a single string (v0.7.0+):
+
+```elixir
+# Non-transactional: each statement executes independently
+sql = """
+CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT);
+INSERT INTO users (name) VALUES ('Alice');
+INSERT INTO users (name) VALUES ('Bob');
+"""
+
+{:ok, _} = EctoLibSql.Native.execute_batch_sql(state, sql)
+
+# Transactional: all-or-nothing execution
+sql = """
+INSERT INTO users (name) VALUES ('Charlie');
+INSERT INTO users (name) VALUES ('David');
+UPDATE users SET name = 'Chuck' WHERE name = 'Charlie';
+"""
+
+{:ok, _} = EctoLibSql.Native.execute_transactional_batch_sql(state, sql)
 ```
 
 #### Bulk Insert Example
@@ -868,6 +947,120 @@ distance_sql = EctoLibSql.Native.vector_distance_cos("description_embedding", qu
   [],
   state
 )
+```
+
+### Connection Management
+
+Control connection behavior and performance with these utilities (v0.7.0+):
+
+#### Busy Timeout
+
+Configure how long to wait when the database is locked:
+
+```elixir
+# Set timeout to 10 seconds (default is 5 seconds)
+{:ok, state} = EctoLibSql.Native.busy_timeout(state, 10_000)
+
+# Now queries will wait up to 10s for locks to release
+{:ok, _, result, state} = EctoLibSql.handle_execute(
+  "INSERT INTO users (name) VALUES (?)",
+  ["Alice"],
+  [],
+  state
+)
+```
+
+#### Reset Connection
+
+Reset connection state without closing it:
+
+```elixir
+# Reset clears prepared statements, releases locks, rolls back transactions
+{:ok, state} = EctoLibSql.Native.reset(state)
+```
+
+#### Interrupt Long-Running Queries
+
+Cancel a query that's taking too long:
+
+```elixir
+# In one process
+Task.async(fn ->
+  EctoLibSql.handle_execute("SELECT * FROM huge_table", [], [], state)
+end)
+
+# In another process, interrupt it
+:ok = EctoLibSql.Native.interrupt(state)
+```
+
+### PRAGMA Configuration
+
+Configure SQLite database parameters with the `EctoLibSql.Pragma` module (v0.7.0+):
+
+#### Foreign Keys
+
+```elixir
+# Enable foreign key constraints
+{:ok, state} = EctoLibSql.Pragma.enable_foreign_keys(state)
+
+# Check if enabled
+{:ok, enabled} = EctoLibSql.Pragma.foreign_keys(state)
+IO.inspect(enabled)  # true
+```
+
+#### Journal Mode
+
+```elixir
+# Set to WAL mode for better concurrency
+{:ok, state} = EctoLibSql.Pragma.set_journal_mode(state, :wal)
+
+# Check current mode
+{:ok, mode} = EctoLibSql.Pragma.journal_mode(state)
+IO.inspect(mode)  # :wal
+```
+
+#### Cache Size
+
+```elixir
+# Set cache to 10MB (negative values = KB)
+{:ok, state} = EctoLibSql.Pragma.set_cache_size(state, -10_000)
+
+# Or use pages (positive values)
+{:ok, state} = EctoLibSql.Pragma.set_cache_size(state, 2000)
+```
+
+#### Synchronous Level
+
+```elixir
+# Set synchronous mode (trade durability for speed)
+{:ok, state} = EctoLibSql.Pragma.set_synchronous(state, :normal)
+
+# Options: :off, :normal, :full, :extra
+```
+
+#### Table Introspection
+
+```elixir
+# Get table structure
+{:ok, columns} = EctoLibSql.Pragma.table_info(state, "users")
+Enum.each(columns, fn col ->
+  IO.inspect(col)  # %{name: "id", type: "INTEGER", ...}
+end)
+
+# List all tables
+{:ok, tables} = EctoLibSql.Pragma.table_list(state)
+IO.inspect(tables)  # ["users", "posts", "sqlite_sequence"]
+```
+
+#### User Version (Schema Versioning)
+
+```elixir
+# Set schema version
+{:ok, state} = EctoLibSql.Pragma.set_user_version(state, 5)
+
+# Get current version
+{:ok, version} = EctoLibSql.Pragma.user_version(state)
+IO.inspect(version)  # 5
 ```
 
 ### Encryption
@@ -1827,6 +2020,160 @@ Manually synchronises a remote replica.
 - `state` (EctoLibSql.State): Connection state
 
 **Returns:** `{:ok, message}` or `{:error, reason}`
+
+#### `EctoLibSql.Native.get_frame_number_for_replica/1` (v0.7.0+)
+
+Get current replication frame number.
+
+**Parameters:**
+- `state` (EctoLibSql.State): Connection state
+
+**Returns:** `{:ok, frame_number}` or `{:error, reason}`
+
+#### `EctoLibSql.Native.sync_until_frame/2` (v0.7.0+)
+
+Synchronise replica until specified frame number.
+
+**Parameters:**
+- `state` (EctoLibSql.State): Connection state
+- `frame_number` (integer): Target frame number
+
+**Returns:** `{:ok, state}` or `{:error, reason}`
+
+#### `EctoLibSql.Native.flush_and_get_frame/1` (v0.7.0+)
+
+Flush pending writes and get frame number.
+
+**Parameters:**
+- `state` (EctoLibSql.State): Connection state
+
+**Returns:** `{:ok, frame_number}` or `{:error, reason}`
+
+#### `EctoLibSql.Native.max_write_replication_index/1` (v0.7.0+)
+
+Get the highest replication frame from write operations (for read-your-writes consistency).
+
+**Parameters:**
+- `state` (EctoLibSql.State): Connection state
+
+**Returns:** `{:ok, frame_number}` or `{:error, reason}`
+
+### Connection Management Functions
+
+#### `EctoLibSql.Native.busy_timeout/2` (v0.7.0+)
+
+Configure database busy timeout.
+
+**Parameters:**
+- `state` (EctoLibSql.State): Connection state
+- `timeout_ms` (integer): Timeout in milliseconds
+
+**Returns:** `{:ok, state}` or `{:error, reason}`
+
+#### `EctoLibSql.Native.reset/1` (v0.7.0+)
+
+Reset connection state without closing.
+
+**Parameters:**
+- `state` (EctoLibSql.State): Connection state
+
+**Returns:** `{:ok, state}` or `{:error, reason}`
+
+#### `EctoLibSql.Native.interrupt/1` (v0.7.0+)
+
+Interrupt a long-running query.
+
+**Parameters:**
+- `state` (EctoLibSql.State): Connection state
+
+**Returns:** `:ok`
+
+### Savepoint Functions
+
+#### `EctoLibSql.Native.create_savepoint/2` (v0.7.0+)
+
+Create a named savepoint within a transaction.
+
+**Parameters:**
+- `state` (EctoLibSql.State): Connection state
+- `name` (String.t()): Savepoint name (alphanumeric only)
+
+**Returns:** `{:ok, state}` or `{:error, reason}`
+
+#### `EctoLibSql.Native.release_savepoint_by_name/2` (v0.7.0+)
+
+Release (commit) a savepoint.
+
+**Parameters:**
+- `state` (EctoLibSql.State): Connection state
+- `name` (String.t()): Savepoint name
+
+**Returns:** `{:ok, state}` or `{:error, reason}`
+
+#### `EctoLibSql.Native.rollback_to_savepoint_by_name/2` (v0.7.0+)
+
+Rollback to a savepoint (keeps transaction active).
+
+**Parameters:**
+- `state` (EctoLibSql.State): Connection state
+- `name` (String.t()): Savepoint name
+
+**Returns:** `{:ok, state}` or `{:error, reason}`
+
+### Statement Introspection Functions
+
+#### `EctoLibSql.Native.stmt_parameter_count/2` (v0.7.0+)
+
+Get number of parameters in prepared statement.
+
+**Parameters:**
+- `state` (EctoLibSql.State): Connection state
+- `stmt_id` (String.t()): Statement ID
+
+**Returns:** `{:ok, count}` or `{:error, reason}`
+
+#### `EctoLibSql.Native.stmt_column_count/2` (v0.7.0+)
+
+Get number of columns in prepared statement result.
+
+**Parameters:**
+- `state` (EctoLibSql.State): Connection state
+- `stmt_id` (String.t()): Statement ID
+
+**Returns:** `{:ok, count}` or `{:error, reason}`
+
+#### `EctoLibSql.Native.stmt_column_name/3` (v0.7.0+)
+
+Get column name by index from prepared statement.
+
+**Parameters:**
+- `state` (EctoLibSql.State): Connection state
+- `stmt_id` (String.t()): Statement ID
+- `index` (integer): Column index (0-based)
+
+**Returns:** `{:ok, name}` or `{:error, reason}`
+
+### Batch SQL Functions
+
+#### `EctoLibSql.Native.execute_batch_sql/2` (v0.7.0+)
+
+Execute multiple SQL statements (non-transactional).
+
+**Parameters:**
+- `state` (EctoLibSql.State): Connection state
+- `sql` (String.t()): Multiple SQL statements separated by semicolons
+
+**Returns:** `{:ok, state}` or `{:error, reason}`
+
+#### `EctoLibSql.Native.execute_transactional_batch_sql/2` (v0.7.0+)
+
+Execute multiple SQL statements atomically in a transaction.
+
+**Parameters:**
+- `state` (EctoLibSql.State): Connection state
+- `sql` (String.t()): Multiple SQL statements separated by semicolons
+
+**Returns:** `{:ok, state}` or `{:error, reason}`
 
 ---
 

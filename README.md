@@ -2,7 +2,7 @@
 
 [![GitHub Actions CI](https://github.com/ocean/ecto_libsql/actions/workflows/ci.yml/badge.svg)](https://github.com/ocean/ecto_libsql/actions/workflows/ci.yml)
 
-`ecto_libsql` is an (unofficial) Elixir Ecto database adapter for LibSQL and Turso, built with Rust NIFs. It supports local libSQL/SQLite files, remote replica with synchronisation, and remote only [Turso](https://turso.tech/) databases.
+`ecto_libsql` is an (unofficial) Elixir [Ecto](https://github.com/elixir-ecto/ecto) database adapter for [LibSQL](https://github.com/tursodatabase/libsql) database files, and databases hosted on [Turso](https://turso.tech/), built with Rust NIFs. It supports local libSQL/SQLite files, remote replica with synchronisation, and remote only Turso databases.
 
 ## Installation
 
@@ -11,7 +11,7 @@ Add `ecto_libsql` to your dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:ecto_libsql, "~> 0.5.0"}
+    {:ecto_libsql, "~> 0.7.0"}
   ]
 end
 ```
@@ -81,16 +81,19 @@ For lower-level control, you can use the DBConnection interface directly:
 
 **Core Functionality**
 - Parameterised queries with safe parameter binding
-- Prepared statements
-- Transactions with multiple isolation levels (deferred, immediate, exclusive)
+- Prepared statements with automatic caching and introspection
+- Transactions with multiple isolation levels (deferred, immediate, exclusive) and savepoints
 - Batch operations (transactional and non-transactional)
 - Metadata access (last insert ID, row counts, etc.)
+- Connection management (busy timeout, reset, interrupt)
+- PRAGMA configuration helpers
 
 **Advanced Features**
 - Vector similarity search
 - Database encryption (AES-256-CBC for local and embedded replica databases)
 - WebSocket and HTTP protocols
 - Cursor-based streaming for large result sets (via DBConnection interface)
+- Advanced replica synchronisation with frame tracking
 
 **Note:** Ecto `Repo.stream()` is not yet implemented. For streaming large datasets, use the DBConnection cursor interface directly (see examples in AGENTS.md).
 
@@ -223,15 +226,22 @@ end)
 
 ### Prepared Statements
 
+Statements are automatically cached and reused for ~10-15x performance improvement:
+
 ```elixir
-# Prepare once, execute many times
+# Prepare once, execute many times (statement cached internally)
 {:ok, state} = EctoLibSql.connect(database: "test.db")
 
 {:ok, stmt_id} = EctoLibSql.Native.prepare(state,
   "SELECT * FROM users WHERE id = ?")
 
+# Cached statement reused with automatic binding cleanup
 {:ok, result1} = EctoLibSql.Native.query_stmt(state, stmt_id, [1])
 {:ok, result2} = EctoLibSql.Native.query_stmt(state, stmt_id, [2])
+
+# Introspect statement structure
+{:ok, param_count} = EctoLibSql.Native.stmt_parameter_count(state, stmt_id)
+{:ok, col_count} = EctoLibSql.Native.stmt_column_count(state, stmt_id)
 
 :ok = EctoLibSql.Native.close_stmt(stmt_id)
 ```
@@ -241,7 +251,7 @@ end)
 ```elixir
 {:ok, state} = EctoLibSql.connect(database: "test.db")
 
-# Execute multiple statements together
+# Execute multiple statements with parameters
 statements = [
   {"INSERT INTO users (name) VALUES (?)", ["Dave"]},
   {"INSERT INTO users (name) VALUES (?)", ["Eve"]},
@@ -253,6 +263,14 @@ statements = [
 
 # Transactional (all-or-nothing)
 {:ok, results} = EctoLibSql.Native.batch_transactional(state, statements)
+
+# Raw SQL batch (useful for migrations, seeding)
+sql = """
+CREATE TABLE posts (id INTEGER PRIMARY KEY, title TEXT);
+INSERT INTO posts (title) VALUES ('First Post');
+INSERT INTO posts (title) VALUES ('Second Post');
+"""
+{:ok, _} = EctoLibSql.Native.execute_batch_sql(state, sql)
 ```
 
 ### Vector Similarity Search
@@ -427,7 +445,7 @@ This mode provides microsecond read latency (local file) with automatic cloud ba
 
 ## Transaction Behaviours
 
-Control transaction locking behaviour:
+Control transaction locking behaviour and use savepoints for partial rollback:
 
 ```elixir
 # Deferred (default) - locks acquired on first write
@@ -438,6 +456,13 @@ Control transaction locking behaviour:
 
 # Read-only - read lock only
 {:ok, state} = EctoLibSql.Native.begin(state, behavior: :read_only)
+
+# Savepoints for nested transaction-like behaviour
+{:ok, state} = EctoLibSql.Native.create_savepoint(state, "sp1")
+# ... operations ...
+{:ok, state} = EctoLibSql.Native.rollback_to_savepoint_by_name(state, "sp1")
+# or
+{:ok, state} = EctoLibSql.Native.release_savepoint_by_name(state, "sp1")
 ```
 
 ## Metadata Functions
