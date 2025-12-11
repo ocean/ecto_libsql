@@ -303,14 +303,36 @@ pub fn query_with_trx_args<'a>(
         .collect::<Result<_, _>>()
         .map_err(|e| rustler::Error::Term(Box::new(e)))?;
 
-    TOKIO_RUNTIME.block_on(async {
-        let res_rows = entry
-            .transaction
-            .query(&query, decoded_args)
-            .await
-            .map_err(|e| rustler::Error::Term(Box::new(format!("Query failed: {}", e))))?;
+    // Determine query type and use appropriate method
+    let query_type = detect_query_type(query);
 
-        collect_rows(env, res_rows).await
+    TOKIO_RUNTIME.block_on(async {
+        match query_type {
+            QueryType::Select => {
+                // SELECT statements - use query()
+                let res_rows = entry
+                    .transaction
+                    .query(&query, decoded_args)
+                    .await
+                    .map_err(|e| rustler::Error::Term(Box::new(format!("Query failed: {}", e))))?;
+
+                collect_rows(env, res_rows).await
+            }
+            _ => {
+                // Non-SELECT statements - use execute()
+                let rows_affected = entry
+                    .transaction
+                    .execute(&query, decoded_args)
+                    .await
+                    .map_err(|e| rustler::Error::Term(Box::new(format!("Execute failed: {}", e))))?;
+
+                // Return empty result with row count
+                let empty_columns: Vec<Term> = Vec::new();
+                let empty_rows: Vec<Term> = Vec::new();
+                let result = (empty_columns, empty_rows, rows_affected);
+                Ok(result.encode(env))
+            }
+        }
     })
 }
 
@@ -584,15 +606,41 @@ fn query_args<'a>(
 
         let params = params.map_err(|e| rustler::Error::Term(Box::new(e)))?;
 
+        // Determine whether to use query() or execute() based on statement type
+        let query_type = detect_query_type(query);
+
         TOKIO_RUNTIME.block_on(async {
             let client_guard = safe_lock_arc(&client, "query_args client")?;
             let conn_guard = safe_lock_arc(&client_guard.client, "query_args conn")?;
 
-            let res = conn_guard.query(query, params).await;
+            // Use execute() for non-SELECT statements, query() for SELECT
+            match query_type {
+                QueryType::Select => {
+                    // SELECT statements return rows - use query()
+                    let res = conn_guard.query(query, params).await;
 
-            match res {
-                Ok(res_rows) => {
-                    let result = collect_rows(env, res_rows).await?;
+                    match res {
+                        Ok(res_rows) => {
+                            let result = collect_rows(env, res_rows).await?;
+                            Ok(result)
+                        }
+                        Err(e) => Err(rustler::Error::Term(Box::new(e.to_string()))),
+                    }
+                }
+                _ => {
+                    // Non-SELECT statements (INSERT, UPDATE, DELETE, etc.) - use execute()
+                    let res = conn_guard.execute(query, params).await;
+
+                    match res {
+                        Ok(rows_affected) => {
+                            // Return empty result with row count for non-SELECT statements
+                            let empty_columns: Vec<Term> = Vec::new();
+                            let empty_rows: Vec<Term> = Vec::new();
+                            let result = (empty_columns, empty_rows, rows_affected);
+                            Ok(result.encode(env))
+                        }
+                        Err(e) => Err(rustler::Error::Term(Box::new(e.to_string()))),
+                    }
 
                     // NOTE: LibSQL automatically syncs writes to remote for embedded replicas.
                     // According to Turso docs, "writes are sent to the remote primary database by default,
@@ -600,11 +648,7 @@ fn query_args<'a>(
                     // We do NOT need to manually call sync() after writes - that would be redundant
                     // and cause performance issues. Manual sync via do_sync() is still available for
                     // explicit user control.
-
-                    Ok(result)
                 }
-
-                Err(e) => Err(rustler::Error::Term(Box::new(e.to_string()))),
             }
         })
     } else {
@@ -806,18 +850,43 @@ fn execute_batch<'a>(
                 let client_guard = safe_lock_arc(&client, "execute_batch client")?;
                 let conn_guard = safe_lock_arc(&client_guard.client, "execute_batch conn")?;
 
-                match conn_guard.query(sql, args.clone()).await {
-                    Ok(rows) => {
-                        let collected = collect_rows(env, rows)
-                            .await
-                            .map_err(|e| rustler::Error::Term(Box::new(format!("{:?}", e))))?;
-                        all_results.push(collected);
+                // Determine query type and use appropriate method
+                let query_type = detect_query_type(sql);
+
+                match query_type {
+                    QueryType::Select => {
+                        // SELECT statements - use query()
+                        match conn_guard.query(sql, args.clone()).await {
+                            Ok(rows) => {
+                                let collected = collect_rows(env, rows)
+                                    .await
+                                    .map_err(|e| rustler::Error::Term(Box::new(format!("{:?}", e))))?;
+                                all_results.push(collected);
+                            }
+                            Err(e) => {
+                                return Err(rustler::Error::Term(Box::new(format!(
+                                    "Batch statement error: {}",
+                                    e
+                                ))));
+                            }
+                        }
                     }
-                    Err(e) => {
-                        return Err(rustler::Error::Term(Box::new(format!(
-                            "Batch statement error: {}",
-                            e
-                        ))));
+                    _ => {
+                        // Non-SELECT statements - use execute()
+                        match conn_guard.execute(sql, args.clone()).await {
+                            Ok(rows_affected) => {
+                                let empty_columns: Vec<Term> = Vec::new();
+                                let empty_rows: Vec<Term> = Vec::new();
+                                let result = (empty_columns, empty_rows, rows_affected);
+                                all_results.push(result.encode(env));
+                            }
+                            Err(e) => {
+                                return Err(rustler::Error::Term(Box::new(format!(
+                                    "Batch statement error: {}",
+                                    e
+                                ))));
+                            }
+                        }
                     }
                 }
             }
