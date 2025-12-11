@@ -72,6 +72,7 @@ defmodule ManualDeleteGetTest do
     test "deletes all records matching a query" do
       {:ok, _alice} = TestRepo.insert(%User{name: "Alice", email: "alice@example.com", age: 30})
       {:ok, _bob} = TestRepo.insert(%User{name: "Bob", email: "bob@example.com", age: 25})
+
       {:ok, _charlie} =
         TestRepo.insert(%User{name: "Charlie", email: "charlie@example.com", age: 35})
 
