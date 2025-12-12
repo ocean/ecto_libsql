@@ -145,21 +145,6 @@ fn decode_transaction_behavior(atom: Atom) -> Option<TransactionBehavior> {
     }
 }
 
-/// Helper function to verify transaction ownership.
-///
-/// Returns an error if the transaction does not belong to the specified connection.
-fn verify_transaction_ownership(
-    entry: &TransactionEntry,
-    conn_id: &str,
-) -> Result<(), rustler::Error> {
-    if entry.conn_id != conn_id {
-        return Err(rustler::Error::Term(Box::new(
-            "Transaction does not belong to this connection",
-        )));
-    }
-    Ok(())
-}
-
 /// Helper function to verify statement ownership.
 ///
 /// Returns an error if the statement does not belong to the specified connection.
@@ -274,7 +259,13 @@ pub fn execute_with_transaction<'a>(
             .ok_or_else(|| rustler::Error::Term(Box::new("Transaction not found")))?;
 
         // Verify transaction belongs to this connection
-        verify_transaction_ownership(&entry, conn_id)?;
+        if entry.conn_id != conn_id {
+            // Re-insert before returning error
+            txn_registry.insert(trx_id.to_string(), entry);
+            return Err(rustler::Error::Term(Box::new(
+                "Transaction does not belong to this connection",
+            )));
+        }
 
         entry
     }; // Lock dropped here
@@ -318,7 +309,13 @@ pub fn query_with_trx_args<'a>(
             .ok_or_else(|| rustler::Error::Term(Box::new("Transaction not found")))?;
 
         // Verify transaction belongs to this connection
-        verify_transaction_ownership(&entry, conn_id)?;
+        if entry.conn_id != conn_id {
+            // Re-insert before returning error
+            txn_registry.insert(trx_id.to_string(), entry);
+            return Err(rustler::Error::Term(Box::new(
+                "Transaction does not belong to this connection",
+            )));
+        }
 
         entry
     }; // Lock dropped here
