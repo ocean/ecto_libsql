@@ -299,19 +299,23 @@ defmodule EctoLibSql.Native do
         %EctoLibSql.Query{statement: statement} = query,
         args
       ) do
-    # Check if statement has RETURNING clause - if so, use query instead of execute
+    # Detect the command type to route correctly
+    command = detect_command(statement)
+    
+    # For SELECT statements (even without RETURNING), use query_with_trx_args
+    # For INSERT/UPDATE/DELETE with RETURNING, use query_with_trx_args
+    # For INSERT/UPDATE/DELETE without RETURNING, use execute_with_transaction
     has_returning = String.contains?(String.upcase(statement), "RETURNING")
+    should_query = command == :select or has_returning
 
-    if has_returning do
-      # Use query_with_trx_args for statements with RETURNING
+    if should_query do
+      # Use query_with_trx_args for SELECT or statements with RETURNING
       case query_with_trx_args(trx_id, conn_id, statement, args) do
         %{
           "columns" => columns,
           "rows" => rows,
           "num_rows" => num_rows
         } ->
-          command = detect_command(statement)
-
           # For INSERT/UPDATE/DELETE without actual returned rows, normalize empty lists to nil
           # This ensures consistency with non-transactional path
           {columns, rows} =
@@ -334,11 +338,11 @@ defmodule EctoLibSql.Native do
           {:error, %EctoLibSql.Error{message: message}, state}
       end
     else
-      # Use execute for statements without RETURNING
+      # Use execute_with_transaction for INSERT/UPDATE/DELETE without RETURNING
       case execute_with_transaction(trx_id, conn_id, statement, args) do
         num_rows when is_integer(num_rows) ->
           result = %EctoLibSql.Result{
-            command: detect_command(statement),
+            command: command,
             num_rows: num_rows
           }
 
