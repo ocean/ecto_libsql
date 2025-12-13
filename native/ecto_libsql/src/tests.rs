@@ -448,9 +448,10 @@ mod should_use_query_tests {
     // always return rows (the query plan), but the current implementation
     // only detects SELECT/RETURNING keywords.
     //
-    // Impact: EXPLAIN SELECT works correctly (detects SELECT), but EXPLAIN
-    // INSERT/UPDATE/DELETE without RETURNING are not detected. Developers
-    // must use Repo.query() directly for these queries.
+    // Impact: EXPLAIN-prefixed statements are NOT detected (they start with
+    // EXPLAIN, not SELECT/RETURNING). EXPLAIN SELECT, EXPLAIN INSERT, etc.
+    // all return false. Developers must use Repo.query() directly for EXPLAIN queries.
+    // This is acceptable since EXPLAIN is for debugging/analysis, not production code.
 
     #[test]
     fn test_explain_select_not_detected() {
@@ -468,12 +469,13 @@ mod should_use_query_tests {
     #[test]
     fn test_explain_insert_not_detected() {
         // EXPLAIN INSERT (without RETURNING) is not detected.
-        // This is expected and acceptable - developers use EXPLAIN manually.
+        // EXPLAIN is out of scope - it's used manually for debugging, not in production.
         assert!(!should_use_query(
             "EXPLAIN INSERT INTO users VALUES (1, 'Alice')"
         ));
 
-        // With RETURNING, it IS detected because of the RETURNING keyword
+        // However, if RETURNING is added, it IS detected because of the RETURNING keyword.
+        // This is a side effect of RETURNING detection, not EXPLAIN recognition.
         assert!(should_use_query(
             "EXPLAIN INSERT INTO users VALUES (1, 'Alice') RETURNING id"
         ));
@@ -482,12 +484,15 @@ mod should_use_query_tests {
     #[test]
     fn test_explain_update_delete_not_detected() {
         // EXPLAIN UPDATE/DELETE without RETURNING are not detected.
+        // EXPLAIN queries start with the EXPLAIN keyword, which is out of scope.
         assert!(!should_use_query(
             "EXPLAIN UPDATE users SET name = 'Bob' WHERE id = 1"
         ));
         assert!(!should_use_query("EXPLAIN DELETE FROM users WHERE id = 1"));
 
-        // With RETURNING, detected via RETURNING keyword
+        // With RETURNING, they ARE detected via the RETURNING keyword.
+        // This is acceptable - developers using EXPLAIN for debugging can add RETURNING
+        // if needed, or use Repo.query() directly for EXPLAIN without RETURNING.
         assert!(should_use_query(
             "EXPLAIN UPDATE users SET name = 'Bob' WHERE id = 1 RETURNING id"
         ));
@@ -633,6 +638,198 @@ mod should_use_query_tests {
                 .join(", ")
         );
         assert!(should_use_query(&long_insert_with_returning));
+    }
+
+    // ===== Transactional SELECT Edge Cases =====
+    //
+    // These tests verify the fix for the routing issue where transactional SELECTs
+    // were previously being misrouted to execute_with_transaction() instead of
+    // query_with_trx_args(). The fix ensures all SELECT queries (whether with or
+    // without RETURNING) are routed to the query path, which correctly returns rows.
+    //
+    // See: https://github.com/ocean/ecto_libsql/issues/[issue-number]
+    // For context on the original bug.
+
+    #[test]
+    fn test_select_alone_requires_query_path() {
+        // Plain SELECT without RETURNING must use query path (returns rows)
+        // This was the core bug: it was being incorrectly routed to execute_with_transaction
+        assert!(should_use_query("SELECT * FROM users"));
+        assert!(should_use_query("SELECT id, name FROM users WHERE active = 1"));
+        assert!(should_use_query("SELECT COUNT(*) FROM users"));
+    }
+
+    #[test]
+    fn test_select_various_forms() {
+        // All SELECT variants must use query path
+        assert!(should_use_query("SELECT 1"));
+        assert!(should_use_query("SELECT 1 AS num"));
+        assert!(should_use_query("SELECT NULL"));
+        assert!(should_use_query(
+            "SELECT u.id, u.name, COUNT(p.id) FROM users u LEFT JOIN posts p ON u.id = p.user_id GROUP BY u.id"
+        ));
+    }
+
+    #[test]
+    fn test_select_with_subqueries() {
+        // Subqueries start with SELECT but the function looks at the first keyword
+        assert!(should_use_query(
+            "SELECT * FROM (SELECT id, name FROM users WHERE active = 1)"
+        ));
+        assert!(should_use_query(
+            "SELECT * FROM users WHERE id IN (SELECT user_id FROM posts)"
+        ));
+    }
+
+    #[test]
+    fn test_select_with_returning_redundant_but_harmless() {
+        // A SELECT with RETURNING is unusual in SQLite (RETURNING is INSERT/UPDATE/DELETE only)
+        // but the function should still detect it correctly
+        // This documents that SELECT takes priority (detected first)
+        assert!(should_use_query(
+            "SELECT * FROM users RETURNING id"
+        ));
+    }
+
+    #[test]
+    fn test_transactional_select_distinction_from_insert_update_delete() {
+        // Core distinction for the fix:
+        // - SELECT -> always use query path
+        // - INSERT/UPDATE/DELETE without RETURNING -> use execute path
+        // - INSERT/UPDATE/DELETE with RETURNING -> use query path
+
+        // SELECT is always query path
+        assert!(should_use_query("SELECT * FROM users"));
+
+        // INSERT/UPDATE/DELETE without RETURNING: execute path
+        assert!(!should_use_query("INSERT INTO users (name) VALUES ('Alice')"));
+        assert!(!should_use_query("UPDATE users SET name = 'Bob' WHERE id = 1"));
+        assert!(!should_use_query("DELETE FROM users WHERE id = 1"));
+
+        // INSERT/UPDATE/DELETE with RETURNING: query path
+        assert!(should_use_query(
+            "INSERT INTO users (name) VALUES ('Alice') RETURNING id"
+        ));
+        assert!(should_use_query(
+            "UPDATE users SET name = 'Bob' WHERE id = 1 RETURNING id"
+        ));
+        assert!(should_use_query(
+            "DELETE FROM users WHERE id = 1 RETURNING id"
+        ));
+    }
+
+    #[test]
+    fn test_select_with_comments_variations() {
+        // SELECT with inline comments should be detected
+        assert!(should_use_query("SELECT /* get all users */ * FROM users"));
+        assert!(should_use_query(
+            "SELECT id, -- user id\n       name -- user name\nFROM users"
+        ));
+
+        // SELECT with comments and RETURNING (edge case, unusual but documented)
+        assert!(should_use_query(
+            "SELECT * /* RETURNING */ FROM users"
+        ));
+    }
+
+    #[test]
+    fn test_select_edge_case_with_string_literals() {
+        // String literals containing keywords shouldn't confuse detection
+        // since we check the first non-whitespace token
+        assert!(should_use_query(
+            "SELECT 'RETURNING' AS literal FROM users"
+        ));
+        assert!(should_use_query(
+            "SELECT 'INSERT' AS keyword_string FROM users"
+        ));
+        assert!(should_use_query(
+            "SELECT message FROM logs WHERE msg = 'SELECT * FROM other_table'"
+        ));
+    }
+
+    #[test]
+    fn test_multiline_select_in_transaction_context() {
+        // Real-world multiline SELECT queries that might be used in transactions
+        assert!(should_use_query(
+            "SELECT u.id,
+                   u.name,
+                   u.email
+            FROM users u
+            WHERE u.active = 1
+            ORDER BY u.created_at DESC
+            LIMIT 10"
+        ));
+
+        // Another multiline example with WHERE clauses
+        assert!(should_use_query(
+            "SELECT
+                id,
+                name,
+                COUNT(posts) as post_count
+            FROM users
+            WHERE created_at > ?
+              AND status = ?
+            GROUP BY id"
+        ));
+    }
+
+    #[test]
+    fn test_select_with_cte_pattern() {
+        // CTEs start with WITH, not SELECT, so they won't be detected.
+        // This is a limitation but acceptable since Ecto doesn't generate CTEs.
+        // However, if a CTE includes SELECT, RETURNING, the function will detect those.
+        assert!(!should_use_query(
+            "WITH active_users AS (SELECT * FROM users WHERE active = 1) SELECT * FROM active_users"
+        ));
+
+        // But if there's an explicit SELECT before WITH (unusual), it would be detected
+        // This is an edge case that doesn't happen in practice
+    }
+
+    #[test]
+    fn test_explain_queries_not_detected_as_select() {
+        // EXPLAIN queries don't start with SELECT, so they're not detected
+        // This is a known limitation - EXPLAIN always returns rows but isn't detected
+        assert!(!should_use_query("EXPLAIN SELECT * FROM users"));
+        assert!(!should_use_query(
+            "EXPLAIN QUERY PLAN SELECT * FROM users WHERE id = 1"
+        ));
+    }
+
+    #[test]
+    fn test_union_queries_detected_via_first_select() {
+        // UNION queries start with SELECT
+        assert!(should_use_query(
+            "SELECT id FROM users UNION SELECT id FROM admins"
+        ));
+        assert!(should_use_query(
+            "SELECT * FROM users WHERE active = 1 UNION ALL SELECT * FROM archived_users"
+        ));
+    }
+
+    #[test]
+    fn test_case_sensitivity_and_keyword_boundary() {
+        // Ensure we're checking keyword boundaries, not substring matches
+        assert!(!should_use_query("SELECTED FROM users")); // "SELECTED" is not "SELECT"
+        assert!(should_use_query("SELECT * FROM users")); // "SELECT" with whitespace after is valid
+
+        // UPDATE vs UPDATED
+        assert!(!should_use_query("UPDATED users SET x = 1"));
+        assert!(!should_use_query("UPDATE users SET x = 1")); // No RETURNING, so false
+
+        // DELETE vs DELETED
+        assert!(!should_use_query("DELETED FROM users"));
+        assert!(!should_use_query("DELETE FROM users")); // No RETURNING, so false
+    }
+
+    #[test]
+    fn test_transaction_specific_queries() {
+        // Transaction control queries (not SELECT, not RETURNING)
+        assert!(!should_use_query("BEGIN"));
+        assert!(!should_use_query("BEGIN TRANSACTION"));
+        assert!(!should_use_query("COMMIT"));
+        assert!(!should_use_query("ROLLBACK"));
+        assert!(!should_use_query("SAVEPOINT sp1"));
     }
 }
 

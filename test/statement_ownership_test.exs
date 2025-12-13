@@ -220,10 +220,17 @@ defmodule EctoLibSql.StatementOwnershipTest do
 
       true = is_binary(cursor_id) and byte_size(cursor_id) > 0
 
+      on_exit(fn ->
+        Native.close(cursor_id, :cursor_id)
+      end)
+
       # Try to fetch from cursor using connection 2 - should fail
       result = Native.fetch_cursor(conn_id2, cursor_id, 100)
       assert {:error, msg} = result
       assert msg =~ "does not belong to connection"
+      
+      # Clean up cursor before returning
+      Native.close(cursor_id, :cursor_id)
     end
 
     test "fetch_cursor works with correct connection", %{
@@ -261,12 +268,19 @@ defmodule EctoLibSql.StatementOwnershipTest do
 
       true = is_binary(cursor_id) and byte_size(cursor_id) > 0
 
+      on_exit(fn ->
+        Native.close(cursor_id, :cursor_id)
+      end)
+
       # Fetch from cursor using correct connection - should work
       result = Native.fetch_cursor(conn_id1, cursor_id, 100)
       assert {columns, rows, count} = result
       assert columns == ["id", "value"]
       assert length(rows) > 0
       assert count >= 0
+      
+      # Clean up cursor before returning
+      Native.close(cursor_id, :cursor_id)
     end
 
     test "declare_cursor_with_context rejects transaction from wrong connection", %{
@@ -300,6 +314,10 @@ defmodule EctoLibSql.StatementOwnershipTest do
       trx_id = Native.begin_transaction(conn_id1)
       true = is_binary(trx_id) and byte_size(trx_id) > 0
 
+      on_exit(fn ->
+        Native.commit_or_rollback_transaction(trx_id, conn_id1, :local, :disable_sync, "rollback")
+      end)
+
       # Try to declare cursor on transaction 1 using connection 2 - should fail
       result =
         Native.declare_cursor_with_context(
@@ -324,8 +342,11 @@ defmodule EctoLibSql.StatementOwnershipTest do
         )
 
       assert is_binary(result2)
+      
+      # Clean up cursor from successful declaration
+      Native.close(result2, :cursor_id)
 
-      # Clean up
+      # Clean up transaction
       Native.commit_or_rollback_transaction(trx_id, conn_id1, :local, :disable_sync, "rollback")
     end
 
@@ -369,6 +390,13 @@ defmodule EctoLibSql.StatementOwnershipTest do
         )
 
       assert is_binary(result2)
+      
+      on_exit(fn ->
+        Native.close(result2, :cursor_id)
+      end)
+      
+      # Clean up cursor before returning
+      Native.close(result2, :cursor_id)
     end
   end
 end
