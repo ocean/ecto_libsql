@@ -318,6 +318,7 @@ defmodule EctoLibSql.SecurityTest do
   end
 
   describe "Path Traversal Prevention" do
+    @tag :ci_only
     test "database paths are handled safely" do
       # Create a test-specific temporary directory for cleanup verification
       test_dir =

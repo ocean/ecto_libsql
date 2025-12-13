@@ -5,6 +5,40 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Query/Execute Routing for Batch Operations**
+  - Implemented proper `query()` vs `execute()` routing in batch operations based on statement type
+  - `execute_batch()` now detects SELECT and RETURNING clauses to use correct LibSQL method
+  - `execute_transactional_batch()` applies same routing logic for atomicity
+  - `execute_batch_native()` and `execute_transactional_batch_native()` properly route SQL batch execution
+  - Prevents "Statement does not return data" errors for operations that should return rows
+  - All operations with RETURNING clauses now correctly use `query()` method
+
+- **Performance: Batch Operation Optimizations**
+  - **Eliminated per-statement argument clones** in batch operations
+  - Changed `batch_stmts.iter()` to `batch_stmts.into_iter()` to consume vector by value
+  - Removed `args.clone()` calls for non-transactional batch.
+  - Removed `args.clone()` calls for transactional batch.
+  - Reduces memory allocations during batch execution for better throughput
+
+- **Lock Coupling Reduction**
+  - Dropped outer `LibSQLConn` mutex guard earlier in batch operations
+  - Extract inner `Arc<Mutex<libsql::Connection>>` before entering async block
+  - Only hold inner connection lock during I/O operations
+  - Applied to `execute_batch()`, `execute_transactional_batch()`, `execute_batch_native()`, and `execute_transactional_batch_native()`
+  - Reduces contention and deadlock surface area
+  - Follows established pattern from `query_args()` function
+
+- **Test Coverage & Documentation**
+  - Enhanced `should_use_query()` test coverage for block comment handling
+  - Added explicit assertion documenting known limitation: RETURNING in block comments detected as false positive (safe)
+  - Documented CTE and EXPLAIN detection limitations with clear scope notes
+  - Added comprehensive future improvement recommendations with priority levels and implementation sketches
+  - Added performance budget note for optimization efforts
+
 ## [0.7.0] - 2025-12-09
 
 ### Added

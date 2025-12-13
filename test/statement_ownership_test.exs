@@ -210,9 +210,19 @@ defmodule EctoLibSql.StatementOwnershipTest do
 
       # Declare cursor on connection 1
       cursor_id =
-        Native.declare_cursor_with_context(state1.conn_id, :connection, "SELECT * FROM test", [])
+        Native.declare_cursor_with_context(
+          state1.conn_id,
+          state1.conn_id,
+          :connection,
+          "SELECT * FROM test",
+          []
+        )
 
       true = is_binary(cursor_id) and byte_size(cursor_id) > 0
+
+      on_exit(fn ->
+        Native.close(cursor_id, :cursor_id)
+      end)
 
       # Try to fetch from cursor using connection 2 - should fail
       result = Native.fetch_cursor(conn_id2, cursor_id, 100)
@@ -245,9 +255,19 @@ defmodule EctoLibSql.StatementOwnershipTest do
 
       # Declare cursor on connection 1
       cursor_id =
-        Native.declare_cursor_with_context(conn_id1, :connection, "SELECT * FROM test", [])
+        Native.declare_cursor_with_context(
+          conn_id1,
+          conn_id1,
+          :connection,
+          "SELECT * FROM test",
+          []
+        )
 
       true = is_binary(cursor_id) and byte_size(cursor_id) > 0
+
+      on_exit(fn ->
+        Native.close(cursor_id, :cursor_id)
+      end)
 
       # Fetch from cursor using correct connection - should work
       result = Native.fetch_cursor(conn_id1, cursor_id, 100)
@@ -255,6 +275,116 @@ defmodule EctoLibSql.StatementOwnershipTest do
       assert columns == ["id", "value"]
       assert length(rows) > 0
       assert count >= 0
+    end
+
+    test "declare_cursor_with_context rejects transaction from wrong connection", %{
+      state1: state1,
+      state2: state2,
+      conn_id1: conn_id1,
+      conn_id2: conn_id2
+    } do
+      # Create table on both connections
+      {:ok, _, _, _state1} =
+        EctoLibSql.handle_execute(
+          %EctoLibSql.Query{
+            statement: "CREATE TABLE test (id INTEGER PRIMARY KEY, value TEXT)"
+          },
+          [],
+          [],
+          state1
+        )
+
+      {:ok, _, _, _state2} =
+        EctoLibSql.handle_execute(
+          %EctoLibSql.Query{
+            statement: "CREATE TABLE test (id INTEGER PRIMARY KEY, value TEXT)"
+          },
+          [],
+          [],
+          state2
+        )
+
+      # Start transaction on connection 1
+      trx_id = Native.begin_transaction(conn_id1)
+      true = is_binary(trx_id) and byte_size(trx_id) > 0
+
+      on_exit(fn ->
+        Native.commit_or_rollback_transaction(trx_id, conn_id1, :local, :disable_sync, "rollback")
+      end)
+
+      # Try to declare cursor on transaction 1 using connection 2 - should fail
+      result =
+        Native.declare_cursor_with_context(
+          conn_id2,
+          trx_id,
+          :transaction,
+          "SELECT * FROM test",
+          []
+        )
+
+      assert {:error, msg} = result
+      assert msg =~ "does not belong to this connection"
+
+      # Verify transaction still works with correct connection
+      result2 =
+        Native.declare_cursor_with_context(
+          conn_id1,
+          trx_id,
+          :transaction,
+          "SELECT * FROM test",
+          []
+        )
+
+      assert is_binary(result2)
+
+      # Clean up cursor from successful declaration
+      Native.close(result2, :cursor_id)
+    end
+
+    test "declare_cursor_with_context validates connection ID matches for connection type", %{
+      state1: state1,
+      conn_id1: conn_id1,
+      conn_id2: conn_id2
+    } do
+      # Create table
+      {:ok, _, _, _state1} =
+        EctoLibSql.handle_execute(
+          %EctoLibSql.Query{
+            statement: "CREATE TABLE test (id INTEGER PRIMARY KEY, value TEXT)"
+          },
+          [],
+          [],
+          state1
+        )
+
+      # Try to declare cursor with mismatched conn_id and id - should fail
+      result =
+        Native.declare_cursor_with_context(
+          conn_id2,
+          conn_id1,
+          :connection,
+          "SELECT * FROM test",
+          []
+        )
+
+      assert {:error, msg} = result
+      assert msg =~ "Connection ID mismatch"
+
+      # Verify it works with matching IDs
+      result2 =
+        Native.declare_cursor_with_context(
+          conn_id1,
+          conn_id1,
+          :connection,
+          "SELECT * FROM test",
+          []
+        )
+
+      assert is_binary(result2)
+
+      on_exit(fn ->
+        Native.close(result2, :cursor_id)
+      end)
     end
   end
 end

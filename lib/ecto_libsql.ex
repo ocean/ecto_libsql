@@ -313,7 +313,7 @@ defmodule EctoLibSql do
     id = trx_id || conn_id
     id_type = if trx_id, do: :transaction, else: :connection
 
-    case EctoLibSql.Native.declare_cursor_with_context(id, id_type, statement, params) do
+    case EctoLibSql.Native.declare_cursor_with_context(conn_id, id, id_type, statement, params) do
       cursor_id when is_binary(cursor_id) ->
         cursor = %{ref: cursor_id}
         {:ok, query, cursor, state}

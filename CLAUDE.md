@@ -5,7 +5,7 @@
 > **Purpose**: Comprehensive guide for AI agents working **ON** the ecto_libsql codebase itself
 >
 > **⚠️ IMPORTANT**: This guide is for **developing and maintaining** the ecto_libsql library.  
-> **📚 For using ecto_libsql in your applications**, see [AGENTS.md](AGENTS.md) instead.
+> **📚 For USING ecto_libsql in your applications**, see [AGENTS.md](AGENTS.md) instead, which covers real world usage of the library.
 
 ## Table of Contents
 
@@ -22,6 +22,8 @@
 
 ---
 
+- ALWAYS use British/Australian English spelling and grammar for code, comments, and documentation, except where required for function calls etc that may be in US English, such as SQL keywords or error messages, or where required for compatibility with external systems.
+
 ---
 
 ## ℹ️ About This Guide
@@ -30,15 +32,8 @@
 - Internal architecture and code structure
 - Rust NIF development patterns
 - Error handling requirements
-- Test organization
+- Test organisation
 - CI/CD and release process
-
-**If you're looking to USE ecto_libsql in your application**, you want [AGENTS.md](AGENTS.md) instead, which covers:
-- How to integrate ecto_libsql into your Elixir/Phoenix app
-- Ecto schemas, migrations, and queries
-- Connection management and configuration
-- Real-world usage examples
-- Performance optimisation for applications
 
 ---
 
@@ -117,8 +112,8 @@ ecto_libsql/
 │   │   └── state.ex                     # Connection state management
 │   └── ecto_libsql.ex                   # DBConnection protocol
 ├── native/ecto_libsql/src/
-│   ├── lib.rs                           # Main Rust NIF implementation (1,201 lines)
-│   └── tests.rs                         # Rust tests (463 lines)
+│   ├── lib.rs                           # Main Rust NIF implementation
+│   └── tests.rs                         # Rust tests
 ├── test/
 │   ├── ecto_adapter_test.exs            # Adapter functionality tests
 │   ├── ecto_connection_test.exs         # SQL generation tests
@@ -127,14 +122,14 @@ ecto_libsql/
 │   ├── ecto_migration_test.exs          # Migration tests
 │   ├── error_handling_test.exs          # Error handling verification
 │   └── turso_remote_test.exs            # Remote Turso tests
-├── AGENTS.md                            # Comprehensive API documentation (2,600+ lines)
+├── AGENTS.md                            # Comprehensive API documentation
 ├── CLAUDE.md                            # This file (AI agent guide)
 ├── README.md                            # User-facing documentation
 ├── CHANGELOG.md                         # Version history
 ├── ECTO_MIGRATION_GUIDE.md             # Migration from PostgreSQL/MySQL
 ├── RUST_ERROR_HANDLING.md              # Rust error patterns quick reference
 ├── RESILIENCE_IMPROVEMENTS.md          # Error handling refactoring details
-└── TESTING.md                          # Testing strategy and organization
+└── TESTING.md                          # Testing strategy and organisation
 ```
 
 ---
@@ -354,7 +349,7 @@ async fn sync_with_timeout(client: &Arc<Mutex<LibSQLConn>>, timeout_secs: u64) -
 **Test Modules**:
 1. **`query_type_detection`**: Tests SQL query type detection (SELECT, INSERT, etc.)
 2. **`integration_tests`**: Real database operations with temporary SQLite files
-3. **`registry_tests`**: UUID generation and registry initialization
+3. **`registry_tests`**: UUID generation and registry initialisation
 
 **Helper Functions**:
 ```rust
@@ -717,34 +712,7 @@ test "boolean conversion" do
 end
 ```
 
-### Task 3: Improve Error Messages
-
-**Example**: Make "Connection not found" more descriptive
-
-1. **Update Rust error**:
-```rust
-// Before
-.ok_or_else(|| rustler::Error::Term(Box::new("Connection not found")))?
-
-// After
-.ok_or_else(|| {
-    rustler::Error::Term(Box::new(format!(
-        "Connection '{}' not found. It may have been closed or never existed.",
-        conn_id
-    )))
-})?
-```
-
-2. **Add test** to verify error message:
-```elixir
-test "descriptive error for invalid connection" do
-  {:error, msg} = EctoLibSql.Native.ping("invalid-id")
-  assert msg =~ "not found"
-  assert msg =~ "closed or never existed"
-end
-```
-
-### Task 4: Add a New DDL Operation
+### Task 3: Add a New DDL Operation
 
 **Example**: Support `CREATE INDEX IF NOT EXISTS`
 
@@ -772,7 +740,7 @@ test "CREATE INDEX IF NOT EXISTS" do
 end
 ```
 
-### Task 5: Working with Transaction Ownership
+### Task 4: Working with Transaction Ownership
 
 **Context**: Transactions are now tracked with their owning connection using `TransactionEntry` struct. All savepoint and transaction operations validate ownership.
 
@@ -823,7 +791,7 @@ test "rejects savepoint from wrong connection" do
 end
 ```
 
-### Task 6: Debug a Failing Test
+### Task 5: Debug a Failing Test
 
 1. **Run with trace**: `mix test test/file.exs:123 --trace`
 2. **Check logs**: Tests configure logger to `:info` level
@@ -935,30 +903,6 @@ end
 
 ---
 
-## Deployment & CI/CD
-
-### GitHub Actions Workflow
-
-The project has comprehensive CI/CD in `.github/workflows/ci.yml`:
-
-**Jobs**:
-1. **rust-checks**: Format, clippy, tests (Ubuntu + macOS)
-2. **elixir-tests-latest**: Latest Elixir/OTP (1.18/27)
-3. **elixir-tests-compatibility**: Older versions (1.17/26)
-4. **integration-test**: Full test suite
-5. **turso-remote-tests**: Turso cloud tests (optional, requires secrets)
-
-**Matrix Testing**:
-- OS: Ubuntu Latest, macOS Latest
-- Elixir: 1.17, 1.18
-- OTP: 26, 27
-- Rust: Stable
-
-**Cache Strategy**:
-- Cargo dependencies cached by Cargo.toml hash
-- Mix dependencies cached by mix.exs hash
-- Significantly speeds up CI runs
-
 ### Pre-Commit Checklist
 
 ```bash
@@ -989,9 +933,6 @@ git commit -m "feat: descriptive message"
 2. **Update CHANGELOG.md** with changes
 3. **Update README.md** if needed
 4. **Run full test suite**: `mix test && cd native/ecto_libsql && cargo test`
-5. **Tag release**: `git tag v0.x.x`
-6. **Push**: `git push && git push --tags`
-7. **Publish to Hex**: `mix hex.publish`
 
 ### Hex Package Files
 
@@ -1014,38 +955,6 @@ files: ~w(lib priv .formatter.exs mix.exs README* LICENSE* CHANGELOG* AGENT* nat
 ---
 
 ## Troubleshooting
-
-### Issue: NIF Not Loaded
-
-**Symptoms**:
-```elixir
-** (ErlangError) Erlang error: :nif_not_loaded
-```
-
-**Causes**:
-1. NIF library not compiled
-2. NIF library in wrong location
-3. Rustler not installed
-
-**Solutions**:
-```bash
-# 1. Clean and recompile
-mix clean
-mix deps.clean rustler --build
-mix compile
-
-# 2. Verify NIF exists
-ls -la priv/native/ecto_libsql.so  # Linux
-ls -la priv/native/libecto_libsql.dylib  # macOS
-
-# 3. Check Rust toolchain
-rustc --version
-cargo --version
-
-# 4. Manually compile NIF
-cd native/ecto_libsql
-cargo build --release
-```
 
 ### Issue: Database Locked
 
@@ -1369,7 +1278,7 @@ mix docs
 - **ECTO_MIGRATION_GUIDE.md** - Migrating from PostgreSQL/MySQL
 - **RUST_ERROR_HANDLING.md** - Rust error patterns quick reference
 - **RESILIENCE_IMPROVEMENTS.md** - Error handling refactoring details
-- **TESTING.md** - Testing strategy, organization, and best practices
+- **TESTING.md** - Testing strategy, organisation, and best practices
 
 ### External Resources
 
@@ -1398,29 +1307,7 @@ mix docs
 
 ## Version History
 
-### v0.5.0 (2024-11-27) - Current
-- **Zero panic Rust NIF** - All 146 `unwrap()` calls eliminated
-- **Production-ready error handling** - All errors return tuples to Elixir
-- **VM stability** - NIF errors no longer crash BEAM VM
-- **Comprehensive error tests** - 21 tests verifying graceful error handling
-
-### v0.4.0 (2024-11-19)
-- **Renamed from LibSqlEx to EctoLibSql**
-- All modules, packages, and documentation updated
-
-### v0.3.0 (2024-11-17)
-- **Full Ecto adapter implementation**
-- Phoenix integration support
-- Migration support with DDL operations
-- Type loaders/dumpers
-- Comprehensive test suite
-
-### v0.2.0
-- DBConnection protocol implementation
-- Transaction support with isolation levels
-- Prepared statements and batch operations
-- Cursor support for streaming
-- Vector search and encryption
+Check the [CHANGELOG.md](CHANGELOG.md) file for details.
 
 ---
 
@@ -1481,7 +1368,7 @@ EctoLibSql is a mature, production-ready Ecto adapter for LibSQL/Turso with:
 
 ---
 
-**Last Updated**: 2024-11-27  
+**Last Updated**: 2025-12-12
 **Maintained By**: ocean  
 **License**: Apache 2.0  
 **Repository**: https://github.com/ocean/ecto_libsql
