@@ -228,9 +228,6 @@ defmodule EctoLibSql.StatementOwnershipTest do
       result = Native.fetch_cursor(conn_id2, cursor_id, 100)
       assert {:error, msg} = result
       assert msg =~ "does not belong to connection"
-
-      # Clean up cursor before returning
-      Native.close(cursor_id, :cursor_id)
     end
 
     test "fetch_cursor works with correct connection", %{
@@ -278,9 +275,6 @@ defmodule EctoLibSql.StatementOwnershipTest do
       assert columns == ["id", "value"]
       assert length(rows) > 0
       assert count >= 0
-
-      # Clean up cursor before returning
-      Native.close(cursor_id, :cursor_id)
     end
 
     test "declare_cursor_with_context rejects transaction from wrong connection", %{
@@ -345,9 +339,6 @@ defmodule EctoLibSql.StatementOwnershipTest do
 
       # Clean up cursor from successful declaration
       Native.close(result2, :cursor_id)
-
-      # Clean up transaction
-      Native.commit_or_rollback_transaction(trx_id, conn_id1, :local, :disable_sync, "rollback")
     end
 
     test "declare_cursor_with_context validates connection ID matches for connection type", %{
@@ -394,9 +385,6 @@ defmodule EctoLibSql.StatementOwnershipTest do
       on_exit(fn ->
         Native.close(result2, :cursor_id)
       end)
-
-      # Clean up cursor before returning
-      Native.close(result2, :cursor_id)
     end
   end
 end

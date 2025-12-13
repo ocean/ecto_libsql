@@ -28,7 +28,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Dropped outer `LibSQLConn` mutex guard earlier in batch operations
   - Extract inner `Arc<Mutex<libsql::Connection>>` before entering async block
   - Only hold inner connection lock during I/O operations
-  - Applied to: `execute_batch()`, `execute_transactional_batch()`, `execute_batch_native()`, `execute_transactional_batch_native()`
+  - Applied to `execute_batch()`, `execute_transactional_batch()`, `execute_batch_native()`, and `execute_transactional_batch_native()`
   - Reduces contention and deadlock surface area
   - Follows established pattern from `query_args()` function
 

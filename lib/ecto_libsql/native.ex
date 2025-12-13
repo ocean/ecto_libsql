@@ -305,7 +305,8 @@ defmodule EctoLibSql.Native do
     # For SELECT statements (even without RETURNING), use query_with_trx_args
     # For INSERT/UPDATE/DELETE with RETURNING, use query_with_trx_args
     # For INSERT/UPDATE/DELETE without RETURNING, use execute_with_transaction
-    has_returning = String.contains?(String.upcase(statement), "RETURNING")
+    # Use word-boundary regex to detect RETURNING precisely (matching Rust NIF behavior)
+    has_returning = Regex.match?(~r/\bRETURNING\b/i, statement)
     should_query = command == :select or has_returning
 
     if should_query do
