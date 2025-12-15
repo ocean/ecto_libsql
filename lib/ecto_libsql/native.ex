@@ -121,7 +121,6 @@ defmodule EctoLibSql.Native do
   @doc false
   def fetch_cursor(_conn_id, _cursor_id, _max_rows), do: :erlang.nif_error(:nif_not_loaded)
 
-  # Phase 1: Critical Production Features (v0.7.0)
   @doc false
   def set_busy_timeout(_conn_id, _timeout_ms), do: :erlang.nif_error(:nif_not_loaded)
 
@@ -140,7 +139,6 @@ defmodule EctoLibSql.Native do
   @doc false
   def execute_transactional_batch_native(_conn_id, _sql), do: :erlang.nif_error(:nif_not_loaded)
 
-  # Phase 1: Statement Introspection & Savepoint Support (v0.7.0)
   @doc false
   def statement_column_count(_conn_id, _stmt_id), do: :erlang.nif_error(:nif_not_loaded)
 
@@ -159,8 +157,6 @@ defmodule EctoLibSql.Native do
   @doc false
   def rollback_to_savepoint(_conn_id, _trx_id, _name), do: :erlang.nif_error(:nif_not_loaded)
 
-  # Phase 2: Advanced Replica Features
-
   @doc false
   def get_frame_number(_conn_id), do: :erlang.nif_error(:nif_not_loaded)
 
@@ -170,7 +166,30 @@ defmodule EctoLibSql.Native do
   @doc false
   def flush_replicator(_conn_id), do: :erlang.nif_error(:nif_not_loaded)
 
-  @doc false
+  @doc """
+  Get the highest frame number from write operations (for read-your-writes consistency).
+
+  This is a low-level NIF function that returns the maximum replication frame
+  number from write operations on this database connection. It's primarily used
+  internally by `get_max_write_frame/1`.
+
+  For most use cases, use `get_max_write_frame/1` instead, which provides better
+  error handling and documentation.
+
+  ## Parameters
+    - conn_id: The connection ID (string)
+
+  ## Returns
+    - Integer frame number (0 if no writes tracked)
+    - `{:error, reason}` if the connection is invalid
+
+  ## Notes
+    - This is a raw NIF function - prefer `get_max_write_frame/1` for normal usage
+    - Returns 0 for local databases (not applicable)
+    - Frame number increases with each write operation
+    - Essential for implementing read-your-writes consistency in multi-replica setups
+
+  """
   def max_write_replication_index(_conn_id), do: :erlang.nif_error(:nif_not_loaded)
 
   # Internal NIF function - not supported, marked for deprecation
@@ -892,10 +911,6 @@ defmodule EctoLibSql.Native do
     end
   end
 
-  # ============================================================================
-  # Phase 1: Statement Introspection & Savepoint Support (v0.7.0)
-  # ============================================================================
-
   @doc """
   Get the number of columns in a prepared statement's result set.
 
@@ -1084,8 +1099,6 @@ defmodule EctoLibSql.Native do
   def rollback_to_savepoint_by_name(%EctoLibSql.State{trx_id: nil}, _name) do
     {:error, "No active transaction"}
   end
-
-  # Phase 2: Advanced Replica Features
 
   @doc """
   Get the current replication frame number from a remote replica.
