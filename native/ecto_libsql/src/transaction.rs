@@ -8,6 +8,11 @@
 ///
 /// Transactions are tracked via a registry and identified by transaction IDs.
 /// Each transaction is associated with a connection ID to prevent cross-connection misuse.
+///
+/// **Note on Locking**: Some functions hold Arc<Mutex<>> locks across await points in async blocks.
+/// This is necessary because `libsql::Connection` methods return futures that borrow from the guard.
+/// The pattern is safe because we use `TOKIO_RUNTIME.block_on()` which executes the entire
+/// async block on a dedicated thread pool, preventing deadlocks.
 use crate::{
     constants::{CONNECTION_REGISTRY, TOKIO_RUNTIME, TXN_REGISTRY},
     decode,
@@ -172,6 +177,8 @@ pub fn begin_transaction(conn_id: &str) -> NifResult<String> {
     }; // Outer lock dropped here
 
     let trx = TOKIO_RUNTIME.block_on(async {
+        // Lock must be held across await because transaction() returns a Future that
+        // borrows from the Connection. We cannot drop the guard before awaiting.
         let conn_guard = utils::safe_lock_arc(&connection, "begin_transaction conn")?;
         conn_guard
             .transaction()
@@ -205,8 +212,17 @@ pub fn begin_transaction(conn_id: &str) -> NifResult<String> {
 /// Returns a transaction ID on success, error on failure.
 #[rustler::nif(schedule = "DirtyIo")]
 pub fn begin_transaction_with_behavior(conn_id: &str, behavior: Atom) -> NifResult<String> {
-    let trx_behavior =
-        decode::decode_transaction_behavior(behavior).unwrap_or(TransactionBehavior::Deferred);
+    let trx_behavior = match decode::decode_transaction_behavior(behavior) {
+        Some(b) => b,
+        None => {
+            // Log warning for unrecognized behavior atom
+            eprintln!(
+                "WARNING: Unrecognized transaction behavior atom: {:?}. Defaulting to Deferred.",
+                behavior
+            );
+            TransactionBehavior::Deferred
+        }
+    };
 
     let conn_map = utils::safe_lock(
         &CONNECTION_REGISTRY,
@@ -225,6 +241,8 @@ pub fn begin_transaction_with_behavior(conn_id: &str, behavior: Atom) -> NifResu
     }; // Outer lock dropped here
 
     let trx = TOKIO_RUNTIME.block_on(async {
+        // Lock must be held across await because transaction_with_behavior() returns a Future
+        // that borrows from the Connection. We cannot drop the guard before awaiting.
         let conn_guard = utils::safe_lock_arc(&connection, "begin_transaction_with_behavior conn")?;
         conn_guard
             .transaction_with_behavior(trx_behavior)
@@ -275,10 +293,8 @@ pub fn execute_with_transaction<'a>(
     // Take transaction entry with ownership verification
     let guard = TransactionEntryGuard::take(trx_id, conn_id)?;
 
-    // Execute async operation without holding the lock
-    let trx = guard
-        .transaction()
-        .map_err(|e| rustler::Error::Term(Box::new(format!("Guard error: {:?}", e))))?;
+    // Get transaction reference (already returns rustler::Error on failure)
+    let trx = guard.transaction()?;
 
     let result = TOKIO_RUNTIME
         .block_on(async { trx.execute(&query, decoded_args).await })
@@ -320,10 +336,8 @@ pub fn query_with_trx_args<'a>(
     // Take transaction entry with ownership verification
     let guard = TransactionEntryGuard::take(trx_id, conn_id)?;
 
-    // Get transaction reference (before async, to handle errors properly)
-    let trx = guard
-        .transaction()
-        .map_err(|e| rustler::Error::Term(Box::new(format!("Guard error: {:?}", e))))?;
+    // Get transaction reference (already returns rustler::Error on failure)
+    let trx = guard.transaction()?;
 
     // Get connection for error enhancement
     let connection = {
@@ -345,9 +359,9 @@ pub fn query_with_trx_args<'a>(
                 Ok(res_rows) => utils::collect_rows(env, res_rows).await,
                 Err(e) => {
                     let error_msg = format!("Query failed: {}", e);
+                    // safe_lock_arc already returns rustler::Error with good context
                     let conn_guard: MutexGuard<libsql::Connection> =
-                        utils::safe_lock_arc(&connection, "query_with_trx_args conn for error")
-                            .map_err(|e| rustler::Error::Term(Box::new(format!("{:?}", e))))?;
+                        utils::safe_lock_arc(&connection, "query_with_trx_args conn for error")?;
                     let enhanced_msg = utils::enhance_constraint_error(&conn_guard, &error_msg)
                         .await
                         .unwrap_or(error_msg);
@@ -362,9 +376,9 @@ pub fn query_with_trx_args<'a>(
                 Ok(rows_affected) => Ok(utils::build_empty_result(env, rows_affected)),
                 Err(e) => {
                     let error_msg = format!("Execute failed: {}", e);
+                    // safe_lock_arc already returns rustler::Error with good context
                     let conn_guard: MutexGuard<libsql::Connection> =
-                        utils::safe_lock_arc(&connection, "query_with_trx_args conn for error")
-                            .map_err(|e| rustler::Error::Term(Box::new(format!("{:?}", e))))?;
+                        utils::safe_lock_arc(&connection, "query_with_trx_args conn for error")?;
                     let enhanced_msg = utils::enhance_constraint_error(&conn_guard, &error_msg)
                         .await
                         .unwrap_or(error_msg);

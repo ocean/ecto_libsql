@@ -4,6 +4,12 @@
 /// including frame number tracking, synchronization, and consistency operations.
 /// These functions are primarily useful for multi-replica deployments where
 /// read-your-writes consistency is important.
+///
+/// **Note on Locking**: Some functions hold Arc<Mutex<>> locks across await points.
+/// This is necessary because `libsql::Database` is not cloneable, so we must maintain
+/// the lock through the entire async operation to access the database instance.
+/// This pattern is safe because we use `TOKIO_RUNTIME.block_on()` which executes
+/// the entire async block on a dedicated thread pool, preventing deadlocks.
 use crate::constants::*;
 use crate::utils::{safe_lock, safe_lock_arc};
 use rustler::{Atom, NifResult};
@@ -32,6 +38,7 @@ pub fn get_frame_number(conn_id: &str) -> NifResult<u64> {
     drop(conn_map);
 
     let result = TOKIO_RUNTIME.block_on(async {
+        // Lock must be held for the entire async operation since Database is not cloneable
         let client_guard = safe_lock_arc(&client, "get_frame_number client")
             .map_err(|e| format!("Failed to lock client: {:?}", e))?;
 
@@ -73,6 +80,7 @@ pub fn sync_until(conn_id: &str, frame_no: u64) -> NifResult<Atom> {
     drop(conn_map);
 
     let result = TOKIO_RUNTIME.block_on(async {
+        // Lock must be held for the entire async operation since Database is not cloneable
         let client_guard = safe_lock_arc(&client, "sync_until client")
             .map_err(|e| format!("Failed to lock client: {:?}", e))?;
 
@@ -117,6 +125,7 @@ pub fn flush_replicator(conn_id: &str) -> NifResult<u64> {
     drop(conn_map);
 
     let result: Result<u64, String> = TOKIO_RUNTIME.block_on(async {
+        // Lock must be held for the entire async operation since Database is not cloneable
         let client_guard = safe_lock_arc(&client, "flush_replicator client")
             .map_err(|e| format!("Failed to lock client: {:?}", e))?;
 

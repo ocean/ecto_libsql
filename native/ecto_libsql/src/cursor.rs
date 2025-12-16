@@ -267,7 +267,7 @@ pub fn declare_cursor_with_context(
 /// - `max_rows`: Maximum number of rows to fetch
 ///
 /// Returns a tuple of (columns, rows, row_count)
-#[rustler::nif]
+#[rustler::nif(schedule = "DirtyIo")]
 pub fn fetch_cursor<'a>(
     env: Env<'a>,
     conn_id: &str,

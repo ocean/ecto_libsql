@@ -86,7 +86,7 @@ pub fn query_prepared<'a>(
     _mode: Atom,
     _syncx: Atom,
     args: Vec<Term<'a>>,
-) -> Result<NifResult<Term<'a>>, rustler::Error> {
+) -> NifResult<Term<'a>> {
     let conn_map = utils::safe_lock(&CONNECTION_REGISTRY, "query_prepared conn_map")?;
     let stmt_registry = utils::safe_lock(&STMT_REGISTRY, "query_prepared stmt_registry")?;
 
@@ -127,7 +127,7 @@ pub fn query_prepared<'a>(
                     .await
                     .map_err(|e| rustler::Error::Term(Box::new(format!("{:?}", e))))?;
 
-                Ok(Ok(collected))
+                Ok(collected)
             }
             Err(e) => Err(rustler::Error::Term(Box::new(e.to_string()))),
         }

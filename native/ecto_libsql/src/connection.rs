@@ -196,7 +196,7 @@ pub fn ping(conn_id: String) -> NifResult<bool> {
 /// - `:cursor_id` - Close a cursor
 ///
 /// Returns `:ok` on success, error if the resource ID is not found.
-#[rustler::nif]
+#[rustler::nif(schedule = "DirtyIo")]
 pub fn close(id: &str, opt: Atom) -> NifResult<Atom> {
     if opt == conn_id() {
         let removed = crate::utils::safe_lock(&CONNECTION_REGISTRY, "close conn")?.remove(id);

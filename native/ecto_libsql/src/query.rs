@@ -146,7 +146,7 @@ pub fn do_sync(conn_id: &str, mode: Atom) -> NifResult<(Atom, String)> {
     });
 
     match result {
-        Ok(()) => Ok((rustler::types::atom::ok(), format!("success sync"))),
+        Ok(()) => Ok((rustler::types::atom::ok(), "success sync".to_string())),
         Err(e) => Err(rustler::Error::Term(Box::new(e))),
     }
 }
