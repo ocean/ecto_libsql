@@ -3,10 +3,9 @@ defmodule EctoLibSql.StatementFeaturesTest do
   Tests for prepared statement features.
 
   Includes:
-  - Basic prepare/execute (implemented)
-  - Statement introspection: columns(), parameter_count() (not implemented)
-  - Statement reset() for reuse (not implemented)
-  - query_row() for single-row queries (not implemented)
+  - Basic prepare/execute
+  - Statement introspection: columns(), parameter_count()
+  - Statement reset() for reuse
   """
   use ExUnit.Case
 
@@ -32,10 +31,6 @@ defmodule EctoLibSql.StatementFeaturesTest do
     {:ok, state: state}
   end
 
-  # ============================================================================
-  # Statement.columns() - SUPPORTED ✅
-  # ============================================================================
-
   describe "Statement.columns()" do
     test "get column metadata from prepared statement", %{state: state} do
       # Prepare statement
@@ -45,14 +40,9 @@ defmodule EctoLibSql.StatementFeaturesTest do
       {:ok, count} = EctoLibSql.Native.stmt_column_count(state, stmt_id)
       assert count == 3
 
-      # Get column names
-      {:ok, name_0} = EctoLibSql.Native.stmt_column_name(state, stmt_id, 0)
-      {:ok, name_1} = EctoLibSql.Native.stmt_column_name(state, stmt_id, 1)
-      {:ok, name_2} = EctoLibSql.Native.stmt_column_name(state, stmt_id, 2)
-
-      assert name_0 == "id"
-      assert name_1 == "name"
-      assert name_2 == "age"
+      # Get column names using helper function
+      names = get_column_names(state, stmt_id, count)
+      assert names == ["id", "name", "age"]
 
       # Cleanup
       EctoLibSql.Native.close_stmt(stmt_id)
@@ -87,17 +77,44 @@ defmodule EctoLibSql.StatementFeaturesTest do
       {:ok, count} = EctoLibSql.Native.stmt_column_count(state, stmt_id)
       assert count == 3
 
-      # Get column names
-      {:ok, name_0} = EctoLibSql.Native.stmt_column_name(state, stmt_id, 0)
-      {:ok, name_1} = EctoLibSql.Native.stmt_column_name(state, stmt_id, 1)
-      {:ok, name_2} = EctoLibSql.Native.stmt_column_name(state, stmt_id, 2)
-
-      # Column names from query
-      assert name_0 == "user_id"
-      assert name_1 == "name"
-      assert name_2 == "post_count"
+      # Get column names using helper function
+      names = get_column_names(state, stmt_id, count)
+      assert names == ["user_id", "name", "post_count"]
 
       # Cleanup
+      EctoLibSql.Native.close_stmt(stmt_id)
+    end
+
+    test "column_name returns error for out-of-bounds indices", %{state: state} do
+      # Prepare statement
+      {:ok, stmt_id} = EctoLibSql.Native.prepare(state, "SELECT * FROM users WHERE id = ?")
+
+      # Get column count
+      {:ok, count} = EctoLibSql.Native.stmt_column_count(state, stmt_id)
+      assert count == 3
+
+      # Index >= count should return error
+      assert {:error, _} = EctoLibSql.Native.stmt_column_name(state, stmt_id, 3)
+      assert {:error, _} = EctoLibSql.Native.stmt_column_name(state, stmt_id, 100)
+
+      # Valid indices (0 to count-1) should succeed
+      {:ok, name_0} = EctoLibSql.Native.stmt_column_name(state, stmt_id, 0)
+      assert name_0 == "id"
+
+      {:ok, name_2} = EctoLibSql.Native.stmt_column_name(state, stmt_id, 2)
+      assert name_2 == "age"
+
+      # Cleanup
+      EctoLibSql.Native.close_stmt(stmt_id)
+    end
+
+    test "stmt_column_name returns error for invalid index", %{state: state} do
+      {:ok, stmt_id} = EctoLibSql.Native.prepare(state, "SELECT * FROM users")
+      {:ok, count} = EctoLibSql.Native.stmt_column_count(state, stmt_id)
+
+      # Out of bounds should return error
+      assert {:error, _} = EctoLibSql.Native.stmt_column_name(state, stmt_id, count)
+
       EctoLibSql.Native.close_stmt(stmt_id)
     end
   end
@@ -235,6 +252,21 @@ defmodule EctoLibSql.StatementFeaturesTest do
       assert {:ok, 2} = EctoLibSql.Native.stmt_parameter_count(state, stmt_id)
 
       EctoLibSql.Native.close_stmt(stmt_id)
+    end
+  end
+
+  # ============================================================================
+  # Helper Functions
+  # ============================================================================
+
+  # Retrieve all column names from a prepared statement.
+  # This helper reduces duplication when working with multiple column names
+  # from the same statement. It iterates from 0 to count-1 and retrieves
+  # each column name using stmt_column_name/3.
+  defp get_column_names(state, stmt_id, count) do
+    for i <- 0..(count - 1) do
+      {:ok, name} = EctoLibSql.Native.stmt_column_name(state, stmt_id, i)
+      name
     end
   end
 end

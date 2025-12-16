@@ -3,7 +3,8 @@
 /// This module handles database connection establishment, health checking,
 /// and connection state management including cleanup and timeouts.
 use crate::constants::*;
-use crate::models::LibSQLConn;
+use crate::decode;
+use crate::models::{LibSQLConn, Mode};
 use crate::utils::safe_lock_arc;
 use bytes::Bytes;
 use libsql::{Builder, Cipher, EncryptionConfig};
@@ -58,54 +59,51 @@ pub fn connect(opts: Term, mode: Term) -> NifResult<String> {
         let timeout = Duration::from_secs(DEFAULT_SYNC_TIMEOUT_SECS);
 
         tokio::time::timeout(timeout, async {
-            let db = match mode.atom_to_string() {
-                Ok(mode_str) => {
-                    if mode_str == "remote_replica" {
-                        let url = url.ok_or_else(|| rustler::Error::BadArg)?;
-                        let token = token.ok_or_else(|| rustler::Error::BadArg)?;
-                        let dbname = dbname.ok_or_else(|| rustler::Error::BadArg)?;
+            let mode_atom: Atom = mode
+                .decode()
+                .map_err(|_| rustler::Error::Term(Box::new("Invalid mode atom")))?;
 
-                        let mut builder = Builder::new_remote_replica(dbname, url, token);
+            let mode_enum = decode::decode_mode(mode_atom)
+                .ok_or_else(|| rustler::Error::Term(Box::new("Unknown mode")))?;
 
-                        if let Some(key) = encryption_key {
-                            let config = EncryptionConfig {
-                                cipher: Cipher::Aes256Cbc,
-                                encryption_key: Bytes::from(key),
-                            };
-                            builder = builder.encryption_config(config);
-                        }
+            let db = match mode_enum {
+                Mode::RemoteReplica => {
+                    let url = url.ok_or_else(|| rustler::Error::BadArg)?;
+                    let token = token.ok_or_else(|| rustler::Error::BadArg)?;
+                    let dbname = dbname.ok_or_else(|| rustler::Error::BadArg)?;
 
-                        builder.build().await
-                    } else if mode_str == "remote" {
-                        let url = url.ok_or_else(|| rustler::Error::BadArg)?;
-                        let token = token.ok_or_else(|| rustler::Error::BadArg)?;
+                    let mut builder = Builder::new_remote_replica(dbname, url, token);
 
-                        Builder::new_remote(url, token).build().await
-                    } else if mode_str == "local" {
-                        let dbname = dbname.ok_or_else(|| rustler::Error::BadArg)?;
-
-                        let mut builder = Builder::new_local(dbname);
-
-                        if let Some(key) = encryption_key {
-                            let config = EncryptionConfig {
-                                cipher: Cipher::Aes256Cbc,
-                                encryption_key: Bytes::from(key),
-                            };
-                            builder = builder.encryption_config(config);
-                        }
-
-                        builder.build().await
-                    } else {
-                        // Unknown connection mode
-                        return Err(rustler::Error::Term(Box::new("Unknown mode".to_string())));
+                    if let Some(key) = encryption_key {
+                        let config = EncryptionConfig {
+                            cipher: Cipher::Aes256Cbc,
+                            encryption_key: Bytes::from(key),
+                        };
+                        builder = builder.encryption_config(config);
                     }
-                }
 
-                Err(other) => {
-                    return Err(rustler::Error::Term(Box::new(format!(
-                        "Unknown mode: {:?}",
-                        other
-                    ))))
+                    builder.build().await
+                }
+                Mode::Remote => {
+                    let url = url.ok_or_else(|| rustler::Error::BadArg)?;
+                    let token = token.ok_or_else(|| rustler::Error::BadArg)?;
+
+                    Builder::new_remote(url, token).build().await
+                }
+                Mode::Local => {
+                    let dbname = dbname.ok_or_else(|| rustler::Error::BadArg)?;
+
+                    let mut builder = Builder::new_local(dbname);
+
+                    if let Some(key) = encryption_key {
+                        let config = EncryptionConfig {
+                            cipher: Cipher::Aes256Cbc,
+                            encryption_key: Bytes::from(key),
+                        };
+                        builder = builder.encryption_config(config);
+                    }
+
+                    builder.build().await
                 }
             }
             .map_err(|e| rustler::Error::Term(Box::new(format!("Failed to build DB: {}", e))))?;
@@ -114,11 +112,8 @@ pub fn connect(opts: Term, mode: Term) -> NifResult<String> {
                 .connect()
                 .map_err(|e| rustler::Error::Term(Box::new(format!("Failed to connect: {}", e))))?;
 
-            let mode_str = mode.atom_to_string().map_err(|e| {
-                rustler::Error::Term(Box::new(format!("Invalid mode atom: {:?}", e)))
-            })?;
-
-            if mode_str != "local" {
+            // Ping remote connections to verify they're accessible
+            if mode_enum != Mode::Local {
                 conn.query("SELECT 1", ())
                     .await
                     .map_err(|e| rustler::Error::Term(Box::new(format!("Failed ping: {}", e))))?;
