@@ -5,6 +5,51 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Major Rust Code Refactoring (Modularisation)**
+  - Split monolithic `lib.rs` (2,302 lines) into 14 focused, single-responsibility modules
+  - **Module structure by feature area**:
+    - `connection.rs` - Connection lifecycle, establishment, and state management
+    - `query.rs` - Basic query execution and result handling
+    - `batch.rs` - Batch operations (transactional and non-transactional)
+    - `statement.rs` - Prepared statement caching and execution
+    - `transaction.rs` - Transaction management with ownership tracking
+    - `savepoint.rs` - Nested transactions (savepoint operations)
+    - `cursor.rs` - Cursor streaming and result pagination
+    - `replication.rs` - Remote replica sync control and frame tracking
+    - `metadata.rs` - Metadata access (rowid, changes, autocommit status)
+    - `utils.rs` - Shared utilities (safe locking, error handling, row collection)
+    - `constants.rs` - Global registries and configuration constants
+    - `models.rs` - Core data structures (LibSQLConn, connection state)
+    - `decode.rs` - Value decoding and type conversions
+  - **Test reorganisation** - Refactored monolithic `tests.rs` (1,194 lines) into structured modules:
+    - `tests/mod.rs` - Test module declaration and organisation
+    - `tests/constants_tests.rs` - Registry and constant tests
+    - `tests/utils_tests.rs` - Utility function and safety tests
+    - `tests/integration_tests.rs` - End-to-end integration tests
+  - **Root module simplification** - `lib.rs` now only declares modules and exports key types
+  - **Improved maintainability** - Separation of concerns
+  - **Zero behaviour changes** - Refactoring is purely organisational, all APIs and functionality preserved
+  - **Enhanced documentation** - Module-level doc comments explain purpose and relationships
+  - **Impact**: Significantly improved code navigation, maintenance, and onboarding for contributors
+
+### Fixed
+
+- **Constraint Error Message Handling**
+  - Enhanced constraint name extraction to support index names in error messages
+  - Now correctly extracts custom index names from enhanced error format: `(index: index_name)`
+  - Falls back to column name extraction for standard SQLite error messages
+  - Improves `unique_constraint/3` matching with custom index names in changesets
+  - Clarified documentation on composite unique constraint handling
+  - Better support for complex constraint scenarios with multiple columns
+
+- **Remote Turso Tests**
+  - Reduced test database size by removing unnecessary operations
+  - Improved test stability and execution reliability
+
 ## [0.7.5] - 2025-12-15
 
 ### Fixed
