@@ -88,26 +88,32 @@ defmodule Ecto.Adapters.LibSql.Connection do
 
   defp extract_constraint_name(message) do
     # Extract constraint name from SQLite error messages
-    # Formats:
-    #   "SQLite failure: `UNIQUE constraint failed: users.email`" -> "email"
+    #
+    # SQLite only reports column names in constraint errors, not index names.
+    # However, ecto_libsql enhances error messages to include the actual index name
+    # by querying SQLite metadata. This allows users to use custom index names in
+    # their changesets with unique_constraint/3.
+    #
+    # Enhanced format (when index is found):
+    #   "UNIQUE constraint failed: users.email (index: users_email_index)" -> "users_email_index"
+    #
+    # Standard formats (fallback to column name):
     #   "UNIQUE constraint failed: users.email" -> "email"
     #   "NOT NULL constraint failed: users.name" -> "name"
     #   "UNIQUE constraint failed: users.slug, users.parent_slug" -> "slug"
     #
-    # Note: SQLite only reports column names, not index names, even for composite unique indexes.
-    # For composite constraints, it may report multiple columns separated by commas.
-    # We extract all column names and return the first one, as Ecto will use this to match
-    # against constraint names defined in changesets.
-    #
-    # Important: For composite unique indexes, users should define their constraint in the
-    # changeset using either:
-    #   - The first column name (e.g., "slug")
-    #   - The full index name if they need more specificity
-    #
-    # Return as string, not atom, because Ecto changesets use string constraint names
-    case Regex.run(~r/constraint failed: (?:\w+\.)?(\w+)/, message) do
-      [_, name] -> name
-      _ -> "unknown"
+    # First, try to extract the index name from enhanced error messages
+    case Regex.run(~r/\(index: ([\w_]+)\)/, message) do
+      [_, index_name] ->
+        # Found enhanced error with actual index name
+        index_name
+
+      nil ->
+        # No index name in message, fall back to column name extraction
+        case Regex.run(~r/constraint failed: (?:\w+\.)?(\w+)/, message) do
+          [_, name] -> name
+          _ -> "unknown"
+        end
     end
   end
 
