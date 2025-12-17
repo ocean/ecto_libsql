@@ -723,12 +723,28 @@ defmodule Ecto.Vector.GeospatialTest do
         )
 
       assert result.num_rows == 3
-      names = Enum.map(result.rows, fn [name, _] -> name end)
-      assert "Sydney" in names
-      assert "Tokyo" in names
-      assert "Melbourne" in names
-      assert "Unknown" not in names
-      assert "Mystery" not in names
+
+      [
+        [first_name, first_dist],
+        [second_name, second_dist],
+        [third_name, third_dist]
+      ] = result.rows
+
+      # Sydney should be first (distance ~0 to itself)
+      assert first_name == "Sydney"
+      assert first_dist < 0.001
+
+      # Melbourne should be second (same country, closer)
+      assert second_name == "Melbourne"
+      assert second_dist > first_dist
+
+      # Tokyo should be third (different country, farther)
+      assert third_name == "Tokyo"
+      assert third_dist > second_dist
+
+      # NULL embeddings should be filtered out
+      assert "Unknown" not in [first_name, second_name, third_name]
+      assert "Mystery" not in [first_name, second_name, third_name]
     end
   end
 
@@ -759,7 +775,6 @@ defmodule Ecto.Vector.GeospatialTest do
         )
 
       assert result.num_rows == 1
-      assert result.num_rows > 0
     end
 
     test "handles very large distance thresholds" do
@@ -883,6 +898,407 @@ defmodule Ecto.Vector.GeospatialTest do
         )
 
       assert result.num_rows == 3
+    end
+  end
+
+  describe "vector transaction rollback" do
+    test "rolls back vector insertions on transaction failure" do
+      # Start with empty table
+      result_before =
+        Ecto.Adapters.SQL.query!(TestRepo, "SELECT COUNT(*) FROM locations")
+
+      assert result_before.rows == [[0]]
+
+      # Attempt transaction that rolls back
+      {:error, :test_rollback} =
+        TestRepo.transaction(fn ->
+          # Insert location with vector embedding
+          TestRepo.insert!(%Location{
+            name: "Test Location",
+            latitude: 45.0,
+            longitude: 45.0,
+            embedding: EctoLibSql.Native.vector([45.0 / 90, 45.0 / 180]),
+            city: "Test City",
+            country: "Test Country"
+          })
+
+          # Verify insert succeeded within transaction
+          count_result =
+            Ecto.Adapters.SQL.query!(TestRepo, "SELECT COUNT(*) FROM locations")
+
+          assert count_result.rows == [[1]]
+
+          # Rollback the transaction
+          TestRepo.rollback(:test_rollback)
+        end)
+
+      # Verify rollback succeeded and location was not persisted
+      result_after =
+        Ecto.Adapters.SQL.query!(TestRepo, "SELECT COUNT(*) FROM locations")
+
+      assert result_after.rows == [[0]]
+    end
+
+    test "rolls back multiple vector insertions on transaction failure" do
+      # Insert initial data
+      TestRepo.insert!(%Location{
+        name: "Sydney",
+        latitude: -33.87,
+        longitude: 151.21,
+        embedding: EctoLibSql.Native.vector([-33.87 / 90, 151.21 / 180]),
+        city: "Sydney",
+        country: "Australia"
+      })
+
+      # Verify initial count
+      result_before =
+        Ecto.Adapters.SQL.query!(TestRepo, "SELECT COUNT(*) FROM locations")
+
+      assert result_before.rows == [[1]]
+
+      # Attempt transaction with multiple inserts that rolls back
+      {:error, :batch_insert_failed} =
+        TestRepo.transaction(fn ->
+          locations = [
+            %Location{
+              name: "Melbourne",
+              latitude: -37.81,
+              longitude: 144.96,
+              embedding: EctoLibSql.Native.vector([-37.81 / 90, 144.96 / 180]),
+              city: "Melbourne",
+              country: "Australia"
+            },
+            %Location{
+              name: "Brisbane",
+              latitude: -27.47,
+              longitude: 153.03,
+              embedding: EctoLibSql.Native.vector([-27.47 / 90, 153.03 / 180]),
+              city: "Brisbane",
+              country: "Australia"
+            }
+          ]
+
+          # Insert multiple locations
+          Enum.each(locations, fn loc ->
+            TestRepo.insert!(loc)
+          end)
+
+          # Verify inserts succeeded within transaction
+          count_result =
+            Ecto.Adapters.SQL.query!(TestRepo, "SELECT COUNT(*) FROM locations")
+
+          assert count_result.rows == [[3]]
+
+          # Rollback everything
+          TestRepo.rollback(:batch_insert_failed)
+        end)
+
+      # Verify only initial location remains after rollback
+      result_after =
+        Ecto.Adapters.SQL.query!(TestRepo, "SELECT COUNT(*) FROM locations")
+
+      assert result_after.rows == [[1]]
+
+      # Verify it's the original Sydney location
+      location_result =
+        Ecto.Adapters.SQL.query!(TestRepo, "SELECT name FROM locations ORDER BY name")
+
+      assert location_result.rows == [["Sydney"]]
+    end
+
+    test "handles savepoint rollback with vector operations" do
+      # Start fresh
+      Ecto.Adapters.SQL.query!(TestRepo, "DELETE FROM locations")
+
+      # Insert initial location
+      TestRepo.insert!(%Location{
+        name: "Sydney",
+        latitude: -33.87,
+        longitude: 151.21,
+        embedding: EctoLibSql.Native.vector([-33.87 / 90, 151.21 / 180]),
+        city: "Sydney",
+        country: "Australia"
+      })
+
+      # Verify initial count
+      result_before =
+        Ecto.Adapters.SQL.query!(TestRepo, "SELECT COUNT(*) FROM locations")
+
+      assert result_before.rows == [[1]]
+
+      # Transaction with savepoint rollback
+      {:error, :manual_savepoint_rollback} =
+        TestRepo.transaction(fn ->
+          # Insert Melbourne
+          TestRepo.insert!(%Location{
+            name: "Melbourne",
+            latitude: -37.81,
+            longitude: 144.96,
+            embedding: EctoLibSql.Native.vector([-37.81 / 90, 144.96 / 180]),
+            city: "Melbourne",
+            country: "Australia"
+          })
+
+          # Verify Melbourne was inserted
+          count_mid =
+            Ecto.Adapters.SQL.query!(TestRepo, "SELECT COUNT(*) FROM locations")
+
+          assert count_mid.rows == [[2]]
+
+          # Manual rollback within transaction
+          TestRepo.rollback(:manual_savepoint_rollback)
+        end)
+
+      # The rollback should cause the entire transaction to fail
+      # Verify Sydney is still there but Melbourne is not
+      result_after =
+        Ecto.Adapters.SQL.query!(TestRepo, "SELECT COUNT(*) FROM locations")
+
+      assert result_after.rows == [[1]]
+
+      # Verify it's still Sydney
+      location_result =
+        Ecto.Adapters.SQL.query!(TestRepo, "SELECT name FROM locations")
+
+      assert location_result.rows == [["Sydney"]]
+    end
+  end
+
+  describe "vector concurrent operations" do
+    test "handles concurrent vector distance queries safely" do
+      # Insert test data
+      TestRepo.insert!(%Location{
+        name: "Sydney",
+        latitude: -33.87,
+        longitude: 151.21,
+        embedding: EctoLibSql.Native.vector([-33.87 / 90, 151.21 / 180]),
+        city: "Sydney",
+        country: "Australia"
+      })
+
+      TestRepo.insert!(%Location{
+        name: "Melbourne",
+        latitude: -37.81,
+        longitude: 144.96,
+        embedding: EctoLibSql.Native.vector([-37.81 / 90, 144.96 / 180]),
+        city: "Melbourne",
+        country: "Australia"
+      })
+
+      TestRepo.insert!(%Location{
+        name: "Tokyo",
+        latitude: 35.68,
+        longitude: 139.69,
+        embedding: EctoLibSql.Native.vector([35.68 / 90, 139.69 / 180]),
+        city: "Tokyo",
+        country: "Japan"
+      })
+
+      # Run concurrent queries
+      tasks =
+        Enum.map(1..10, fn i ->
+          Task.async(fn ->
+            # Vary the query vector across iterations
+            query_lat = -33.87 + i * 0.1
+            query_lon = 151.21 + i * 0.2
+
+            Ecto.Adapters.SQL.query!(
+              TestRepo,
+              """
+              SELECT name, vector_distance_cos(embedding, vector(?)) as distance
+              FROM locations
+              ORDER BY distance
+              LIMIT 2
+              """,
+              [
+                EctoLibSql.Native.vector([
+                  query_lat / 90,
+                  query_lon / 180
+                ])
+              ]
+            )
+          end)
+        end)
+
+      results = Task.await_many(tasks)
+
+      # All concurrent queries should succeed
+      assert length(results) == 10
+      assert Enum.all?(results, fn result -> result.num_rows == 2 end)
+
+      # Each result should have valid distance values
+      Enum.each(results, fn result ->
+        Enum.each(result.rows, fn [_name, distance] ->
+          assert is_float(distance)
+          assert distance >= 0.0
+        end)
+      end)
+    end
+
+    test "handles concurrent vector insertions with transactions" do
+      # Prepare test data
+      locations = [
+        {"Tokyo", 35.68, 139.69, "Tokyo", "Japan"},
+        {"Osaka", 34.67, 135.50, "Osaka", "Japan"},
+        {"Kyoto", 35.01, 135.77, "Kyoto", "Japan"},
+        {"Bangkok", 13.73, 100.50, "Bangkok", "Thailand"},
+        {"Singapore", 1.35, 103.82, "Singapore", "Singapore"}
+      ]
+
+      # Run concurrent insert transactions
+      tasks =
+        Enum.map(locations, fn {name, lat, lon, city, country} ->
+          Task.async(fn ->
+            TestRepo.transaction(fn ->
+              TestRepo.insert!(%Location{
+                name: name,
+                latitude: lat,
+                longitude: lon,
+                embedding: EctoLibSql.Native.vector([lat / 90, lon / 180]),
+                city: city,
+                country: country
+              })
+            end)
+          end)
+        end)
+
+      results = Task.await_many(tasks)
+
+      # All inserts should succeed
+      assert Enum.all?(results, fn
+               {:ok, _} -> true
+               _ -> false
+             end)
+
+      # Verify all locations were inserted
+      result =
+        Ecto.Adapters.SQL.query!(TestRepo, "SELECT COUNT(*) FROM locations")
+
+      assert result.rows == [[5]]
+
+      # Verify data integrity
+      names_result =
+        Ecto.Adapters.SQL.query!(TestRepo, "SELECT name FROM locations ORDER BY name")
+
+      names = Enum.map(names_result.rows, fn [name] -> name end)
+
+      assert length(names) == 5
+
+      assert Enum.all?(names, fn name ->
+               name in ["Tokyo", "Osaka", "Kyoto", "Bangkok", "Singapore"]
+             end)
+    end
+
+    test "handles concurrent distance queries with different vector dimensions" do
+      # Insert locations
+      Ecto.Adapters.SQL.query!(
+        TestRepo,
+        """
+        INSERT INTO locations (name, latitude, longitude, embedding, city, country, inserted_at, updated_at)
+        VALUES
+          ('Sydney', -33.87, 151.21, vector(?), 'Sydney', 'Australia', datetime('now'), datetime('now')),
+          ('Melbourne', -37.81, 144.96, vector(?), 'Melbourne', 'Australia', datetime('now'), datetime('now')),
+          ('Tokyo', 35.68, 139.69, vector(?), 'Tokyo', 'Japan', datetime('now'), datetime('now'))
+        """,
+        [
+          EctoLibSql.Native.vector([-33.87 / 90, 151.21 / 180]),
+          EctoLibSql.Native.vector([-37.81 / 90, 144.96 / 180]),
+          EctoLibSql.Native.vector([35.68 / 90, 139.69 / 180])
+        ]
+      )
+
+      # Run queries with different query points concurrently
+      query_points = [
+        [-33.87 / 90, 151.21 / 180],
+        # Sydney
+        [-37.81 / 90, 144.96 / 180],
+        # Melbourne
+        [35.68 / 90, 139.69 / 180],
+        # Tokyo
+        [0.0, 0.0],
+        # Origin
+        [1.0, 0.0]
+        # North Pole projection
+      ]
+
+      tasks =
+        Enum.map(query_points, fn point ->
+          Task.async(fn ->
+            Ecto.Adapters.SQL.query!(
+              TestRepo,
+              """
+              SELECT name, vector_distance_cos(embedding, vector(?)) as distance
+              FROM locations
+              ORDER BY distance
+              """,
+              [EctoLibSql.Native.vector(point)]
+            )
+          end)
+        end)
+
+      results = Task.await_many(tasks)
+
+      # All queries should succeed and return all 3 locations
+      assert length(results) == 5
+      assert Enum.all?(results, fn result -> result.num_rows == 3 end)
+    end
+
+    test "handles concurrent read and transaction write operations" do
+      # Insert initial data
+      TestRepo.insert!(%Location{
+        name: "Sydney",
+        latitude: -33.87,
+        longitude: 151.21,
+        embedding: EctoLibSql.Native.vector([-33.87 / 90, 151.21 / 180]),
+        city: "Sydney",
+        country: "Australia"
+      })
+
+      # Create reader and writer tasks
+      readers =
+        Enum.map(1..5, fn _ ->
+          Task.async(fn ->
+            Ecto.Adapters.SQL.query!(
+              TestRepo,
+              """
+              SELECT COUNT(*) FROM locations
+              """
+            )
+          end)
+        end)
+
+      writers =
+        Enum.map(
+          ["Melbourne", "Brisbane", "Adelaide"],
+          fn name ->
+            Task.async(fn ->
+              TestRepo.transaction(fn ->
+                TestRepo.insert!(%Location{
+                  name: name,
+                  latitude: 0.0,
+                  longitude: 0.0,
+                  embedding: EctoLibSql.Native.vector([0.0, 0.0]),
+                  city: name,
+                  country: "Australia"
+                })
+              end)
+            end)
+          end
+        )
+
+      # Wait for all tasks
+      read_results = Task.await_many(readers)
+      write_results = Task.await_many(writers)
+
+      # All operations should succeed
+      assert Enum.all?(read_results, fn result -> result.num_rows > 0 end)
+      assert Enum.all?(write_results, fn result -> match?({:ok, _}, result) end)
+
+      # Final count should be initial + inserted
+      final_result =
+        Ecto.Adapters.SQL.query!(TestRepo, "SELECT COUNT(*) FROM locations")
+
+      assert final_result.rows == [[4]]
     end
   end
 end
