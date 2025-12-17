@@ -148,7 +148,7 @@ defmodule Ecto.Adapters.LibSql.Connection do
 
       cols =
         Enum.map(rest, fn col ->
-          col |> clean.() |> String.split(".") |> List.last() |> clean.()
+          col |> clean.() |> String.split(".") |> List.last()
         end)
 
       [table_col | cols] |> Enum.concat(["index"]) |> Enum.join("_")
@@ -158,7 +158,6 @@ defmodule Ecto.Adapters.LibSql.Connection do
         constraint
         |> clean.()
         |> String.split(".")
-        |> Enum.map(clean)
         |> Enum.concat(["index"])
         |> Enum.join("_")
       else
