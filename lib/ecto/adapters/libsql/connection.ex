@@ -66,6 +66,21 @@ defmodule Ecto.Adapters.LibSql.Connection do
   end
 
   @impl true
+  @doc """
+  Parse a SQLite error message and map it to a list of Ecto constraint tuples.
+  
+  Accepts an exception-like map containing a SQLite error `:message` and returns recognised constraint information such as unique, foreign_key or check constraints; returns an empty list when no known constraint pattern is found.
+  
+  ## Parameters
+  
+    - error: Map containing a `:message` string produced by SQLite.
+    - _opts: Options (unused).
+  
+  ## Returns
+  
+    - A keyword list of constraint tuples, for example `[unique: "table_column_index"]`, `[foreign_key: :unknown]`, `[check: "constraint_name"]`, or `[]` when no constraint is recognised.
+  """
+  @spec to_constraints(%{message: String.t()}, Keyword.t()) :: Keyword.t()
   def to_constraints(%{message: message}, _opts) do
     cond do
       String.contains?(message, "UNIQUE constraint failed") ->
