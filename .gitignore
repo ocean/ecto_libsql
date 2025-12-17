@@ -30,6 +30,9 @@ ecto_libsql-*.tar
 /priv/native/*.dll
 /priv/native/*.dylib
 
+# Erlang PLTs for Dialyzer
+/priv/plts/
+
 # Test databases
 z_ecto_libsql_test-*.db
 z_ecto_libsql_test-*.db-*
