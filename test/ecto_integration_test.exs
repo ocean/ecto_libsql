@@ -30,7 +30,7 @@ defmodule Ecto.Integration.EctoLibSqlTest do
       |> cast(attrs, [:name, :email, :age, :active, :balance, :bio])
       |> validate_required([:name, :email])
       |> validate_format(:email, ~r/@/)
-      |> unique_constraint(:email, name: "email")
+      |> unique_constraint(:email, name: "users_email_index")
     end
   end
 

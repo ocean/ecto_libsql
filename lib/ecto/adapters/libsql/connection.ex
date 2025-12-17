@@ -87,33 +87,77 @@ defmodule Ecto.Adapters.LibSql.Connection do
   end
 
   defp extract_constraint_name(message) do
-    # Extract constraint name from SQLite error messages
+    # Extract constraint name from SQLite error messages.
     #
     # SQLite only reports column names in constraint errors, not index names.
-    # However, ecto_libsql enhances error messages to include the actual index name
-    # by querying SQLite metadata. This allows users to use custom index names in
-    # their changesets with unique_constraint/3.
+    # We reconstruct the index name following Ecto's naming convention:
+    #   table_column1_column2_index
     #
-    # Enhanced format (when index is found):
-    #   "UNIQUE constraint failed: users.email (index: users_email_index)" -> "users_email_index"
+    # Examples:
+    #   "UNIQUE constraint failed: users.email" -> "users_email_index"
+    #   "UNIQUE constraint failed: users.slug, users.parent_slug" -> "users_slug_parent_slug_index"
+    #   "NOT NULL constraint failed: users.name" -> "users_name_index"
+    #   "CHECK constraint failed: positive_age" -> "positive_age"
     #
-    # Standard formats (fallback to column name):
-    #   "UNIQUE constraint failed: users.email" -> "email"
-    #   "NOT NULL constraint failed: users.name" -> "name"
-    #   "UNIQUE constraint failed: users.slug, users.parent_slug" -> "slug"
-    #
-    # First, try to extract the index name from enhanced error messages
+    # First, try to extract the index name from enhanced error messages (if present)
     case Regex.run(~r/\(index: ([\w_]+)\)/, message) do
       [_, index_name] ->
         # Found enhanced error with actual index name
         index_name
 
       nil ->
-        # No index name in message, fall back to column name extraction
-        case Regex.run(~r/constraint failed: (?:\w+\.)?(\w+)/, message) do
-          [_, name] -> name
-          _ -> "unknown"
+        # No index name in message, reconstruct from column names
+        case Regex.run(~r/constraint failed: (.+)$/, message) do
+          [_, constraint_part] ->
+            # Strip any trailing backticks that libSQL might add to error messages
+            cleaned = constraint_part |> String.trim() |> String.trim_trailing("`")
+            constraint_name_hack(cleaned)
+
+          _ ->
+            "unknown"
         end
+    end
+  end
+
+  # Reconstruct index names from SQLite constraint error messages.
+  # This follows Ecto's convention: table_column1_column2_index
+  defp constraint_name_hack(constraint) do
+    # Helper to clean backticks from identifiers (libSQL sometimes adds them)
+    clean = fn s -> String.trim(s, "`") end
+
+    if String.contains?(constraint, ", ") do
+      # Multi-column constraint: "table.col1, table.col2" -> "table_col1_col2_index"
+      constraint
+      |> String.split(", ")
+      |> Enum.with_index()
+      |> Enum.map(fn
+        {table_col, 0} ->
+          # First column includes table name
+          table_col |> clean.() |> String.replace(".", "_")
+
+        {table_col, _} ->
+          # Subsequent columns: only take the column name
+          table_col
+          |> clean.()
+          |> String.split(".")
+          |> List.last()
+          |> clean.()
+      end)
+      |> Enum.concat(["index"])
+      |> Enum.join("_")
+    else
+      if String.contains?(constraint, ".") do
+        # Single column: "table.column" -> "table_column_index"
+        constraint
+        |> clean.()
+        |> String.split(".")
+        |> Enum.map(clean)
+        |> Enum.concat(["index"])
+        |> Enum.join("_")
+      else
+        # No table prefix (e.g., CHECK constraint name): return as-is
+        clean.(constraint)
+      end
     end
   end
 
