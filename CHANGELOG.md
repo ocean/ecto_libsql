@@ -5,6 +5,21 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Constraint Error Handling: Index Name Reconstruction (Issue #34)**
+  - Improved constraint name extraction to reconstruct full index names from SQLite error messages
+  - Now follows Ecto's naming convention: `table_column1_column2_index`
+  - **Single-column constraints**: `"UNIQUE constraint failed: users.email"` → `"users_email_index"` (previously just `"email"`)
+  - **Multi-column constraints**: `"UNIQUE constraint failed: users.slug, users.parent_slug"` → `"users_slug_parent_slug_index"`
+  - **Backtick handling**: Properly strips trailing backticks appended by libSQL to error messages
+  - **Enhanced error messages**: Preserves custom index names from enhanced format `(index: custom_index_name)`
+  - **NOT NULL constraints**: Reconstructs index names following same convention
+  - Enables accurate `unique_constraint/3` and `check_constraint/3` matching with custom index names in Ecto changesets
+  - Added comprehensive test coverage for all constraint scenarios (4 new tests)
+
 ## [0.8.0] - 2025-12-17
 
 ### Changed

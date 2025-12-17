@@ -16,7 +16,17 @@ defmodule EctoLibSql.MixProject do
       homepage_url: @source_url,
       package: package(),
       description: description(),
-      docs: docs()
+      docs: docs(),
+      dialyzer: [
+        plt_core_path: "priv/plts",
+        app_tree: true,
+        plt_add_apps: [:mix, :ex_unit],
+        ignore_warnings: ".dialyzer_ignore.exs",
+        list_unused_filters: true
+      ],
+      aliases: [
+        "check.dialyzer": "dialyzer"
+      ]
     ]
   end
 
@@ -38,12 +48,13 @@ defmodule EctoLibSql.MixProject do
 
   defp deps do
     [
-      {:rustler, "~> 0.37.1"},
       {:db_connection, "~> 2.1"},
+      {:dialyxir, "~> 1.4", only: [:dev], runtime: false},
       {:ecto, "~> 3.11"},
       {:ecto_sql, "~> 3.11"},
       {:ex_doc, "~> 0.31", only: :dev, runtime: false},
-      {:jason, "~> 1.4"}
+      {:jason, "~> 1.4"},
+      {:rustler, "~> 0.37.1"}
     ]
   end
 

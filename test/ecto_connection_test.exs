@@ -413,8 +413,8 @@ defmodule Ecto.Adapters.LibSql.ConnectionTest do
       error = %{message: "UNIQUE constraint failed: users.email"}
       constraints = Connection.to_constraints(error, [])
 
-      # Returns string constraint names to match Ecto changeset format
-      assert [unique: "email"] = constraints
+      # Reconstructs index name following Ecto's naming convention: table_column_index
+      assert [unique: "users_email_index"] = constraints
     end
 
     test "converts FOREIGN KEY constraint errors" do
@@ -437,6 +437,38 @@ defmodule Ecto.Adapters.LibSql.ConnectionTest do
       constraints = Connection.to_constraints(error, [])
 
       assert [] = constraints
+    end
+
+    test "converts multi-column UNIQUE constraint errors" do
+      error = %{message: "UNIQUE constraint failed: users.slug, users.parent_slug"}
+      constraints = Connection.to_constraints(error, [])
+
+      # Reconstructs index name from multiple columns: table_col1_col2_index
+      assert [unique: "users_slug_parent_slug_index"] = constraints
+    end
+
+    test "converts NOT NULL constraint errors" do
+      error = %{message: "NOT NULL constraint failed: users.name"}
+      constraints = Connection.to_constraints(error, [])
+
+      # NOT NULL constraints are reported as check constraints with reconstructed index name
+      assert [check: "users_name_index"] = constraints
+    end
+
+    test "handles backticks in constraint error messages" do
+      error = %{message: "UNIQUE constraint failed: users.email`"}
+      constraints = Connection.to_constraints(error, [])
+
+      # Properly strips backticks appended by libSQL
+      assert [unique: "users_email_index"] = constraints
+    end
+
+    test "preserves enhanced error messages with index name" do
+      error = %{message: "UNIQUE constraint failed: users.email (index: custom_email_index)"}
+      constraints = Connection.to_constraints(error, [])
+
+      # Uses the provided index name from enhanced error
+      assert [unique: "custom_email_index"] = constraints
     end
   end
 
