@@ -137,16 +137,25 @@ defmodule Ecto.Vector.GeospatialTest do
 
       # Query using cosine distance
       result =
-        Ecto.Adapters.SQL.query!(TestRepo, """
-        SELECT name, city, country, vector_distance_cos(embedding, vector(?)) as distance
-        FROM locations
-        ORDER BY distance
-        LIMIT 3
-        """, [sydney_embedding])
+        Ecto.Adapters.SQL.query!(
+          TestRepo,
+          """
+          SELECT name, city, country, vector_distance_cos(embedding, vector(?)) as distance
+          FROM locations
+          ORDER BY distance
+          LIMIT 3
+          """,
+          [sydney_embedding]
+        )
 
       # Should return Sydney first (distance 0 to itself), followed by other cities
       assert result.num_rows == 3
-      [[sydney_name, _, _, sydney_dist], [second_name, _, _, second_dist], [third_name, _, _, third_dist]] =
+
+      [
+        [sydney_name, _, _, sydney_dist],
+        [second_name, _, _, second_dist],
+        [third_name, _, _, third_dist]
+      ] =
         result.rows
 
       assert sydney_name == "Sydney"
@@ -165,36 +174,48 @@ defmodule Ecto.Vector.GeospatialTest do
 
     test "filters nearest locations by region" do
       # Insert cities from different regions
-      Ecto.Adapters.SQL.query!(TestRepo, """
-      INSERT INTO locations (name, latitude, longitude, embedding, city, country, inserted_at, updated_at)
-      VALUES
-        ('Sydney', -33.87, 151.21, vector(?), 'Sydney', 'Australia', datetime('now'), datetime('now')),
-        ('Melbourne', -37.81, 144.96, vector(?), 'Melbourne', 'Australia', datetime('now'), datetime('now')),
-        ('Tokyo', 35.68, 139.69, vector(?), 'Tokyo', 'Japan', datetime('now'), datetime('now')),
-        ('Osaka', 34.67, 135.50, vector(?), 'Osaka', 'Japan', datetime('now'), datetime('now')),
-        ('New York', 40.71, -74.01, vector(?), 'New York', 'USA', datetime('now'), datetime('now'))
-      """, [
-        EctoLibSql.Native.vector([-33.87 / 90, 151.21 / 180]),
-        EctoLibSql.Native.vector([-37.81 / 90, 144.96 / 180]),
-        EctoLibSql.Native.vector([35.68 / 90, 139.69 / 180]),
-        EctoLibSql.Native.vector([34.67 / 90, 135.50 / 180]),
-        EctoLibSql.Native.vector([40.71 / 90, -74.01 / 180])
-      ])
+      Ecto.Adapters.SQL.query!(
+        TestRepo,
+        """
+        INSERT INTO locations (name, latitude, longitude, embedding, city, country, inserted_at, updated_at)
+        VALUES
+          ('Sydney', -33.87, 151.21, vector(?), 'Sydney', 'Australia', datetime('now'), datetime('now')),
+          ('Melbourne', -37.81, 144.96, vector(?), 'Melbourne', 'Australia', datetime('now'), datetime('now')),
+          ('Tokyo', 35.68, 139.69, vector(?), 'Tokyo', 'Japan', datetime('now'), datetime('now')),
+          ('Osaka', 34.67, 135.50, vector(?), 'Osaka', 'Japan', datetime('now'), datetime('now')),
+          ('New York', 40.71, -74.01, vector(?), 'New York', 'USA', datetime('now'), datetime('now'))
+        """,
+        [
+          EctoLibSql.Native.vector([-33.87 / 90, 151.21 / 180]),
+          EctoLibSql.Native.vector([-37.81 / 90, 144.96 / 180]),
+          EctoLibSql.Native.vector([35.68 / 90, 139.69 / 180]),
+          EctoLibSql.Native.vector([34.67 / 90, 135.50 / 180]),
+          EctoLibSql.Native.vector([40.71 / 90, -74.01 / 180])
+        ]
+      )
 
       # Find nearest location to Tokyo, but only in Asia
       tokyo_embedding = EctoLibSql.Native.vector([35.68 / 90, 139.69 / 180])
 
       result =
-        Ecto.Adapters.SQL.query!(TestRepo, """
-        SELECT name, city, country, vector_distance_cos(embedding, vector(?)) as distance
-        FROM locations
-        WHERE country IN ('Japan', 'Australia')
-        ORDER BY distance
-        LIMIT 2
-        """, [tokyo_embedding])
+        Ecto.Adapters.SQL.query!(
+          TestRepo,
+          """
+          SELECT name, city, country, vector_distance_cos(embedding, vector(?)) as distance
+          FROM locations
+          WHERE country IN ('Japan', 'Australia')
+          ORDER BY distance
+          LIMIT 2
+          """,
+          [tokyo_embedding]
+        )
 
       assert result.num_rows == 2
-      [[first_name, _, first_country, first_dist], [second_name, _, _second_country, _second_dist]] =
+
+      [
+        [first_name, _, first_country, first_dist],
+        [second_name, _, _second_country, _second_dist]
+      ] =
         result.rows
 
       # Tokyo should be first (distance 0)
@@ -208,33 +229,41 @@ defmodule Ecto.Vector.GeospatialTest do
 
     test "searches within distance threshold" do
       # Insert cities
-      Ecto.Adapters.SQL.query!(TestRepo, """
-      INSERT INTO locations (name, latitude, longitude, embedding, city, country, inserted_at, updated_at)
-      VALUES
-        ('Sydney', -33.87, 151.21, vector(?), 'Sydney', 'Australia', datetime('now'), datetime('now')),
-        ('Melbourne', -37.81, 144.96, vector(?), 'Melbourne', 'Australia', datetime('now'), datetime('now')),
-        ('Brisbane', -27.47, 153.03, vector(?), 'Brisbane', 'Australia', datetime('now'), datetime('now')),
-        ('Tokyo', 35.68, 139.69, vector(?), 'Tokyo', 'Japan', datetime('now'), datetime('now')),
-        ('New York', 40.71, -74.01, vector(?), 'New York', 'USA', datetime('now'), datetime('now'))
-      """, [
-        EctoLibSql.Native.vector([-33.87 / 90, 151.21 / 180]),
-        EctoLibSql.Native.vector([-37.81 / 90, 144.96 / 180]),
-        EctoLibSql.Native.vector([-27.47 / 90, 153.03 / 180]),
-        EctoLibSql.Native.vector([35.68 / 90, 139.69 / 180]),
-        EctoLibSql.Native.vector([40.71 / 90, -74.01 / 180])
-      ])
+      Ecto.Adapters.SQL.query!(
+        TestRepo,
+        """
+        INSERT INTO locations (name, latitude, longitude, embedding, city, country, inserted_at, updated_at)
+        VALUES
+          ('Sydney', -33.87, 151.21, vector(?), 'Sydney', 'Australia', datetime('now'), datetime('now')),
+          ('Melbourne', -37.81, 144.96, vector(?), 'Melbourne', 'Australia', datetime('now'), datetime('now')),
+          ('Brisbane', -27.47, 153.03, vector(?), 'Brisbane', 'Australia', datetime('now'), datetime('now')),
+          ('Tokyo', 35.68, 139.69, vector(?), 'Tokyo', 'Japan', datetime('now'), datetime('now')),
+          ('New York', 40.71, -74.01, vector(?), 'New York', 'USA', datetime('now'), datetime('now'))
+        """,
+        [
+          EctoLibSql.Native.vector([-33.87 / 90, 151.21 / 180]),
+          EctoLibSql.Native.vector([-37.81 / 90, 144.96 / 180]),
+          EctoLibSql.Native.vector([-27.47 / 90, 153.03 / 180]),
+          EctoLibSql.Native.vector([35.68 / 90, 139.69 / 180]),
+          EctoLibSql.Native.vector([40.71 / 90, -74.01 / 180])
+        ]
+      )
 
       # Search for locations within a certain distance of Sydney
       # Using a threshold of 0.15 (roughly 15% of max distance in normalized space)
       sydney_embedding = EctoLibSql.Native.vector([-33.87 / 90, 151.21 / 180])
 
       result =
-        Ecto.Adapters.SQL.query!(TestRepo, """
-        SELECT name, country, vector_distance_cos(embedding, vector(?)) as distance
-        FROM locations
-        WHERE vector_distance_cos(embedding, vector(?)) < 0.15
-        ORDER BY distance
-        """, [sydney_embedding, sydney_embedding])
+        Ecto.Adapters.SQL.query!(
+          TestRepo,
+          """
+          SELECT name, country, vector_distance_cos(embedding, vector(?)) as distance
+          FROM locations
+          WHERE vector_distance_cos(embedding, vector(?)) < 0.15
+          ORDER BY distance
+          """,
+          [sydney_embedding, sydney_embedding]
+        )
 
       # Should find Sydney and nearby Australian cities
       names = Enum.map(result.rows, fn [name, _, _] -> name end)
@@ -249,39 +278,47 @@ defmodule Ecto.Vector.GeospatialTest do
 
     test "aggregates nearest neighbors by country" do
       # Insert multiple cities per country
-      Ecto.Adapters.SQL.query!(TestRepo, """
-      INSERT INTO locations (name, latitude, longitude, embedding, city, country, inserted_at, updated_at)
-      VALUES
-        ('Sydney', -33.87, 151.21, vector(?), 'Sydney', 'Australia', datetime('now'), datetime('now')),
-        ('Melbourne', -37.81, 144.96, vector(?), 'Melbourne', 'Australia', datetime('now'), datetime('now')),
-        ('Brisbane', -27.47, 153.03, vector(?), 'Brisbane', 'Australia', datetime('now'), datetime('now')),
-        ('Tokyo', 35.68, 139.69, vector(?), 'Tokyo', 'Japan', datetime('now'), datetime('now')),
-        ('Osaka', 34.67, 135.50, vector(?), 'Osaka', 'Japan', datetime('now'), datetime('now')),
-        ('New York', 40.71, -74.01, vector(?), 'New York', 'USA', datetime('now'), datetime('now')),
-        ('Los Angeles', 34.05, -118.24, vector(?), 'Los Angeles', 'USA', datetime('now'), datetime('now'))
-      """, [
-        EctoLibSql.Native.vector([-33.87 / 90, 151.21 / 180]),
-        EctoLibSql.Native.vector([-37.81 / 90, 144.96 / 180]),
-        EctoLibSql.Native.vector([-27.47 / 90, 153.03 / 180]),
-        EctoLibSql.Native.vector([35.68 / 90, 139.69 / 180]),
-        EctoLibSql.Native.vector([34.67 / 90, 135.50 / 180]),
-        EctoLibSql.Native.vector([40.71 / 90, -74.01 / 180]),
-        EctoLibSql.Native.vector([34.05 / 90, -118.24 / 180])
-      ])
+      Ecto.Adapters.SQL.query!(
+        TestRepo,
+        """
+        INSERT INTO locations (name, latitude, longitude, embedding, city, country, inserted_at, updated_at)
+        VALUES
+          ('Sydney', -33.87, 151.21, vector(?), 'Sydney', 'Australia', datetime('now'), datetime('now')),
+          ('Melbourne', -37.81, 144.96, vector(?), 'Melbourne', 'Australia', datetime('now'), datetime('now')),
+          ('Brisbane', -27.47, 153.03, vector(?), 'Brisbane', 'Australia', datetime('now'), datetime('now')),
+          ('Tokyo', 35.68, 139.69, vector(?), 'Tokyo', 'Japan', datetime('now'), datetime('now')),
+          ('Osaka', 34.67, 135.50, vector(?), 'Osaka', 'Japan', datetime('now'), datetime('now')),
+          ('New York', 40.71, -74.01, vector(?), 'New York', 'USA', datetime('now'), datetime('now')),
+          ('Los Angeles', 34.05, -118.24, vector(?), 'Los Angeles', 'USA', datetime('now'), datetime('now'))
+        """,
+        [
+          EctoLibSql.Native.vector([-33.87 / 90, 151.21 / 180]),
+          EctoLibSql.Native.vector([-37.81 / 90, 144.96 / 180]),
+          EctoLibSql.Native.vector([-27.47 / 90, 153.03 / 180]),
+          EctoLibSql.Native.vector([35.68 / 90, 139.69 / 180]),
+          EctoLibSql.Native.vector([34.67 / 90, 135.50 / 180]),
+          EctoLibSql.Native.vector([40.71 / 90, -74.01 / 180]),
+          EctoLibSql.Native.vector([34.05 / 90, -118.24 / 180])
+        ]
+      )
 
       # Find the closest location to Sydney in each country
       sydney_embedding = EctoLibSql.Native.vector([-33.87 / 90, 151.21 / 180])
 
       result =
-        Ecto.Adapters.SQL.query!(TestRepo, """
-        SELECT
-          country,
-          name,
-          vector_distance_cos(embedding, vector(?)) as distance
-        FROM locations
-        WHERE country != 'Australia'
-        ORDER BY country, distance
-        """, [sydney_embedding])
+        Ecto.Adapters.SQL.query!(
+          TestRepo,
+          """
+          SELECT
+            country,
+            name,
+            vector_distance_cos(embedding, vector(?)) as distance
+          FROM locations
+          WHERE country != 'Australia'
+          ORDER BY country, distance
+          """,
+          [sydney_embedding]
+        )
 
       assert result.num_rows == 4
       rows = result.rows
@@ -304,23 +341,27 @@ defmodule Ecto.Vector.GeospatialTest do
 
     test "finds approximate locations using vector ranges" do
       # Insert locations in specific regions
-      Ecto.Adapters.SQL.query!(TestRepo, """
-      INSERT INTO locations (name, latitude, longitude, embedding, city, country, inserted_at, updated_at)
-      VALUES
-        ('Sydney', -33.87, 151.21, vector(?), 'Sydney', 'Australia', datetime('now'), datetime('now')),
-        ('Melbourne', -37.81, 144.96, vector(?), 'Melbourne', 'Australia', datetime('now'), datetime('now')),
-        ('Tokyo', 35.68, 139.69, vector(?), 'Tokyo', 'Japan', datetime('now'), datetime('now')),
-        ('Bangkok', 13.73, 100.50, vector(?), 'Bangkok', 'Thailand', datetime('now'), datetime('now')),
-        ('Singapore', 1.35, 103.82, vector(?), 'Singapore', 'Singapore', datetime('now'), datetime('now')),
-        ('New York', 40.71, -74.01, vector(?), 'New York', 'USA', datetime('now'), datetime('now'))
-      """, [
-        EctoLibSql.Native.vector([-33.87 / 90, 151.21 / 180]),
-        EctoLibSql.Native.vector([-37.81 / 90, 144.96 / 180]),
-        EctoLibSql.Native.vector([35.68 / 90, 139.69 / 180]),
-        EctoLibSql.Native.vector([13.73 / 90, 100.50 / 180]),
-        EctoLibSql.Native.vector([1.35 / 90, 103.82 / 180]),
-        EctoLibSql.Native.vector([40.71 / 90, -74.01 / 180])
-      ])
+      Ecto.Adapters.SQL.query!(
+        TestRepo,
+        """
+        INSERT INTO locations (name, latitude, longitude, embedding, city, country, inserted_at, updated_at)
+        VALUES
+          ('Sydney', -33.87, 151.21, vector(?), 'Sydney', 'Australia', datetime('now'), datetime('now')),
+          ('Melbourne', -37.81, 144.96, vector(?), 'Melbourne', 'Australia', datetime('now'), datetime('now')),
+          ('Tokyo', 35.68, 139.69, vector(?), 'Tokyo', 'Japan', datetime('now'), datetime('now')),
+          ('Bangkok', 13.73, 100.50, vector(?), 'Bangkok', 'Thailand', datetime('now'), datetime('now')),
+          ('Singapore', 1.35, 103.82, vector(?), 'Singapore', 'Singapore', datetime('now'), datetime('now')),
+          ('New York', 40.71, -74.01, vector(?), 'New York', 'USA', datetime('now'), datetime('now'))
+        """,
+        [
+          EctoLibSql.Native.vector([-33.87 / 90, 151.21 / 180]),
+          EctoLibSql.Native.vector([-37.81 / 90, 144.96 / 180]),
+          EctoLibSql.Native.vector([35.68 / 90, 139.69 / 180]),
+          EctoLibSql.Native.vector([13.73 / 90, 100.50 / 180]),
+          EctoLibSql.Native.vector([1.35 / 90, 103.82 / 180]),
+          EctoLibSql.Native.vector([40.71 / 90, -74.01 / 180])
+        ]
+      )
 
       # Find locations in Southeast Asia (roughly 0-30° N, 95-140° E)
       # Normalized: latitude [0/90, 30/90] = [0, 0.33], longitude [95/180, 140/180] = [0.53, 0.78]
