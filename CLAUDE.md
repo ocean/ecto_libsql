@@ -227,7 +227,7 @@ async fn test_something() {
 
 #### Module Organisation
 
-The Rust codebase is organised into 14 focused modules, each with a single responsibility:
+The Rust codebase is organised into 14 focussed modules, each with a single responsibility:
 
 **`lib.rs` (29 lines)**
 - Root module that declares and exports all submodules
@@ -544,6 +544,41 @@ mix test --exclude turso_remote             # Skip Turso tests
 - Type conversions (Elixir ↔ SQLite)
 - Concurrent operations (if applicable)
 
+### Running Turso Remote Tests
+
+⚠️ **Cost Warning**: Turso remote tests create real cloud databases. Only run when actively developing remote/replica functionality. Tests are skipped by default if credentials are missing.
+
+#### Setup
+
+Create `.env.local` in the project root:
+
+```
+TURSO_DB_URI="libsql://your-database.turso.io"
+TURSO_AUTH_TOKEN="your-token-here"
+```
+
+#### Run Remote Tests
+
+Load environment variables and run tests:
+
+```bash
+# Run only Turso remote tests
+export $(grep -v '^#' .env.local | xargs) && mix test test/turso_remote_test.exs
+
+# Or run all tests (Turso tests will run if credentials are available)
+export $(grep -v '^#' .env.local | xargs) && mix test
+```
+
+This command:
+1. Reads `.env.local` (skips lines starting with `#`)
+2. Exports each variable to the shell environment
+3. Runs tests with credentials available
+4. Variables are only available for this command execution (not persisted to shell session)
+
+#### Skip Remote Tests (Default)
+
+Turso remote tests are skipped by default using a config switch in the test helper file.
+
 ---
 
 ## Common Tasks
@@ -693,7 +728,7 @@ def freeze_replica(%EctoLibSql.State{conn_id: conn_id} = _state) when is_binary(
 end
 ```
 
-3. **Add comprehensive tests** asserting unsupported behavior:
+3. **Add comprehensive tests** asserting unsupported behaviour:
 ```elixir
 describe "freeze_replica - NOT SUPPORTED" do
   test "returns :unsupported atom for any valid connection" do
@@ -735,7 +770,7 @@ end
 - **Honest API**: Users know the operation is unsupported rather than failing mysteriously
 - **Clear error codes**: `:unsupported` atom is unambiguous (not a generic string error)
 - **Future-proof docs**: Documentation explains why and what workarounds exist
-- **No hidden behavior**: Function is a no-op that doesn't corrupt state
+- **No hidden behaviour**: Function is a no-op that doesn't corrupt state
 - **Comprehensive tests**: Prevent accidental "fixes" that break in production
 
 ---
@@ -1041,7 +1076,7 @@ sql = "SELECT id FROM docs ORDER BY #{distance} LIMIT 10"
 
 ### Transaction Behaviours
 
-| Behavior | Use Case |
+| Behaviour | Use Case |
 |----------|----------|
 | `:deferred` | Default: lock on first write |
 | `:immediate` | Write-heavy workloads |

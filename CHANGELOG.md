@@ -5,12 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.8.0] - 2025-12-17
 
 ### Changed
 
 - **Major Rust Code Refactoring (Modularisation)**
-  - Split monolithic `lib.rs` (2,302 lines) into 13 focused, single-responsibility modules
+  - Split monolithic `lib.rs` (2,302 lines) into 13 focussed, single-responsibility modules
   - **Module structure by feature area**:
     - `connection.rs` - Connection lifecycle, establishment, and state management
     - `query.rs` - Basic query execution and result handling
@@ -65,7 +65,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     - Table and index names are now properly quoted with double quotes
     - Internal double quotes are escaped by doubling them
     - Defensive programming against potential edge cases with special characters in identifiers
-  - **Performance Optimizations**:
+  - **Performance Optimisations**:
     - **Replication**: `max_write_replication_index()` in `replication.rs` now calls synchronous method directly instead of wrapping in `TOKIO_RUNTIME.block_on()`
       - Eliminates unnecessary async overhead for synchronous operations
     - **Connection**: `connect()` in `connection.rs` now uses shared global `TOKIO_RUNTIME` instead of creating a new runtime per connection
@@ -98,7 +98,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Prevents "Statement does not return data" errors for operations that should return rows
   - All operations with RETURNING clauses now correctly use `query()` method
 
-- **Performance: Batch Operation Optimizations**
+- **Performance: Batch Operation Optimisations**
   - **Eliminated per-statement argument clones** in batch operations
   - Changed `batch_stmts.iter()` to `batch_stmts.into_iter()` to consume vector by value
   - Removed `args.clone()` calls for non-transactional batch.
@@ -118,7 +118,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Added explicit assertion documenting known limitation: RETURNING in block comments detected as false positive (safe)
   - Documented CTE and EXPLAIN detection limitations with clear scope notes
   - Added comprehensive future improvement recommendations with priority levels and implementation sketches
-  - Added performance budget note for optimization efforts
+  - Added performance budget note for optimisation efforts
 
 ## [0.7.0] - 2025-12-09
 
@@ -130,10 +130,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `prepare_statement/2` now immediately prepares statements (catches SQL errors early)
   - `query_prepared/5` uses cached statement with `stmt.reset()` call
   - `execute_prepared/6` uses cached statement with `stmt.reset()` call
-  - Statement introspection functions optimized to use cached statements directly
+  - Statement introspection functions optimised to use cached statements directly
   - Eliminates 30-50% performance overhead from repeated statement re-preparation
   - **Impact**: Significant performance improvement for prepared statement workloads (~10-15x faster for cached queries)
-  - **Backward compatible**: API unchanged, behavior improved (eager validation better than deferred)
+  - **Backward compatible**: API unchanged, behaviour improved (eager validation better than deferred)
 
 - **Statement Caching Benchmark Test**
   - Added `test/stmt_caching_benchmark_test.exs` with comprehensive caching tests
@@ -236,7 +236,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Test Suite Improvements**
   - Removed duplicated tests to improve maintainability
-  - Standardized test database naming conventions across all test files
+  - Standardised test database naming conventions across all test files
   - Improved test assertions for better clarity and debugging
   - Added explicit disconnect calls to match test patterns
   - Enabled previously skipped tests for now-implemented features
@@ -251,7 +251,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Replica Function API Improvements**
   - Added state-accepting overloads for replica functions for better ergonomics
-  - Fixed inconsistent `flush_replicator` behavior to always use 30-second timeout
+  - Fixed inconsistent `flush_replicator` behaviour to always use 30-second timeout
   - Improved error messages for replica operations
 
 ### Fixed

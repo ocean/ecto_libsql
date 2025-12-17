@@ -342,7 +342,7 @@ dependencies = [
 
 [[package]]
 name = "ecto_libsql"
-version = "0.7.5"
+version = "0.8.0"
 dependencies = [
  "bytes",
  "lazy_static",

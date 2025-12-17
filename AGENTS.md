@@ -951,7 +951,7 @@ distance_sql = EctoLibSql.Native.vector_distance_cos("description_embedding", qu
 
 ### Connection Management
 
-Control connection behavior and performance with these utilities (v0.7.0+):
+Control connection behaviour and performance with these utilities (v0.7.0+):
 
 #### Busy Timeout
 
