@@ -5,6 +5,87 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Changed
+
+- **Major Rust Code Refactoring (Modularisation)**
+  - Split monolithic `lib.rs` (2,302 lines) into 13 focused, single-responsibility modules
+  - **Module structure by feature area**:
+    - `connection.rs` - Connection lifecycle, establishment, and state management
+    - `query.rs` - Basic query execution and result handling
+    - `batch.rs` - Batch operations (transactional and non-transactional)
+    - `statement.rs` - Prepared statement caching and execution
+    - `transaction.rs` - Transaction management with ownership tracking
+    - `savepoint.rs` - Nested transactions (savepoint operations)
+    - `cursor.rs` - Cursor streaming and result pagination
+    - `replication.rs` - Remote replica sync control and frame tracking
+    - `metadata.rs` - Metadata access (rowid, changes, autocommit status)
+    - `utils.rs` - Shared utilities (safe locking, error handling, row collection)
+    - `constants.rs` - Global registries and configuration constants
+    - `models.rs` - Core data structures (LibSQLConn, connection state)
+    - `decode.rs` - Value decoding and type conversions
+  - **Test reorganisation** - Refactored monolithic `tests.rs` (1,194 lines) into structured modules:
+    - `tests/mod.rs` - Test module declaration and organisation
+    - `tests/constants_tests.rs` - Registry and constant tests
+    - `tests/utils_tests.rs` - Utility function and safety tests
+    - `tests/integration_tests.rs` - End-to-end integration tests
+  - **Root module simplification** - `lib.rs` now only declares modules and exports key types
+  - **Improved maintainability** - Separation of concerns
+  - **Zero behaviour changes** - Refactoring is purely organisational, all APIs and functionality preserved
+  - **Enhanced documentation** - Module-level doc comments explain purpose and relationships
+  - **Impact**: Significantly improved code navigation, maintenance, and onboarding for contributors
+
+### Fixed
+
+- **Prepared Statement Column Introspection Tests**
+  - Enabled previously skipped tests for `stmt_column_count/2` and `stmt_column_name/3` features
+  - Tests verify column metadata retrieval from prepared statements works correctly
+  - Fixed test references to use correct NIF function names
+  - Both simple and complex query scenarios now tested and passing
+
+- **Critical Rust NIF Thread Safety and Scheduler Issues**
+  - **Registry Lock Management**: Fixed all functions to drop registry locks before entering `TOKIO_RUNTIME.block_on()` async blocks
+    - `execute_batch()` and `execute_transactional_batch()` in `batch.rs`: Simplified function signatures, dropped `conn_map` lock before async operations
+    - `declare_cursor()` in `cursor.rs`: Dropped `conn_map` lock before async block
+    - `do_sync()` in `query.rs`: Dropped `conn_map` lock before async block
+    - `savepoint()`, `release_savepoint()`, and `rollback_to_savepoint()` in `savepoint.rs`: Now use `TransactionEntryGuard` pattern to avoid holding `TXN_REGISTRY` lock during async operations
+    - `prepare_statement()` in `statement.rs`: Now clones inner connection Arc and drops client lock before async block, preventing locks from being held across await points
+    - `begin_transaction()` and `begin_transaction_with_behavior()` in `transaction.rs`: Now clone inner connection Arc and drop all locks before async transaction creation, preventing locks from being held across await points
+  - **DirtyIo Scheduler Annotations**: Added `#[rustler::nif(schedule = "DirtyIo")]` to blocking NIFs
+    - `last_insert_rowid()`, `changes()`, and `is_autocommit()` in `metadata.rs`
+    - Prevents blocking the BEAM scheduler during I/O operations
+  - **Atom Naming Consistency**: Renamed `remote_primary` atom to `remote` in `constants.rs` and `decode.rs`
+    - Fixes mismatch between Rust atom (`remote_primary()`) and Elixir convention (`:remote`)
+    - `decode_mode()` now correctly decodes `:remote` atoms from Elixir
+  - **Binary Allocation Error Handling**: Return `:error` atom instead of `nil` when binary allocation fails
+    - Updated `cursor.rs` and `utils.rs` to use `:error` atom for `OwnedBinary::new()` allocation failures
+    - Provides clearer indication of allocation errors in query results
+  - **SQL Identifier Quoting**: Added proper quoting for SQLite identifiers in PRAGMA queries (`utils.rs`)
+    - Table and index names are now properly quoted with double quotes
+    - Internal double quotes are escaped by doubling them
+    - Defensive programming against potential edge cases with special characters in identifiers
+  - **Performance Optimizations**:
+    - **Replication**: `max_write_replication_index()` in `replication.rs` now calls synchronous method directly instead of wrapping in `TOKIO_RUNTIME.block_on()`
+      - Eliminates unnecessary async overhead for synchronous operations
+    - **Connection**: `connect()` in `connection.rs` now uses shared global `TOKIO_RUNTIME` instead of creating a new runtime per connection
+      - Prevents resource exhaustion under high connection rates
+      - Eliminates expensive runtime creation overhead (each runtime spawns multiple threads)
+      - Aligns with pattern used by all other operations in the codebase
+  - **Impact**: Eliminates potential deadlocks, prevents BEAM scheduler blocking, ensures proper Elixir-Rust atom communication, improves error visibility, reduces overhead for replication index queries
+
+- **Constraint Error Message Handling**
+  - Enhanced constraint name extraction to support index names in error messages
+  - Now correctly extracts custom index names from enhanced error format: `(index: index_name)`
+  - Falls back to column name extraction for standard SQLite error messages
+  - Improves `unique_constraint/3` matching with custom index names in changesets
+  - Clarified documentation on composite unique constraint handling
+  - Better support for complex constraint scenarios with multiple columns
+
+- **Remote Turso Tests**
+  - Reduced test database size by removing unnecessary operations
+  - Improved test stability and execution reliability
+
 ## [0.7.5] - 2025-12-15
 
 ### Fixed

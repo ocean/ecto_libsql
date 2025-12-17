@@ -33,3 +33,6 @@ ecto_libsql-*.tar
 # Test databases
 z_ecto_libsql_test-*.db
 z_ecto_libsql_test-*.db-*
+
+# Local environment variables.
+.env.local

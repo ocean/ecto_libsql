@@ -30,7 +30,8 @@
       "Bash(gh pr view:*)",
       "Bash(cargo clippy:*)",
       "Bash(find:*)",
-      "Bash(cargo doc:*)"
+      "Bash(cargo doc:*)",
+      "WebSearch"
     ],
     "deny": [],
     "ask": []
