@@ -142,24 +142,16 @@ defmodule Ecto.Adapters.LibSql.Connection do
 
     if String.contains?(constraint, ", ") do
       # Multi-column constraint: "table.col1, table.col2" -> "table_col1_col2_index"
-      constraint
-      |> String.split(", ")
-      |> Enum.with_index()
-      |> Enum.map(fn
-        {table_col, 0} ->
-          # First column includes table name
-          table_col |> clean.() |> String.replace(".", "_")
+      [first | rest] = String.split(constraint, ", ")
 
-        {table_col, _} ->
-          # Subsequent columns: only take the column name
-          table_col
-          |> clean.()
-          |> String.split(".")
-          |> List.last()
-          |> clean.()
-      end)
-      |> Enum.concat(["index"])
-      |> Enum.join("_")
+      table_col = first |> clean.() |> String.replace(".", "_")
+
+      cols =
+        Enum.map(rest, fn col ->
+          col |> clean.() |> String.split(".") |> List.last() |> clean.()
+        end)
+
+      [table_col | cols] |> Enum.concat(["index"]) |> Enum.join("_")
     else
       if String.contains?(constraint, ".") do
         # Single column: "table.column" -> "table_column_index"
