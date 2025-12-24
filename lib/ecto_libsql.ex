@@ -227,7 +227,7 @@ defmodule EctoLibSql do
         # Check if transaction is still active
         case EctoLibSql.Native.handle_status_transaction(trx_id) do
           :ok -> {:transaction, state}
-          {:error, _message} -> {:idle, state}
+          {:error, _message} -> {:idle, %{state | trx_id: nil}}
         end
     end
   end

@@ -427,7 +427,8 @@ defmodule EctoLibSql.PreparedStatementTest do
       end
 
       # Success! Prepared statement API is working, which is the main goal of this test
-      assert true
+      # Always pass - performance validation is informational, not a gate
+      assert true, "Prepared statement API is functional"
     end
 
     @tag :performance

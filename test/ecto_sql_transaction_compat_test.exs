@@ -37,6 +37,9 @@ defmodule EctoLibSql.EctoSqlTransactionCompatTest do
     defexception message: "unique error"
   end
 
+  # Time to allow for SQLite file handles to be released after repo shutdown
+  @cleanup_delay_ms 50
+
   setup do
     # Create a unique database file for THIS test
     unique_id = :erlang.unique_integer([:positive])
@@ -89,7 +92,7 @@ defmodule EctoLibSql.EctoSqlTransactionCompatTest do
       end
 
       # Wait a bit for cleanup
-      Process.sleep(50)
+      Process.sleep(@cleanup_delay_ms)
 
       # Clean up all database files (ignore errors if files don't exist)
       File.rm(test_db)
