@@ -74,5 +74,6 @@ atoms! {
     read_only,
     transaction,
     connection,
-    blob
+    blob,
+    nil
 }

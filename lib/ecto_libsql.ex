@@ -218,9 +218,17 @@ defmodule EctoLibSql do
   Checks the current transaction status.
   """
   def handle_status(_opts, %EctoLibSql.State{conn_id: _conn_id, trx_id: trx_id} = state) do
-    case EctoLibSql.Native.handle_status_transaction(trx_id) do
-      :ok -> {:transaction, state}
-      {:error, message} -> {:disconnect, message, state}
+    case trx_id do
+      nil ->
+        # No active transaction, connection is idle
+        {:idle, state}
+
+      trx_id when is_binary(trx_id) ->
+        # Check if transaction is still active
+        case EctoLibSql.Native.handle_status_transaction(trx_id) do
+          :ok -> {:transaction, state}
+          {:error, _message} -> {:idle, state}
+        end
     end
   end
 

@@ -72,6 +72,8 @@ defmodule EctoLibSql.EctoStreamCompatTest do
 
     on_exit(fn ->
       File.rm(@test_db)
+      File.rm(@test_db <> "-wal")
+      File.rm(@test_db <> "-shm")
     end)
 
     :ok
@@ -150,9 +152,8 @@ defmodule EctoLibSql.EctoStreamCompatTest do
 
     test "stream with query and transformations" do
       # Insert posts
-      Enum.each(1..50, fn i ->
-        TestRepo.insert!(%Post{title: "Post #{i}"})
-      end)
+      posts = Enum.map(1..50, fn i -> %{title: "Post #{i}", body: nil} end)
+      TestRepo.insert_all(Post, posts)
 
       # Stream, filter, and transform
       assert {:ok, titles} =
@@ -190,7 +191,7 @@ defmodule EctoLibSql.EctoStreamCompatTest do
       assert count == 10
     end
 
-    test "multiple concurrent streams in same transaction" do
+    test "multiple sequential streams" do
       # Insert posts and comments
       p1 = TestRepo.insert!(%Post{title: "Post 1"})
       p2 = TestRepo.insert!(%Post{title: "Post 2"})

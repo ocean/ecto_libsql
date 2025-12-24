@@ -393,9 +393,18 @@ pub fn should_use_query(sql: &str) -> bool {
 
 /// Decode an Elixir term to a LibSQL Value
 ///
-/// Supports integers, floats, booleans, strings, blobs, and binary data.
+/// Supports integers, floats, booleans, strings, blobs, nil/null, and binary data.
 pub fn decode_term_to_value(term: Term) -> Result<Value, String> {
-    use crate::constants::blob;
+    use crate::constants::{blob, nil};
+
+    // Check for nil atom first (represents NULL in SQL)
+    if let Ok(atom) = term.decode::<rustler::Atom>() {
+        if atom == nil() {
+            return Ok(Value::Null);
+        }
+        // If it's not nil, it might be a boolean or other atom type
+        // Let boolean decoding handle true/false below
+    }
 
     if let Ok(v) = term.decode::<i64>() {
         Ok(Value::Integer(v))

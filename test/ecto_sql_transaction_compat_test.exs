@@ -9,12 +9,16 @@ defmodule EctoLibSql.EctoSqlTransactionCompatTest do
   - Manual rollback operations
   - Transaction isolation
   - LibSQL-specific transaction modes (DEFERRED, IMMEDIATE, EXCLUSIVE, READ_ONLY)
+
+  Note: Each test gets its own database file and repo instance to avoid SQLite
+  locking issues. Tests run serially (async: false) since they all use the same
+  TestRepo name.
   """
   use ExUnit.Case, async: false
 
   import Ecto.Query
 
-  # Define test repo
+  # Define test repo module (will be started per-test with unique database)
   defmodule TestRepo do
     use Ecto.Repo,
       otp_app: :ecto_libsql,
@@ -33,16 +37,23 @@ defmodule EctoLibSql.EctoSqlTransactionCompatTest do
     defexception message: "unique error"
   end
 
-  setup_all do
-    # Use a unique database file to avoid locking issues
-    test_db = "z_ecto_libsql_test-transaction_compat-#{:erlang.unique_integer([:positive])}.db"
+  setup do
+    # Create a unique database file for THIS test
+    unique_id = :erlang.unique_integer([:positive])
+    test_db = "z_ecto_libsql_test-transaction_compat-#{unique_id}.db"
 
-    # Start the test repo
-    {:ok, _} = TestRepo.start_link(database: test_db)
+    # Start a repo specifically for this test
+    # Always use TestRepo as the name so tests don't need to change
+    {:ok, pid} =
+      TestRepo.start_link(
+        database: test_db,
+        pool_size: 1,
+        name: TestRepo
+      )
 
-    # Enable WAL mode for better concurrency (returns result, so we use query instead of query!)
+    # Enable WAL mode for better concurrency
     Ecto.Adapters.SQL.query(TestRepo, "PRAGMA journal_mode=WAL")
-    # Increase busy timeout to 10 seconds
+    # Set busy timeout
     Ecto.Adapters.SQL.query(TestRepo, "PRAGMA busy_timeout=10000")
 
     # Create transactions table
@@ -54,37 +65,38 @@ defmodule EctoLibSql.EctoSqlTransactionCompatTest do
     """)
 
     on_exit(fn ->
+      # Stop this test's repo
+      if Process.alive?(pid) do
+        try do
+          :ok = Supervisor.stop(pid)
+        catch
+          # Handle cases where supervisor is already stopping or stopped
+          :exit, {:noproc, _} ->
+            :ok
+
+          # Normal shutdown patterns from GenServer.stop
+          :exit, {:shutdown, _} ->
+            :ok
+
+          :exit, {{:shutdown, _}, _} ->
+            :ok
+
+          # Unexpected exits - log for debugging
+          :exit, reason ->
+            IO.warn("Unexpected exit during test cleanup: #{inspect(reason)}")
+            :ok
+        end
+      end
+
+      # Wait a bit for cleanup
+      Process.sleep(50)
+
+      # Clean up all database files (ignore errors if files don't exist)
       File.rm(test_db)
+      File.rm("#{test_db}-shm")
+      File.rm("#{test_db}-wal")
     end)
 
-    :ok
-  end
-
-  setup do
-    # Clean table before each test with a retry mechanism
-    cleanup_with_retry = fn ->
-      try do
-        Ecto.Adapters.SQL.query!(TestRepo, "DELETE FROM transactions")
-        :ok
-      rescue
-        _ ->
-          # If locked, wait and retry
-          Process.sleep(200)
-
-          try do
-            Ecto.Adapters.SQL.query!(TestRepo, "DELETE FROM transactions")
-            :ok
-          rescue
-            _ ->
-              # Final retry after longer wait
-              Process.sleep(500)
-              Ecto.Adapters.SQL.query!(TestRepo, "DELETE FROM transactions")
-              :ok
-          end
-      end
-    end
-
-    cleanup_with_retry.()
     :ok
   end
 
@@ -371,7 +383,8 @@ defmodule EctoLibSql.EctoSqlTransactionCompatTest do
     test "transaction is not left open on query error" do
       refute TestRepo.in_transaction?()
 
-      assert_raise Ecto.QueryError, fn ->
+      # EctoLibSql raises EctoLibSql.Error instead of Ecto.QueryError
+      assert_raise EctoLibSql.Error, fn ->
         TestRepo.transaction(fn ->
           # This should fail - invalid SQL
           Ecto.Adapters.SQL.query!(TestRepo, "INVALID SQL QUERY")
