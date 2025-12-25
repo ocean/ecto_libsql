@@ -75,5 +75,6 @@ atoms! {
     transaction,
     connection,
     blob,
-    nil
+    nil,
+    unsupported
 }

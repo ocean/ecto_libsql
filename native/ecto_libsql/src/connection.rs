@@ -350,3 +350,101 @@ pub fn interrupt_connection(conn_id: &str) -> NifResult<Atom> {
         Err(rustler::Error::Term(Box::new("Invalid connection ID")))
     }
 }
+
+/// Enable or disable loading of SQLite extensions.
+///
+/// By default, extension loading is disabled for security reasons.
+/// You must explicitly enable it before calling `load_extension`.
+///
+/// # Arguments
+/// - `conn_id`: Database connection ID
+/// - `enabled`: Whether to enable (true) or disable (false) extension loading
+///
+/// # Returns
+/// - `:ok` - Extension loading enabled/disabled successfully
+/// - `{:error, reason}` - Operation failed
+///
+/// # Security Warning
+/// Only enable extension loading if you trust the extensions being loaded.
+/// Malicious extensions can compromise database security.
+#[rustler::nif(schedule = "DirtyIo")]
+pub fn enable_load_extension(conn_id: &str, enabled: bool) -> NifResult<Atom> {
+    let conn_map = crate::utils::safe_lock(&CONNECTION_REGISTRY, "enable_load_extension conn_map")?;
+
+    if let Some(client) = conn_map.get(conn_id) {
+        let client = client.clone();
+        drop(conn_map); // Release lock before operation
+
+        let client_guard = safe_lock_arc(&client, "enable_load_extension client")?;
+        let conn_guard: std::sync::MutexGuard<libsql::Connection> =
+            safe_lock_arc(&client_guard.client, "enable_load_extension conn")?;
+
+        if enabled {
+            conn_guard.load_extension_enable().map_err(|e| {
+                rustler::Error::Term(Box::new(format!(
+                    "Failed to enable extension loading: {}",
+                    e
+                )))
+            })?;
+        } else {
+            conn_guard.load_extension_disable().map_err(|e| {
+                rustler::Error::Term(Box::new(format!(
+                    "Failed to disable extension loading: {}",
+                    e
+                )))
+            })?;
+        }
+
+        Ok(rustler::types::atom::ok())
+    } else {
+        Err(rustler::Error::Term(Box::new("Invalid connection ID")))
+    }
+}
+
+/// Load a SQLite extension from a dynamic library file.
+///
+/// Extensions must be enabled first via `enable_load_extension(conn_id, true)`.
+///
+/// # Arguments
+/// - `conn_id`: Database connection ID
+/// - `path`: Path to the extension dynamic library (.so, .dylib, or .dll)
+/// - `entry_point`: Optional entry point function name (defaults to extension-specific default)
+///
+/// # Returns
+/// - `:ok` - Extension loaded successfully
+/// - `{:error, reason}` - Extension loading failed
+///
+/// # Security Warning
+/// Only load extensions from trusted sources. Extensions run with full database
+/// access and can execute arbitrary code.
+///
+/// # Common Extensions
+/// - FTS5 (full-text search) - usually built-in, but can be loaded separately
+/// - JSON1 (JSON functions) - usually built-in
+/// - R-Tree (spatial indexing)
+/// - Custom user-defined functions
+#[rustler::nif(schedule = "DirtyIo")]
+pub fn load_extension(conn_id: &str, path: &str, entry_point: Option<&str>) -> NifResult<Atom> {
+    let conn_map = crate::utils::safe_lock(&CONNECTION_REGISTRY, "load_extension conn_map")?;
+
+    if let Some(client) = conn_map.get(conn_id) {
+        let client = client.clone();
+        drop(conn_map); // Release lock before operation
+
+        let path_buf = std::path::PathBuf::from(path);
+
+        let client_guard = safe_lock_arc(&client, "load_extension client")?;
+        let conn_guard: std::sync::MutexGuard<libsql::Connection> =
+            safe_lock_arc(&client_guard.client, "load_extension conn")?;
+
+        conn_guard
+            .load_extension(&path_buf, entry_point)
+            .map_err(|e| {
+                rustler::Error::Term(Box::new(format!("Failed to load extension: {}", e)))
+            })?;
+
+        Ok(rustler::types::atom::ok())
+    } else {
+        Err(rustler::Error::Term(Box::new("Invalid connection ID")))
+    }
+}

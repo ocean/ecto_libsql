@@ -131,6 +131,21 @@ defmodule EctoLibSql.Native do
   def interrupt_connection(_conn_id), do: :erlang.nif_error(:nif_not_loaded)
 
   @doc false
+  def enable_load_extension(_conn_id, _enabled), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc false
+  def load_extension(_conn_id, _path, _entry_point), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc false
+  def set_update_hook(_conn_id, _pid), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc false
+  def clear_update_hook(_conn_id), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc false
+  def set_authorizer(_conn_id, _pid), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc false
   def pragma_query(_conn_id, _pragma_stmt), do: :erlang.nif_error(:nif_not_loaded)
 
   @doc false
@@ -147,6 +162,9 @@ defmodule EctoLibSql.Native do
 
   @doc false
   def statement_parameter_count(_conn_id, _stmt_id), do: :erlang.nif_error(:nif_not_loaded)
+
+  @doc false
+  def statement_parameter_name(_conn_id, _stmt_id, _idx), do: :erlang.nif_error(:nif_not_loaded)
 
   @doc false
   def reset_statement(_conn_id, _stmt_id), do: :erlang.nif_error(:nif_not_loaded)
@@ -836,6 +854,226 @@ defmodule EctoLibSql.Native do
   end
 
   @doc """
+  Enable or disable loading of SQLite extensions.
+
+  By default, extension loading is disabled for security reasons.
+  You must explicitly enable it before calling `load_ext/3`.
+
+  ## Parameters
+    - state: The connection state
+    - enabled: Whether to enable (true) or disable (false) extension loading
+
+  ## Returns
+    - `:ok` - Extension loading enabled/disabled successfully
+    - `{:error, reason}` - Operation failed
+
+  ## Example
+
+      # Enable extension loading
+      :ok = EctoLibSql.Native.enable_extensions(state, true)
+
+      # Load an extension
+      :ok = EctoLibSql.Native.load_ext(state, "/path/to/extension.so")
+
+      # Disable extension loading (recommended after loading)
+      :ok = EctoLibSql.Native.enable_extensions(state, false)
+
+  ## Security Warning
+
+  ⚠️ Only enable extension loading if you trust the extensions being loaded.
+  Malicious extensions can compromise database security and execute arbitrary code.
+
+  """
+  def enable_extensions(%EctoLibSql.State{conn_id: conn_id} = _state, enabled)
+      when is_boolean(enabled) do
+    enable_load_extension(conn_id, enabled)
+  end
+
+  @doc """
+  Load a SQLite extension from a dynamic library file.
+
+  Extensions must be enabled first via `enable_extensions/2`.
+
+  ## Parameters
+    - state: The connection state
+    - path: Path to the extension dynamic library (.so, .dylib, or .dll)
+    - entry_point: Optional entry point function name (defaults to extension-specific default)
+
+  ## Returns
+    - `:ok` - Extension loaded successfully
+    - `{:error, reason}` - Extension loading failed
+
+  ## Example
+
+      # Enable extension loading first
+      :ok = EctoLibSql.Native.enable_extensions(state, true)
+
+      # Load an extension
+      :ok = EctoLibSql.Native.load_ext(state, "/usr/lib/sqlite3/pcre.so")
+
+      # Load with custom entry point
+      :ok = EctoLibSql.Native.load_ext(state, "/path/to/extension.so", "sqlite3_extension_init")
+
+      # Disable extension loading after
+      :ok = EctoLibSql.Native.enable_extensions(state, false)
+
+  ## Common Extensions
+
+  - **FTS5** (full-text search) - Usually built-in, provides advanced full-text search
+  - **JSON1** (JSON functions) - Usually built-in, provides JSON manipulation functions
+  - **R-Tree** (spatial indexing) - Spatial data structures for geographic data
+  - **PCRE** (regular expressions) - Perl-compatible regular expressions
+  - Custom user-defined functions
+
+  ## Security Warning
+
+  ⚠️ Only load extensions from trusted sources. Extensions run with full database
+  access and can execute arbitrary code.
+
+  ## Notes
+
+  - Extension loading must be enabled first via `enable_extensions/2`
+  - Extensions are loaded per-connection, not globally
+  - Some extensions may already be built into libsql (FTS5, JSON1)
+  - Extension files must match your platform (.so on Linux, .dylib on macOS, .dll on Windows)
+
+  """
+  def load_ext(%EctoLibSql.State{conn_id: conn_id} = _state, path, entry_point \\ nil)
+      when is_binary(path) do
+    load_extension(conn_id, path, entry_point)
+  end
+
+  @doc """
+  Install an update hook for monitoring database changes (CDC).
+
+  **NOT SUPPORTED** - Update hooks require sending messages from managed BEAM threads,
+  which is not allowed by Rustler's threading model.
+
+  ## Why Not Supported
+
+  SQLite's update hook callback is called synchronously during INSERT/UPDATE/DELETE operations,
+  and runs on the same thread executing the SQL statement. In our NIF implementation:
+  1. SQL execution happens on Erlang scheduler threads (managed by BEAM)
+  2. Rustler's `OwnedEnv::send_and_clear()` can ONLY be called from unmanaged threads
+  3. Calling `send_and_clear()` from a managed thread causes a panic
+
+  This is a fundamental limitation of mixing NIF callbacks with Erlang's threading model.
+
+  ## Alternatives
+
+  For change data capture and real-time updates, consider:
+
+  1. **Application-level events** - Emit events from your Ecto repos:
+
+      defmodule MyApp.Repo do
+        def insert(changeset, opts \\\\ []) do
+          case Ecto.Repo.insert(__MODULE__, changeset, opts) do
+            {:ok, record} = result ->
+              Phoenix.PubSub.broadcast(MyApp.PubSub, "db_changes", {:insert, record})
+              result
+            error -> error
+          end
+        end
+      end
+
+  2. **Database triggers** - Use SQLite triggers to log changes to a separate table:
+
+      CREATE TRIGGER users_audit_insert AFTER INSERT ON users
+      BEGIN
+        INSERT INTO audit_log (action, table_name, row_id, timestamp)
+        VALUES ('insert', 'users', NEW.id, datetime('now'));
+      END;
+
+  3. **Polling-based CDC** - Periodically query for changes using timestamps or version columns
+
+  4. **Phoenix.Tracker** - Track state changes at the application level
+
+  ## Returns
+    - `:unsupported` - Always returns unsupported
+
+  """
+  def add_update_hook(%EctoLibSql.State{} = state, _pid \\ self()) do
+    set_update_hook(state.conn_id, self())
+  end
+
+  @doc """
+  Remove the update hook from a connection.
+
+  **NOT SUPPORTED** - Update hooks are not currently implemented.
+
+  ## Returns
+    - `:unsupported` - Always returns unsupported
+
+  """
+  def remove_update_hook(%EctoLibSql.State{conn_id: conn_id} = _state) do
+    clear_update_hook(conn_id)
+  end
+
+  @doc """
+  Install an authorizer hook for row-level security.
+
+  **NOT SUPPORTED** - Authorizer hooks require synchronous bidirectional communication
+  between Rust and Elixir, which is not feasible with Rustler's threading model.
+
+  ## Why Not Supported
+
+  SQLite's authorizer callback is called synchronously during query compilation and expects
+  an immediate response (Allow/Deny/Ignore). This would require:
+  1. Sending a message from Rust to Elixir
+  2. Blocking the Rust thread waiting for a response
+  3. Receiving the response from Elixir
+
+  This pattern is not safe with Rustler because:
+  - The callback runs on a SQLite thread (potentially holding locks)
+  - Blocking on Erlang scheduler threads can cause deadlocks
+  - No safe way to do synchronous Rust→Elixir→Rust calls
+
+  ## Alternatives
+
+  For row-level security and access control, consider:
+
+  1. **Application-level authorization** - Check permissions in Elixir before queries:
+
+      defmodule MyApp.Auth do
+        def can_access?(user, table, action) do
+          # Check user permissions
+        end
+      end
+
+      def get_user(id, current_user) do
+        if MyApp.Auth.can_access?(current_user, "users", :read) do
+          Repo.get(User, id)
+        else
+          {:error, :unauthorized}
+        end
+      end
+
+  2. **Database views** - Create views with WHERE clauses for different user levels:
+
+      CREATE VIEW user_visible_posts AS
+      SELECT * FROM posts WHERE user_id = current_user_id();
+
+  3. **Query rewriting** - Modify queries in Elixir to include authorization constraints:
+
+      defmodule MyApp.Repo do
+        def all(queryable, current_user) do
+          queryable
+          |> apply_tenant_filter(current_user)
+          |> Ecto.Repo.all()
+        end
+      end
+
+  4. **Connection-level restrictions** - Use different database connections with different privileges
+
+  ## Returns
+    - `:unsupported` - Always returns unsupported
+
+  """
+  def add_authorizer(%EctoLibSql.State{conn_id: conn_id} = _state, pid \\ self()) do
+    set_authorizer(conn_id, pid)
+  end
+
+  @doc """
   Execute multiple SQL statements from a semicolon-separated string.
 
   Uses LibSQL's native batch execution for optimal performance. This is more
@@ -989,6 +1227,53 @@ defmodule EctoLibSql.Native do
       when is_binary(stmt_id) do
     case statement_parameter_count(conn_id, stmt_id) do
       count when is_integer(count) -> {:ok, count}
+      {:error, reason} -> {:error, reason}
+    end
+  end
+
+  @doc """
+  Get the name of a parameter in a prepared statement by its index.
+
+  Returns the parameter name for named parameters (`:name`, `@name`, `$name`),
+  or `nil` for positional parameters (`?`).
+
+  ## Parameters
+    - state: The connection state
+    - stmt_id: The statement ID returned from `prepare/2`
+    - idx: Parameter index (1-based, following SQLite convention)
+
+  ## Returns
+    - `{:ok, name}` - Parameter has a name (e.g., `:id` returns `"id"`)
+    - `{:ok, nil}` - Parameter is positional (`?`)
+    - `{:error, reason}` - Error occurred
+
+  ## Example
+
+      # Named parameters
+      {:ok, stmt_id} = EctoLibSql.Native.prepare(state, "SELECT * FROM users WHERE id = :id AND name = :name")
+      {:ok, param1} = EctoLibSql.Native.stmt_parameter_name(state, stmt_id, 1)
+      # param1 = "id"
+      {:ok, param2} = EctoLibSql.Native.stmt_parameter_name(state, stmt_id, 2)
+      # param2 = "name"
+
+      # Positional parameters
+      {:ok, stmt_id} = EctoLibSql.Native.prepare(state, "SELECT * FROM users WHERE id = ?")
+      {:ok, param1} = EctoLibSql.Native.stmt_parameter_name(state, stmt_id, 1)
+      # param1 = nil
+
+  ## Notes
+    - Parameter indices are 1-based (first parameter is index 1)
+    - Named parameters start with `:`, `@`, or `$` in SQL but the prefix is stripped in the returned name
+    - Returns `nil` for positional `?` placeholders
+
+  """
+  def stmt_parameter_name(%EctoLibSql.State{conn_id: conn_id} = _state, stmt_id, idx)
+      when is_binary(stmt_id) and is_integer(idx) and idx >= 1 do
+    # The NIF returns Option<String> which becomes {:ok, "name"} or {:ok, nil} or {:error, reason}
+    # But Rustler converts Some("name") to just "name", not {:ok, "name"}
+    case statement_parameter_name(conn_id, stmt_id, idx) do
+      name when is_binary(name) -> {:ok, name}
+      nil -> {:ok, nil}
       {:error, reason} -> {:error, reason}
     end
   end

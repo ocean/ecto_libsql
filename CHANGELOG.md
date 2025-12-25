@@ -7,7 +7,57 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Investigated but Not Supported
+
+- **Hooks Investigation**: Researched implementation of SQLite hooks (update hooks and authorizer hooks) for CDC and row-level security
+  - **Update Hooks (CDC)**: Cannot be implemented due to Rustler threading limitations
+    - SQLite's update hook runs on managed BEAM threads
+    - Rustler's `OwnedEnv::send_and_clear()` can ONLY be called from unmanaged threads
+    - Would cause panic: "send_and_clear: current thread is managed"
+  - **Authorizer Hooks (RLS)**: Cannot be implemented due to synchronous callback requirements
+    - Requires immediate synchronous response (Allow/Deny/Ignore)
+    - No safe way to block waiting for Elixir response from scheduler thread
+    - Would risk deadlocks with scheduler thread blocking
+  - **Result**: Both `add_update_hook/2`, `remove_update_hook/1`, and `add_authorizer/2` return `{:error, :unsupported}`
+  - **Alternatives provided**: Comprehensive documentation of alternative approaches:
+    - For CDC: Application-level events, database triggers, polling, Phoenix.Tracker
+    - For RLS: Application-level auth, database views, query rewriting, connection-level privileges
+  - See Rustler issue: https://github.com/rusterlium/rustler/issues/293
+
 ### Added
+
+- **SQLite Extension Loading Support (`enable_extensions/2`, `load_ext/3`)**
+  - Load SQLite extensions dynamically from shared library files
+  - **Security-first design**: Extension loading disabled by default, must be explicitly enabled
+  - **Supported extensions**: FTS5 (full-text search), JSON1, R-Tree (spatial indexing), PCRE (regex), custom user-defined functions
+  - Rust NIFs: `enable_load_extension/2`, `load_extension/3` in `src/connection.rs`
+  - Elixir wrappers: `EctoLibSql.Native.enable_extensions/2`, `EctoLibSql.Native.load_ext/3`
+  - **API workflow**: Enable extension loading → Load extension(s) → Disable extension loading (recommended)
+  - **Entry point support**: Optional custom entry point function name parameter
+  - **Platform support**: .so (Linux), .dylib (macOS), .dll (Windows)
+  - **Use cases**: Full-text search (FTS5), JSON functions, spatial data (R-Tree), regex matching, custom SQL functions
+  - **Security warnings**: Only load extensions from trusted sources - extensions have full database access
+  - Comprehensive documentation with security warnings and common extension examples
+
+- **Statement Parameter Name Introspection (`stmt_parameter_name/3`)**
+  - Retrieve parameter names from prepared statements with named parameters
+  - **Supports all SQLite named parameter styles**: `:name`, `@name`, `$name`
+  - **Use cases**: Dynamic query building, parameter validation, better debugging, API introspection
+  - Rust NIF: `statement_parameter_name()` in `src/statement.rs`
+  - Elixir wrapper: `EctoLibSql.Native.stmt_parameter_name/3`
+  - Returns `{:ok, "name"}` for named parameters (prefix included) or `{:ok, nil}` for positional `?` placeholders
+  - **Note**: Uses 1-based parameter indexing (first parameter is index 1) following SQLite convention
+  - Added 5 comprehensive tests covering all three named parameter styles, positional parameters, and mixed parameter scenarios
+  - Complements existing `stmt_parameter_count/2` for complete parameter introspection
+
+- **Comprehensive Statement Introspection Test Coverage**
+  - Added 18 edge case tests for prepared statement introspection features (13 existing + 5 parameter_name tests)
+  - **Parameter introspection edge cases**: 0 parameters, 20+ parameters, UPDATE statements, complex nested queries, named parameter introspection
+  - **Column introspection edge cases**: SELECT *, INSERT/UPDATE/DELETE without RETURNING (0 columns), aggregate functions, JOINs, subqueries, computed expressions
+  - Improved test coverage for `stmt_parameter_count/2`, `stmt_parameter_name/3`, `stmt_column_count/2`, and `stmt_column_name/3`
+  - All tests verify correct behaviour for simple queries, complex JOINs, aggregates, and edge cases
+  - Tests ensure proper handling of aliased columns, expressions, multi-table queries, and all three named parameter styles
+  - Location: `test/statement_features_test.exs` - added 180+ lines of comprehensive edge case tests
 
 - **Statement Reset (`reset_stmt/2`)**
   - Explicitly reset prepared statements to initial state for efficient reuse

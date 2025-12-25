@@ -396,6 +396,294 @@ defmodule EctoLibSql.StatementFeaturesTest do
 
       EctoLibSql.Native.close_stmt(stmt_id)
     end
+
+    test "parameter_count returns 0 for statements with no parameters", %{state: state} do
+      {:ok, stmt_id} = EctoLibSql.Native.prepare(state, "SELECT * FROM users")
+
+      assert {:ok, 0} = EctoLibSql.Native.stmt_parameter_count(state, stmt_id)
+
+      EctoLibSql.Native.close_stmt(stmt_id)
+    end
+
+    test "parameter_count handles many parameters", %{state: state} do
+      # Create INSERT statement with 20 parameters
+      placeholders = Enum.map(1..20, fn _ -> "?" end) |> Enum.join(", ")
+      columns = Enum.map(1..20, fn i -> "col#{i}" end) |> Enum.join(", ")
+
+      # Create table with 20 columns
+      create_sql =
+        "CREATE TABLE many_cols (#{Enum.map(1..20, fn i -> "col#{i} TEXT" end) |> Enum.join(", ")})"
+
+      {:ok, _, _, state} = EctoLibSql.handle_execute(create_sql, [], [], state)
+
+      # Prepare INSERT with 20 parameters
+      insert_sql = "INSERT INTO many_cols (#{columns}) VALUES (#{placeholders})"
+      {:ok, stmt_id} = EctoLibSql.Native.prepare(state, insert_sql)
+
+      assert {:ok, 20} = EctoLibSql.Native.stmt_parameter_count(state, stmt_id)
+
+      EctoLibSql.Native.close_stmt(stmt_id)
+    end
+
+    test "parameter_count for UPDATE statements", %{state: state} do
+      {:ok, stmt_id} =
+        EctoLibSql.Native.prepare(state, "UPDATE users SET name = ?, age = ? WHERE id = ?")
+
+      assert {:ok, 3} = EctoLibSql.Native.stmt_parameter_count(state, stmt_id)
+
+      EctoLibSql.Native.close_stmt(stmt_id)
+    end
+
+    test "parameter_count for complex nested queries", %{state: state} do
+      # Create posts table for JOIN query
+      {:ok, _, _, state} =
+        EctoLibSql.handle_execute(
+          "CREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER, title TEXT)",
+          [],
+          [],
+          state
+        )
+
+      # Complex query with multiple parameters in different parts
+      complex_sql = """
+      SELECT u.name, COUNT(p.id) as post_count
+      FROM users u
+      LEFT JOIN posts p ON u.id = p.user_id
+      WHERE u.age > ? AND u.name LIKE ?
+      GROUP BY u.id
+      HAVING COUNT(p.id) >= ?
+      """
+
+      {:ok, stmt_id} = EctoLibSql.Native.prepare(state, complex_sql)
+
+      assert {:ok, 3} = EctoLibSql.Native.stmt_parameter_count(state, stmt_id)
+
+      EctoLibSql.Native.close_stmt(stmt_id)
+    end
+
+    test "parameter_name introspection for named parameters", %{state: state} do
+      # Test with colon-style named parameters (:name)
+      {:ok, stmt_id} =
+        EctoLibSql.Native.prepare(
+          state,
+          "INSERT INTO users (id, name, age) VALUES (:id, :name, :age)"
+        )
+
+      # Get parameter names (note: SQLite uses 1-based indexing)
+      {:ok, param1} = EctoLibSql.Native.stmt_parameter_name(state, stmt_id, 1)
+      assert param1 == ":id"
+
+      {:ok, param2} = EctoLibSql.Native.stmt_parameter_name(state, stmt_id, 2)
+      assert param2 == ":name"
+
+      {:ok, param3} = EctoLibSql.Native.stmt_parameter_name(state, stmt_id, 3)
+      assert param3 == ":age"
+
+      EctoLibSql.Native.close_stmt(stmt_id)
+    end
+
+    test "parameter_name returns nil for positional parameters", %{state: state} do
+      {:ok, stmt_id} =
+        EctoLibSql.Native.prepare(state, "SELECT * FROM users WHERE name = ? AND age = ?")
+
+      # Positional parameters should return nil
+      {:ok, param1} = EctoLibSql.Native.stmt_parameter_name(state, stmt_id, 1)
+      assert param1 == nil
+
+      {:ok, param2} = EctoLibSql.Native.stmt_parameter_name(state, stmt_id, 2)
+      assert param2 == nil
+
+      EctoLibSql.Native.close_stmt(stmt_id)
+    end
+
+    test "parameter_name supports dollar-style parameters", %{state: state} do
+      # Test with dollar-style named parameters ($name)
+      {:ok, stmt_id} =
+        EctoLibSql.Native.prepare(state, "SELECT * FROM users WHERE id = $id AND name = $name")
+
+      {:ok, param1} = EctoLibSql.Native.stmt_parameter_name(state, stmt_id, 1)
+      assert param1 == "$id"
+
+      {:ok, param2} = EctoLibSql.Native.stmt_parameter_name(state, stmt_id, 2)
+      assert param2 == "$name"
+
+      EctoLibSql.Native.close_stmt(stmt_id)
+    end
+
+    test "parameter_name supports at-style parameters", %{state: state} do
+      # Test with at-style named parameters (@name)
+      {:ok, stmt_id} =
+        EctoLibSql.Native.prepare(state, "SELECT * FROM users WHERE id = @id AND name = @name")
+
+      {:ok, param1} = EctoLibSql.Native.stmt_parameter_name(state, stmt_id, 1)
+      assert param1 == "@id"
+
+      {:ok, param2} = EctoLibSql.Native.stmt_parameter_name(state, stmt_id, 2)
+      assert param2 == "@name"
+
+      EctoLibSql.Native.close_stmt(stmt_id)
+    end
+
+    test "parameter_name handles mixed positional and named parameters", %{state: state} do
+      # SQLite allows mixing positional and named parameters
+      {:ok, stmt_id} =
+        EctoLibSql.Native.prepare(state, "SELECT * FROM users WHERE id = :id AND age > ?")
+
+      {:ok, param1} = EctoLibSql.Native.stmt_parameter_name(state, stmt_id, 1)
+      assert param1 == ":id"
+
+      {:ok, param2} = EctoLibSql.Native.stmt_parameter_name(state, stmt_id, 2)
+      assert param2 == nil
+
+      EctoLibSql.Native.close_stmt(stmt_id)
+    end
+  end
+
+  # ============================================================================
+  # Column introspection edge cases
+  # ============================================================================
+
+  describe "Column introspection edge cases ✅" do
+    test "column count for SELECT *", %{state: state} do
+      {:ok, stmt_id} = EctoLibSql.Native.prepare(state, "SELECT * FROM users")
+
+      # Should return 3 columns (id, name, age)
+      assert {:ok, 3} = EctoLibSql.Native.stmt_column_count(state, stmt_id)
+
+      EctoLibSql.Native.close_stmt(stmt_id)
+    end
+
+    test "column count for INSERT without RETURNING", %{state: state} do
+      {:ok, stmt_id} =
+        EctoLibSql.Native.prepare(state, "INSERT INTO users VALUES (?, ?, ?)")
+
+      # INSERT without RETURNING should return 0 columns
+      assert {:ok, 0} = EctoLibSql.Native.stmt_column_count(state, stmt_id)
+
+      EctoLibSql.Native.close_stmt(stmt_id)
+    end
+
+    test "column count for UPDATE without RETURNING", %{state: state} do
+      {:ok, stmt_id} =
+        EctoLibSql.Native.prepare(state, "UPDATE users SET name = ? WHERE id = ?")
+
+      # UPDATE without RETURNING should return 0 columns
+      assert {:ok, 0} = EctoLibSql.Native.stmt_column_count(state, stmt_id)
+
+      EctoLibSql.Native.close_stmt(stmt_id)
+    end
+
+    test "column count for DELETE without RETURNING", %{state: state} do
+      {:ok, stmt_id} = EctoLibSql.Native.prepare(state, "DELETE FROM users WHERE id = ?")
+
+      # DELETE without RETURNING should return 0 columns
+      assert {:ok, 0} = EctoLibSql.Native.stmt_column_count(state, stmt_id)
+
+      EctoLibSql.Native.close_stmt(stmt_id)
+    end
+
+    test "column metadata for aggregate functions", %{state: state} do
+      {:ok, stmt_id} =
+        EctoLibSql.Native.prepare(
+          state,
+          """
+          SELECT
+            COUNT(*) as total,
+            AVG(age) as avg_age,
+            MIN(age) as min_age,
+            MAX(age) as max_age,
+            SUM(age) as sum_age
+          FROM users
+          """
+        )
+
+      assert {:ok, 5} = EctoLibSql.Native.stmt_column_count(state, stmt_id)
+
+      # Check column names
+      names = get_column_names(state, stmt_id, 5)
+      assert names == ["total", "avg_age", "min_age", "max_age", "sum_age"]
+
+      EctoLibSql.Native.close_stmt(stmt_id)
+    end
+
+    test "column metadata for JOIN with multiple tables", %{state: state} do
+      # Create posts table
+      {:ok, _, _, state} =
+        EctoLibSql.handle_execute(
+          "CREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER, title TEXT, content TEXT)",
+          [],
+          [],
+          state
+        )
+
+      # Complex JOIN query
+      {:ok, stmt_id} =
+        EctoLibSql.Native.prepare(
+          state,
+          """
+          SELECT
+            u.id,
+            u.name,
+            u.age,
+            p.id as post_id,
+            p.title,
+            p.content
+          FROM users u
+          INNER JOIN posts p ON u.id = p.user_id
+          """
+        )
+
+      assert {:ok, 6} = EctoLibSql.Native.stmt_column_count(state, stmt_id)
+
+      names = get_column_names(state, stmt_id, 6)
+      assert names == ["id", "name", "age", "post_id", "title", "content"]
+
+      EctoLibSql.Native.close_stmt(stmt_id)
+    end
+
+    test "column metadata for subqueries", %{state: state} do
+      {:ok, stmt_id} =
+        EctoLibSql.Native.prepare(
+          state,
+          """
+          SELECT
+            name,
+            (SELECT COUNT(*) FROM users) as total_users
+          FROM users
+          WHERE id = ?
+          """
+        )
+
+      assert {:ok, 2} = EctoLibSql.Native.stmt_column_count(state, stmt_id)
+
+      names = get_column_names(state, stmt_id, 2)
+      assert names == ["name", "total_users"]
+
+      EctoLibSql.Native.close_stmt(stmt_id)
+    end
+
+    test "column metadata for computed expressions", %{state: state} do
+      {:ok, stmt_id} =
+        EctoLibSql.Native.prepare(
+          state,
+          """
+          SELECT
+            id,
+            name,
+            age * 2 as double_age,
+            UPPER(name) as upper_name,
+            age + 10 as age_plus_ten
+          FROM users
+          """
+        )
+
+      assert {:ok, 5} = EctoLibSql.Native.stmt_column_count(state, stmt_id)
+
+      names = get_column_names(state, stmt_id, 5)
+      assert names == ["id", "name", "double_age", "upper_name", "age_plus_ten"]
+
+      EctoLibSql.Native.close_stmt(stmt_id)
+    end
   end
 
   # ============================================================================
