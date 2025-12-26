@@ -325,6 +325,59 @@ pub fn statement_parameter_count(conn_id: &str, stmt_id: &str) -> NifResult<usiz
     Ok(count)
 }
 
+/// Get the name of a parameter in a prepared statement by its index.
+///
+/// Returns the parameter name if it's a named parameter (e.g., `:name`, `@name`, `$name`),
+/// or `None` if it's a positional parameter (`?`).
+///
+/// This is useful for understanding the parameter names in queries that use
+/// named parameters instead of positional placeholders.
+///
+/// # Arguments
+/// - `conn_id`: Database connection ID
+/// - `stmt_id`: Prepared statement ID
+/// - `idx`: Parameter index (1-based, following SQLite convention)
+///
+/// # Returns
+/// - `{:ok, name}` - Parameter has a name (e.g., `:name` returns `"name"`)
+/// - `{:ok, nil}` - Parameter is positional (`?`)
+/// - `{:error, reason}` - Error occurred
+///
+/// # Note
+/// Parameter indices in SQLite are 1-based, not 0-based. The first parameter is index 1.
+#[rustler::nif(schedule = "DirtyIo")]
+pub fn statement_parameter_name(
+    conn_id: &str,
+    stmt_id: &str,
+    idx: i32,
+) -> NifResult<Option<String>> {
+    let conn_map = utils::safe_lock(&CONNECTION_REGISTRY, "statement_parameter_name conn_map")?;
+    let stmt_registry = utils::safe_lock(&STMT_REGISTRY, "statement_parameter_name stmt_registry")?;
+
+    if conn_map.get(conn_id).is_none() {
+        return Err(rustler::Error::Term(Box::new("Invalid connection ID")));
+    }
+
+    let (stored_conn_id, cached_stmt) = stmt_registry
+        .get(stmt_id)
+        .ok_or_else(|| rustler::Error::Term(Box::new("Statement not found")))?;
+
+    // Verify statement belongs to this connection
+    decode::verify_statement_ownership(stored_conn_id, conn_id)?;
+
+    let cached_stmt = cached_stmt.clone();
+
+    drop(stmt_registry);
+    drop(conn_map);
+
+    let stmt_guard = utils::safe_lock_arc(&cached_stmt, "statement_parameter_name stmt")?;
+
+    // SQLite uses 1-based parameter indices
+    let param_name = stmt_guard.parameter_name(idx).map(|s| s.to_string());
+
+    Ok(param_name)
+}
+
 /// Reset a prepared statement to its initial state for reuse.
 ///
 /// After executing a statement, you should reset it before binding new parameters

@@ -7,6 +7,7 @@ pub mod connection;
 pub mod constants;
 pub mod cursor;
 pub mod decode;
+pub mod hooks;
 pub mod metadata;
 pub mod models;
 pub mod query;
