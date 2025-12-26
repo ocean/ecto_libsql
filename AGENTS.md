@@ -1298,6 +1298,108 @@ mix ecto.migrate   # Run migrations
 mix ecto.rollback  # Rollback last migration
 ```
 
+#### RANDOM ROWID Support (libSQL Extension)
+
+For security and privacy, use RANDOM ROWID to generate pseudorandom row IDs instead of sequential integers:
+
+```elixir
+# Create table with random row IDs (prevents ID enumeration attacks)
+defmodule MyApp.Repo.Migrations.CreateSessions do
+  use Ecto.Migration
+
+  def change do
+    create table(:sessions, options: [random_rowid: true]) do
+      add :token, :string, null: false
+      add :user_id, references(:users, on_delete: :delete_all)
+      add :expires_at, :utc_datetime
+
+      timestamps()
+    end
+
+    create unique_index(:sessions, [:token])
+  end
+end
+```
+
+**Benefits:**
+- **Security**: Prevents ID enumeration attacks (guessing valid IDs)
+- **Privacy**: Doesn't leak business metrics through sequential IDs
+- **Unpredictability**: Row IDs are pseudorandom, not sequential
+
+**Usage:**
+```elixir
+# Basic usage
+create table(:sessions, options: [random_rowid: true]) do
+  add :token, :string
+end
+
+# With composite primary key
+create table(:audit_log, options: [random_rowid: true]) do
+  add :user_id, :integer, primary_key: true
+  add :action_id, :integer, primary_key: true
+  add :timestamp, :integer
+end
+
+# With IF NOT EXISTS
+create_if_not_exists table(:sessions, options: [random_rowid: true]) do
+  add :token, :string
+end
+```
+
+**Restrictions:**
+- Mutually exclusive with WITHOUT ROWID (per libSQL specification)
+- Mutually exclusive with AUTOINCREMENT (per libSQL specification)
+- LibSQL extension - not available in standard SQLite
+
+**SQL Output:**
+```sql
+CREATE TABLE sessions (...) RANDOM ROWID
+```
+
+#### ALTER COLUMN Support (libSQL Extension)
+
+LibSQL supports modifying column attributes with ALTER COLUMN (not available in standard SQLite):
+
+```elixir
+defmodule MyApp.Repo.Migrations.ModifyUserColumns do
+  use Ecto.Migration
+
+  def change do
+    alter table(:users) do
+      # Change column type
+      modify :age, :string, default: "0"
+
+      # Add NOT NULL constraint
+      modify :email, :string, null: false
+
+      # Add DEFAULT value
+      modify :status, :string, default: "active"
+
+      # Add foreign key reference
+      modify :team_id, references(:teams, on_delete: :nilify_all)
+    end
+  end
+end
+```
+
+**Supported Modifications:**
+- Type affinity changes (`:integer` → `:string`, etc.)
+- NOT NULL constraints
+- DEFAULT values
+- CHECK constraints
+- REFERENCES (foreign keys)
+
+**Important Notes:**
+- Changes only apply to **new or updated rows**
+- Existing data is **not revalidated** or modified
+- This is a **libSQL extension** - not available in standard SQLite
+
+**SQL Output:**
+```sql
+ALTER TABLE users ALTER COLUMN age TO age TEXT DEFAULT '0'
+ALTER TABLE users ALTER COLUMN email TO email TEXT NOT NULL
+```
+
 ### Basic Queries
 
 #### Insert
@@ -1719,33 +1821,60 @@ Ecto types map to SQLite types as follows:
 
 ### Ecto Migration Notes
 
-Most Ecto migrations work perfectly. SQLite limitations:
+Most Ecto migrations work perfectly. LibSQL provides extensions beyond standard SQLite:
 
 ```elixir
-# ✅ SUPPORTED
-create table(:users)
-alter table(:users) do: add :field, :type
-drop table(:users)
-create index(:users, [:email])
-rename table(:old), to: table(:new)
-rename table(:users), :old_field, to: :new_field
+# ✅ FULLY SUPPORTED
+create table(:users)                                    # CREATE TABLE
+create table(:sessions, options: [random_rowid: true]) # RANDOM ROWID (libSQL extension)
+alter table(:users) do: add :field, :type              # ADD COLUMN
+alter table(:users) do: modify :field, :new_type       # ALTER COLUMN (libSQL extension)
+alter table(:users) do: remove :field                  # DROP COLUMN (libSQL/SQLite 3.35.0+)
+drop table(:users)                                      # DROP TABLE
+create index(:users, [:email])                         # CREATE INDEX
+rename table(:old), to: table(:new)                    # RENAME TABLE
+rename table(:users), :old_field, to: :new_field       # RENAME COLUMN
 
-# ❌ NOT SUPPORTED
-alter table(:users) do: modify :field, :new_type  # Can't change column type
-alter table(:users) do: remove :field  # Can't drop column (SQLite < 3.35.0)
+# ⚠️ LIBSQL EXTENSIONS (not in standard SQLite)
+alter table(:users) do: modify :age, :string           # ALTER COLUMN - libSQL only
+create table(:sessions, options: [random_rowid: true]) # RANDOM ROWID - libSQL only
+```
 
-# Workaround: Recreate table
+**Important Notes:**
+
+1. **ALTER COLUMN** is a libSQL extension (not available in standard SQLite)
+   - Supported operations: type changes, NOT NULL, DEFAULT, CHECK, REFERENCES
+   - Changes only apply to new/updated rows; existing data is not revalidated
+
+2. **DROP COLUMN** requires SQLite 3.35.0+ or libSQL
+   - Cannot drop PRIMARY KEY columns, UNIQUE columns, or referenced columns
+
+3. **RANDOM ROWID** is a libSQL extension for security/privacy
+   - Prevents ID enumeration attacks
+   - Mutually exclusive with WITHOUT ROWID and AUTOINCREMENT
+
+**Standard SQLite Workaround (if not using libSQL's ALTER COLUMN):**
+
+If you need to modify columns on standard SQLite (without libSQL's extensions), recreate the table:
+
+```elixir
 defmodule MyApp.Repo.Migrations.ChangeUserAge do
   use Ecto.Migration
 
   def up do
     create table(:users_new) do
-      # Define new schema
+      add :id, :integer, primary_key: true
+      add :name, :string
+      add :age, :string  # Changed from :integer
+      timestamps()
     end
 
-    execute "INSERT INTO users_new SELECT * FROM users"
+    execute "INSERT INTO users_new (id, name, age, inserted_at, updated_at) SELECT id, name, CAST(age AS TEXT), inserted_at, updated_at FROM users"
     drop table(:users)
     rename table(:users_new), to: table(:users)
+
+    # Recreate indexes
+    create unique_index(:users, [:email])
   end
 end
 ```

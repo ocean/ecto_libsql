@@ -7,6 +7,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **RANDOM ROWID Support (libSQL Extension)**
+  - Added support for libSQL's RANDOM ROWID table option to generate pseudorandom rowid values instead of consecutive integers
+  - **Security/Privacy Benefits**: Prevents ID enumeration attacks and leaking business metrics through sequential IDs
+  - **Usage**: Pass `options: [random_rowid: true]` to `create table()` in migrations
+  - **Example**:
+    ```elixir
+    create table(:sessions, options: [random_rowid: true]) do
+      add :token, :string
+      add :user_id, :integer
+      timestamps()
+    end
+    ```
+  - **Compatibility**: Works with all table configurations (single PK, composite PK, IF NOT EXISTS)
+  - **Restrictions**: Mutually exclusive with WITHOUT ROWID and AUTOINCREMENT (per libSQL specification)
+  - SQL output: `CREATE TABLE sessions (...) RANDOM ROWID`
+  - Added 5 comprehensive tests covering RANDOM ROWID with various configurations
+  - Documentation: See [libSQL extensions guide](https://github.com/tursodatabase/libsql/blob/main/libsql-sqlite3/doc/libsql_extensions.md#random-rowid)
+
+### Clarifications
+
+- **ALTER TABLE ALTER COLUMN Support (Already Implemented)**
+  - **Fully supported** since v0.6.0 - libSQL's ALTER COLUMN extension for modifying column attributes
+  - **Capabilities**: Modify type affinity, NOT NULL, CHECK, DEFAULT, and REFERENCES constraints
+  - **Usage**: Use `:modify` in migrations as with other Ecto adapters
+  - **Example**:
+    ```elixir
+    alter table(:users) do
+      modify :age, :string, default: "0"  # Change type and default
+      modify :email, :string, null: false # Add NOT NULL constraint
+    end
+    ```
+  - **Important**: Changes only apply to new/updated rows; existing data is not revalidated
+  - **Implementation**: `lib/ecto/adapters/libsql/connection.ex:213-219` handles `:modify` changes
+  - SQL output: `ALTER TABLE users ALTER COLUMN age TO age TEXT DEFAULT '0'`
+  - This is a **libSQL extension** beyond standard SQLite (SQLite does not support ALTER COLUMN)
+
 ### Investigated but Not Supported
 
 - **Hooks Investigation**: Researched implementation of SQLite hooks (update hooks and authorizer hooks) for CDC and row-level security

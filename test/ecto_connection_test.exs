@@ -46,6 +46,79 @@ defmodule Ecto.Adapters.LibSql.ConnectionTest do
       assert sql =~ ~s[PRIMARY KEY ("user_id", "role_id")]
     end
 
+    test "creates table with RANDOM ROWID (libSQL extension)" do
+      table = %Table{name: :sessions, prefix: nil, options: [random_rowid: true]}
+
+      columns = [
+        {:add, :id, :id, [primary_key: true]},
+        {:add, :token, :string, []}
+      ]
+
+      [sql] = Connection.execute_ddl({:create, table, columns})
+
+      assert sql =~ ~s[CREATE TABLE "sessions"]
+      assert sql =~ ~s[RANDOM ROWID]
+      # Verify the RANDOM ROWID comes after the closing parenthesis
+      assert sql =~ ~r/\).*RANDOM ROWID/
+    end
+
+    test "creates table with RANDOM ROWID and composite primary key" do
+      table = %Table{name: :audit_log, prefix: nil, options: [random_rowid: true]}
+
+      columns = [
+        {:add, :user_id, :integer, [primary_key: true]},
+        {:add, :action_id, :integer, [primary_key: true]},
+        {:add, :timestamp, :integer, []}
+      ]
+
+      [sql] = Connection.execute_ddl({:create, table, columns})
+
+      assert sql =~ ~s[PRIMARY KEY ("user_id", "action_id")]
+      assert sql =~ ~s[RANDOM ROWID]
+      # Ensure both composite PK and RANDOM ROWID are present
+      assert sql =~ ~r/PRIMARY KEY.*\).*RANDOM ROWID/
+    end
+
+    test "creates table without RANDOM ROWID when option is false" do
+      table = %Table{name: :users, prefix: nil, options: [random_rowid: false]}
+
+      columns = [
+        {:add, :id, :id, [primary_key: true]},
+        {:add, :name, :string, []}
+      ]
+
+      [sql] = Connection.execute_ddl({:create, table, columns})
+
+      refute sql =~ ~s[RANDOM ROWID]
+    end
+
+    test "creates table without RANDOM ROWID when no options specified" do
+      table = %Table{name: :users, prefix: nil}
+
+      columns = [
+        {:add, :id, :id, [primary_key: true]},
+        {:add, :name, :string, []}
+      ]
+
+      [sql] = Connection.execute_ddl({:create, table, columns})
+
+      refute sql =~ ~s[RANDOM ROWID]
+    end
+
+    test "creates table with RANDOM ROWID and IF NOT EXISTS" do
+      table = %Table{name: :sessions, prefix: nil, options: [random_rowid: true]}
+
+      columns = [
+        {:add, :id, :id, [primary_key: true]},
+        {:add, :token, :string, []}
+      ]
+
+      [sql] = Connection.execute_ddl({:create_if_not_exists, table, columns})
+
+      assert sql =~ ~s[CREATE TABLE IF NOT EXISTS "sessions"]
+      assert sql =~ ~s[RANDOM ROWID]
+    end
+
     test "creates table with NOT NULL constraint" do
       table = %Table{name: :users, prefix: nil}
 
