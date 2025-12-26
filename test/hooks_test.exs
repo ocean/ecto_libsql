@@ -13,16 +13,16 @@ defmodule EctoLibSql.HooksTest do
 
   describe "add_update_hook/2 - NOT SUPPORTED" do
     test "returns :unsupported error", %{state: state} do
-      assert :unsupported = Native.add_update_hook(state)
+      assert {:error, :unsupported} = Native.add_update_hook(state)
     end
 
     test "returns :unsupported with custom PID", %{state: state} do
       test_pid = self()
-      assert :unsupported = Native.add_update_hook(state, test_pid)
+      assert {:error, :unsupported} = Native.add_update_hook(state, test_pid)
     end
 
     test "does not affect database operations", %{state: state} do
-      :unsupported = Native.add_update_hook(state)
+      {:error, :unsupported} = Native.add_update_hook(state)
 
       # Database operations should still work
       {:ok, _, _, _state} =
@@ -47,27 +47,27 @@ defmodule EctoLibSql.HooksTest do
 
   describe "remove_update_hook/1 - NOT SUPPORTED" do
     test "returns :unsupported error", %{state: state} do
-      assert :unsupported = Native.remove_update_hook(state)
+      assert {:error, :unsupported} = Native.remove_update_hook(state)
     end
 
     test "can be called multiple times safely", %{state: state} do
-      assert :unsupported = Native.remove_update_hook(state)
-      assert :unsupported = Native.remove_update_hook(state)
+      assert {:error, :unsupported} = Native.remove_update_hook(state)
+      assert {:error, :unsupported} = Native.remove_update_hook(state)
     end
   end
 
   describe "add_authorizer/2 - NOT SUPPORTED" do
     test "returns :unsupported error", %{state: state} do
-      assert :unsupported = Native.add_authorizer(state)
+      assert {:error, :unsupported} = Native.add_authorizer(state)
     end
 
     test "returns :unsupported with custom PID", %{state: state} do
       test_pid = self()
-      assert :unsupported = Native.add_authorizer(state, test_pid)
+      assert {:error, :unsupported} = Native.add_authorizer(state, test_pid)
     end
 
     test "does not affect database operations", %{state: state} do
-      :unsupported = Native.add_authorizer(state)
+      {:error, :unsupported} = Native.add_authorizer(state)
 
       # Database operations should still work
       {:ok, _, _, _state} =

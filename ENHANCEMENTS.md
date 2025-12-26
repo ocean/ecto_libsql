@@ -355,7 +355,7 @@ config :my_app, MyApp.Repo,
 **Reason**: Rustler threading model incompatibility
 
 **Why Not Supported**:
-Both update hooks and authorizer hooks are fundamentally incompatible with Rustler's threading model:
+Both update hooks and authoriser hooks are fundamentally incompatible with Rustler's threading model:
 
 1. **Update Hooks Problem**:
    - SQLite's update hook callback runs synchronously during INSERT/UPDATE/DELETE operations
@@ -363,8 +363,8 @@ Both update hooks and authorizer hooks are fundamentally incompatible with Rustl
    - Rustler's `OwnedEnv::send_and_clear()` can ONLY be called from unmanaged threads
    - Calling `send_and_clear()` from managed thread causes panic: "current thread is managed"
 
-2. **Authorizer Hooks Problem**:
-   - SQLite's authorizer callback is synchronous and expects immediate response (Allow/Deny/Ignore)
+2. **Authoriser Hooks Problem**:
+   - SQLite's authoriser callback is synchronous and expects immediate response (Allow/Deny/Ignore)
    - Would require blocking Rust thread waiting for Elixir response
    - No safe way to do synchronous Rust→Elixir→Rust calls
    - Blocking on scheduler threads can cause deadlocks
@@ -377,8 +377,8 @@ For **Change Data Capture / Real-time Updates**:
 - Polling-based CDC with timestamps
 - Phoenix.Tracker for state tracking
 
-For **Row-Level Security / Authorization**:
-- Application-level authorization checks before queries
+For **Row-Level Security / Authorisation**:
+- Application-level authorisation checks before queries
 - Database views with WHERE clauses
 - Query rewriting in Ecto
 - Connection-level privileges
@@ -445,13 +445,13 @@ For **Row-Level Security / Authorization**:
 ### Potential Enhancements
 1. **Haversine Formula**: Implement actual geographic distance calculations for accuracy
 2. **Higher Dimensions**: Support for more complex geospatial data (elevation, time, etc.)
-3. **Index Optimization**: Add spatial indexes for performance on large datasets
+3. **Index Optimisation**: Add spatial indexes for performance on large datasets
 4. **Batch Queries**: Use batch operations for multiple location lookups
 5. **Clustering**: Find geographic clusters of locations using vector analysis
 
 ### Real-World Applications
 - **Location-based services**: Find nearby restaurants, hotels, gas stations
-- **Delivery optimization**: Locate nearest warehouse to customer location
+- **Delivery optimisation**: Locate nearest warehouse to customer location
 - **Regional analytics**: Find closest office/branch in each region
 - **Social discovery**: Find nearby users, events, or meetup groups
 - **Asset tracking**: Locate nearest available equipment or resources
@@ -885,4 +885,4 @@ disallowed-methods = [
 8. **Ecto Integration Improvements**
 9. **P3 Low Priority Features**
 
-This prioritization ensures we address the most critical production issues first, then focus on performance and reliability, before moving to nice-to-have features and advanced functionality.
+This prioritisation ensures we address the most critical production issues first, then focus on performance and reliability, before moving to nice-to-have features and advanced functionality.

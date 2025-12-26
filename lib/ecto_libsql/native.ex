@@ -992,8 +992,8 @@ defmodule EctoLibSql.Native do
     - `:unsupported` - Always returns unsupported
 
   """
-  def add_update_hook(%EctoLibSql.State{} = state, _pid \\ self()) do
-    set_update_hook(state.conn_id, self())
+  def add_update_hook(%EctoLibSql.State{} = state, pid \\ self()) do
+    set_update_hook(state.conn_id, pid)
   end
 
   @doc """

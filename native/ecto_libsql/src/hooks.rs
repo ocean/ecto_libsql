@@ -5,7 +5,7 @@
 ///
 /// **CURRENT STATUS**: Both update hooks and authorizer hooks are currently **NOT SUPPORTED**
 /// due to fundamental threading limitations with Rustler and the BEAM VM.
-use rustler::{Atom, LocalPid, NifResult};
+use rustler::{Atom, Env, LocalPid, NifResult};
 
 /// Set update hook for a connection
 ///
@@ -62,8 +62,11 @@ use rustler::{Atom, LocalPid, NifResult};
 /// # Returns
 /// - `{:error, :unsupported}` - Always returns unsupported
 #[rustler::nif]
-pub fn set_update_hook(_conn_id: &str, _pid: LocalPid) -> NifResult<Atom> {
-    Err(rustler::Error::Atom("unsupported"))
+pub fn set_update_hook(env: Env, _conn_id: &str, _pid: LocalPid) -> NifResult<(Atom, Atom)> {
+    Ok((
+        Atom::from_str(env, "error")?,
+        Atom::from_str(env, "unsupported")?,
+    ))
 }
 
 /// Clear update hook for a connection
@@ -76,8 +79,11 @@ pub fn set_update_hook(_conn_id: &str, _pid: LocalPid) -> NifResult<Atom> {
 /// # Returns
 /// - `{:error, :unsupported}` - Always returns unsupported
 #[rustler::nif]
-pub fn clear_update_hook(_conn_id: &str) -> NifResult<Atom> {
-    Err(rustler::Error::Atom("unsupported"))
+pub fn clear_update_hook(env: Env, _conn_id: &str) -> NifResult<(Atom, Atom)> {
+    Ok((
+        Atom::from_str(env, "error")?,
+        Atom::from_str(env, "unsupported")?,
+    ))
 }
 
 /// Set authorizer hook for a connection
@@ -148,6 +154,9 @@ pub fn clear_update_hook(_conn_id: &str) -> NifResult<Atom> {
 /// # Returns
 /// - `{:error, :unsupported}` - Always returns unsupported
 #[rustler::nif]
-pub fn set_authorizer(_conn_id: &str, _pid: LocalPid) -> NifResult<Atom> {
-    Err(rustler::Error::Atom("unsupported"))
+pub fn set_authorizer(env: Env, _conn_id: &str, _pid: LocalPid) -> NifResult<(Atom, Atom)> {
+    Ok((
+        Atom::from_str(env, "error")?,
+        Atom::from_str(env, "unsupported")?,
+    ))
 }
