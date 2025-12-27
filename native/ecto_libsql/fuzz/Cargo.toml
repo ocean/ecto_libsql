@@ -19,7 +19,7 @@ path = ".."
 
 [[bin]]
 name = "fuzz_should_use_query"
-path = "fuzz_targets/fuzz_target_1.rs"
+path = "fuzz_targets/fuzz_should_use_query.rs"
 test = false
 doc = false
 bench = false
