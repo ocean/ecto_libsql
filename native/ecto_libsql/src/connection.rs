@@ -40,15 +40,15 @@ use uuid::Uuid;
 pub fn connect(opts: Term, mode: Term) -> NifResult<String> {
     let list: Vec<Term> = opts
         .decode()
-        .map_err(|e| rustler::Error::Term(Box::new(format!("decode failed: {:?}", e))))?;
+        .map_err(|e| rustler::Error::Term(Box::new(format!("decode failed: {e:?}"))))?;
 
     let mut map = HashMap::with_capacity(list.len());
 
     for pair in list {
         let (key, value): (rustler::Atom, Term) = pair.decode().map_err(|e| {
-            rustler::Error::Term(Box::new(format!("expected keyword tuple: {:?}", e)))
+            rustler::Error::Term(Box::new(format!("expected keyword tuple: {e:?}")))
         })?;
-        map.insert(format!("{:?}", key), value);
+        map.insert(format!("{key:?}"), value);
     }
 
     let url = map.get("uri").and_then(|t| t.decode::<String>().ok());
@@ -134,17 +134,17 @@ pub fn connect(opts: Term, mode: Term) -> NifResult<String> {
                     builder.build().await
                 }
             }
-            .map_err(|e| rustler::Error::Term(Box::new(format!("Failed to build DB: {}", e))))?;
+            .map_err(|e| rustler::Error::Term(Box::new(format!("Failed to build DB: {e}"))))?;
 
             let conn = db
                 .connect()
-                .map_err(|e| rustler::Error::Term(Box::new(format!("Failed to connect: {}", e))))?;
+                .map_err(|e| rustler::Error::Term(Box::new(format!("Failed to connect: {e}"))))?;
 
             // Ping remote connections to verify they're accessible
             if mode_enum != Mode::Local {
                 conn.query("SELECT 1", ())
                     .await
-                    .map_err(|e| rustler::Error::Term(Box::new(format!("Failed ping: {}", e))))?;
+                    .map_err(|e| rustler::Error::Term(Box::new(format!("Failed ping: {e}"))))?;
             }
 
             let libsql_conn = Arc::new(Mutex::new(LibSQLConn {
@@ -155,10 +155,7 @@ pub fn connect(opts: Term, mode: Term) -> NifResult<String> {
             let conn_id = Uuid::new_v4().to_string();
             crate::utils::safe_lock(&CONNECTION_REGISTRY, "connect conn_registry")
                 .map_err(|e| {
-                    rustler::Error::Term(Box::new(format!(
-                        "Failed to register connection: {:?}",
-                        e
-                    )))
+                    rustler::Error::Term(Box::new(format!("Failed to register connection: {e:?}")))
                 })?
                 .insert(conn_id.clone(), libsql_conn);
 
@@ -167,8 +164,7 @@ pub fn connect(opts: Term, mode: Term) -> NifResult<String> {
         .await
         .map_err(|_| {
             rustler::Error::Term(Box::new(format!(
-                "Connection timeout after {} seconds",
-                DEFAULT_SYNC_TIMEOUT_SECS
+                "Connection timeout after {DEFAULT_SYNC_TIMEOUT_SECS} seconds"
             )))
         })?
     })
@@ -204,10 +200,7 @@ pub fn ping(conn_id: String) -> NifResult<bool> {
         });
         match result {
             Ok(_) => Ok(true),
-            Err(e) => Err(rustler::Error::Term(Box::new(format!(
-                "Ping error: {:?}",
-                e
-            )))),
+            Err(e) => Err(rustler::Error::Term(Box::new(format!("Ping error: {e:?}")))),
         }
     } else {
         Err(rustler::Error::Term(Box::new("Invalid connection ID")))
@@ -280,7 +273,7 @@ pub fn set_busy_timeout(conn_id: &str, timeout_ms: u64) -> NifResult<Atom> {
 
             conn_guard
                 .busy_timeout(Duration::from_millis(timeout_ms))
-                .map_err(|e| rustler::Error::Term(Box::new(format!("busy_timeout failed: {}", e))))
+                .map_err(|e| rustler::Error::Term(Box::new(format!("busy_timeout failed: {e}"))))
         });
 
         match result {
@@ -353,7 +346,7 @@ pub fn interrupt_connection(conn_id: &str) -> NifResult<Atom> {
 
         conn_guard
             .interrupt()
-            .map_err(|e| rustler::Error::Term(Box::new(format!("interrupt failed: {}", e))))?;
+            .map_err(|e| rustler::Error::Term(Box::new(format!("interrupt failed: {e}"))))?;
 
         Ok(rustler::types::atom::ok())
     } else {
@@ -391,16 +384,12 @@ pub fn enable_load_extension(conn_id: &str, enabled: bool) -> NifResult<Atom> {
 
         if enabled {
             conn_guard.load_extension_enable().map_err(|e| {
-                rustler::Error::Term(Box::new(format!(
-                    "Failed to enable extension loading: {}",
-                    e
-                )))
+                rustler::Error::Term(Box::new(format!("Failed to enable extension loading: {e}")))
             })?;
         } else {
             conn_guard.load_extension_disable().map_err(|e| {
                 rustler::Error::Term(Box::new(format!(
-                    "Failed to disable extension loading: {}",
-                    e
+                    "Failed to disable extension loading: {e}"
                 )))
             })?;
         }
@@ -450,7 +439,7 @@ pub fn load_extension(conn_id: &str, path: &str, entry_point: Option<&str>) -> N
         conn_guard
             .load_extension(&path_buf, entry_point)
             .map_err(|e| {
-                rustler::Error::Term(Box::new(format!("Failed to load extension: {}", e)))
+                rustler::Error::Term(Box::new(format!("Failed to load extension: {e}")))
             })?;
 
         Ok(rustler::types::atom::ok())

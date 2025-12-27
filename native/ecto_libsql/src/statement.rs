@@ -54,7 +54,7 @@ pub fn prepare_statement(conn_id: &str, sql: &str) -> NifResult<String> {
         conn_guard
             .prepare(&sql_to_prepare)
             .await
-            .map_err(|e| rustler::Error::Term(Box::new(format!("Prepare failed: {}", e))))
+            .map_err(|e| rustler::Error::Term(Box::new(format!("Prepare failed: {e}"))))
     });
 
     match stmt_result {
@@ -133,7 +133,7 @@ pub fn query_prepared<'a>(
             Ok(rows) => {
                 let collected = utils::collect_rows(env, rows)
                     .await
-                    .map_err(|e| rustler::Error::Term(Box::new(format!("{:?}", e))))?;
+                    .map_err(|e| rustler::Error::Term(Box::new(format!("{e:?}"))))?;
 
                 Ok(collected)
             }
@@ -209,7 +209,7 @@ pub fn execute_prepared<'a>(
         let affected = stmt_guard
             .execute(decoded_args)
             .await
-            .map_err(|e| rustler::Error::Term(Box::new(format!("Execute failed: {}", e))))?;
+            .map_err(|e| rustler::Error::Term(Box::new(format!("Execute failed: {e}"))))?;
 
         // NOTE: LibSQL automatically syncs writes to remote for embedded replicas.
         // No manual sync needed here.

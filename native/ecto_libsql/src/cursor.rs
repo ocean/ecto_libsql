@@ -73,7 +73,7 @@ pub fn declare_cursor(conn_id: &str, sql: &str, args: Vec<Term>) -> NifResult<St
                     if let Some(name) = row.column_name(i) {
                         columns.push(name.to_string());
                     } else {
-                        columns.push(format!("col{}", i));
+                        columns.push(format!("col{i}"));
                     }
                 }
             }
@@ -144,7 +144,7 @@ pub fn declare_cursor_with_context(
                 .transaction()?
                 .query(sql, decoded_args)
                 .await
-                .map_err(|e| rustler::Error::Term(Box::new(format!("Query failed: {}", e))))?;
+                .map_err(|e| rustler::Error::Term(Box::new(format!("Query failed: {e}"))))?;
 
             let mut columns: Vec<String> = Vec::new();
             let mut rows: Vec<Vec<Value>> = Vec::new();
@@ -159,7 +159,7 @@ pub fn declare_cursor_with_context(
                         if let Some(name) = row.column_name(i) {
                             columns.push(name.to_string());
                         } else {
-                            columns.push(format!("col{}", i));
+                            columns.push(format!("col{i}"));
                         }
                     }
                 }
@@ -227,7 +227,7 @@ pub fn declare_cursor_with_context(
                         if let Some(name) = row.column_name(i) {
                             columns.push(name.to_string());
                         } else {
-                            columns.push(format!("col{}", i));
+                            columns.push(format!("col{i}"));
                         }
                     }
                 }
