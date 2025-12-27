@@ -5,4 +5,5 @@
 
 mod constants_tests;
 mod integration_tests;
+mod proptest_tests;
 mod utils_tests;

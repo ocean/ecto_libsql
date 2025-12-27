@@ -3,6 +3,9 @@
 //! These tests verify that the global registries (for connections, transactions,
 //! statements, and cursors) are properly initialized and accessible.
 
+// Allow unwrap() in tests for cleaner test code - see CLAUDE.md "Test Code Exception"
+#![allow(clippy::unwrap_used)]
+
 use crate::constants::{CONNECTION_REGISTRY, CURSOR_REGISTRY, STMT_REGISTRY, TXN_REGISTRY};
 use uuid::Uuid;
 

@@ -2,11 +2,9 @@
 ///
 /// This module holds all static configuration, global registries, and atom definitions
 /// used throughout the codebase.
-use lazy_static::lazy_static;
-use once_cell::sync::Lazy;
 use rustler::atoms;
 use std::collections::HashMap;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 use tokio::runtime::Runtime;
 
 use crate::models::{CursorData, LibSQLConn, TransactionEntry};
@@ -24,7 +22,8 @@ type StatementEntry = (String, Arc<Mutex<libsql::Statement>>);
 /// - System has available threads
 /// - Ulimit settings (-u) are not too restrictive
 /// - System memory is available
-pub static TOKIO_RUNTIME: Lazy<Runtime> = Lazy::new(|| {
+#[allow(clippy::expect_used)] // Intentional: runtime creation must succeed or the NIF cannot function
+pub static TOKIO_RUNTIME: LazyLock<Runtime> = LazyLock::new(|| {
     Runtime::new()
         .expect("Failed to initialize Tokio runtime - check system resources and thread limits")
 });
@@ -32,28 +31,29 @@ pub static TOKIO_RUNTIME: Lazy<Runtime> = Lazy::new(|| {
 /// Default timeout for sync operations (in seconds)
 pub const DEFAULT_SYNC_TIMEOUT_SECS: u64 = 30;
 
-// Global registry for active database connections - Maps connection ID to LibSQLConn state
-lazy_static! {
-    pub static ref CONNECTION_REGISTRY: Mutex<HashMap<String, Arc<Mutex<LibSQLConn>>>> =
-        Mutex::new(HashMap::new());
-}
+/// Global registry for active database connections
+///
+/// Maps connection ID to `LibSQLConn` state wrapped in `Arc<Mutex>` for thread-safe access.
+pub static CONNECTION_REGISTRY: LazyLock<Mutex<HashMap<String, Arc<Mutex<LibSQLConn>>>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
-// Global registry for active transactions - Maps transaction ID to TransactionEntry
-lazy_static! {
-    pub static ref TXN_REGISTRY: Mutex<HashMap<String, TransactionEntry>> =
-        Mutex::new(HashMap::new());
-}
+/// Global registry for active transactions
+///
+/// Maps transaction ID to `TransactionEntry` containing the connection ownership info.
+pub static TXN_REGISTRY: LazyLock<Mutex<HashMap<String, TransactionEntry>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
-// Global registry for prepared statements - Maps statement ID to (connection_id, cached_statement)
-lazy_static! {
-    pub static ref STMT_REGISTRY: Mutex<HashMap<String, StatementEntry>> =
-        Mutex::new(HashMap::new());
-}
+/// Global registry for prepared statements
+///
+/// Maps statement ID to (connection_id, cached_statement) tuple.
+pub static STMT_REGISTRY: LazyLock<Mutex<HashMap<String, StatementEntry>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
-// Global registry for active cursors - Maps cursor ID to CursorData
-lazy_static! {
-    pub static ref CURSOR_REGISTRY: Mutex<HashMap<String, CursorData>> = Mutex::new(HashMap::new());
-}
+/// Global registry for active cursors
+///
+/// Maps cursor ID to `CursorData` containing buffered rows and position.
+pub static CURSOR_REGISTRY: LazyLock<Mutex<HashMap<String, CursorData>>> =
+    LazyLock::new(|| Mutex::new(HashMap::new()));
 
 // Atom declarations for EctoLibSql - used as return values and option identifiers in the NIF interface
 atoms! {
