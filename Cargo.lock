@@ -360,9 +360,7 @@ name = "ecto_libsql"
 version = "0.8.1"
 dependencies = [
  "bytes",
- "lazy_static",
  "libsql",
- "once_cell",
  "proptest",
  "rustler",
  "tokio",

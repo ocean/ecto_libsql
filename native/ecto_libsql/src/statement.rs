@@ -385,7 +385,7 @@ pub fn statement_parameter_name(
     let stmt_guard = utils::safe_lock_arc(&cached_stmt, "statement_parameter_name stmt")?;
 
     // SQLite uses 1-based parameter indices
-    let param_name = stmt_guard.parameter_name(idx).map(|s| s.to_string());
+    let param_name = stmt_guard.parameter_name(idx).map(ToString::to_string);
 
     Ok(param_name)
 }
@@ -502,9 +502,8 @@ pub fn get_statement_columns(
             let name = col.name().to_string();
             let origin_name = col
                 .origin_name()
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| name.clone());
-            let decl_type = col.decl_type().map(|s| s.to_string());
+                .map_or_else(|| name.clone(), ToString::to_string);
+            let decl_type = col.decl_type().map(ToString::to_string);
             (name, origin_name, decl_type)
         })
         .collect();

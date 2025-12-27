@@ -15,9 +15,7 @@ name = "ecto_libsql"
 crate-type = ["cdylib", "rlib"]
 
 [dependencies]
-lazy_static = "1.5.0"
 libsql = { version = "0.9.29", features = ["encryption", "replication"] }
-once_cell = "1.21.3"
 rustler = "0.37.0"
 tokio = "1.45.1"
 uuid = "1.17.0"
@@ -25,3 +23,26 @@ bytes = "1.5"
 
 [dev-dependencies]
 proptest = "1.5"
+
+# Lint configuration - enforces code quality standards
+[lints.rust]
+# Deny all warnings in CI
+unsafe_code = "deny"
+
+[lints.clippy]
+# Warn on unwrap/expect - test code may use unwrap() per CLAUDE.md guidelines
+# Production code has been cleaned to use safe error handling
+unwrap_used = "warn"
+expect_used = "warn"
+panic = "warn"
+
+# Warn on style and best practices (subset of pedantic that are reasonable)
+cloned_instead_of_copied = "warn"
+explicit_iter_loop = "warn"
+inefficient_to_string = "warn"
+manual_let_else = "warn"
+map_unwrap_or = "warn"
+redundant_closure_for_method_calls = "warn"
+semicolon_if_nothing_returned = "warn"
+single_match_else = "warn"
+uninlined_format_args = "warn"

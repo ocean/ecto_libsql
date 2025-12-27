@@ -215,15 +215,12 @@ pub fn begin_transaction(conn_id: &str) -> NifResult<String> {
 /// Returns a transaction ID on success, error on failure.
 #[rustler::nif(schedule = "DirtyIo")]
 pub fn begin_transaction_with_behavior(conn_id: &str, behavior: Atom) -> NifResult<String> {
-    let trx_behavior = match decode::decode_transaction_behavior(behavior) {
-        Some(b) => b,
-        None => {
-            // Unrecognized behavior - return error to Elixir for proper logging
-            // This allows the application to handle unknown behaviors explicitly
-            return Err(rustler::Error::Term(Box::new(
-                format!("Invalid transaction behavior: {behavior:?}. Use :deferred, :immediate, :exclusive, or :read_only")
-            )));
-        }
+    let Some(trx_behavior) = decode::decode_transaction_behavior(behavior) else {
+        // Unrecognised behaviour - return error to Elixir for proper logging
+        // This allows the application to handle unknown behaviours explicitly
+        return Err(rustler::Error::Term(Box::new(format!(
+            "Invalid transaction behavior: {behavior:?}. Use :deferred, :immediate, :exclusive, or :read_only"
+        ))));
     };
 
     let conn_map = utils::safe_lock(

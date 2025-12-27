@@ -17,16 +17,16 @@ use uuid::Uuid;
 /// Establish a database connection to a local, remote, or remote replica database.
 ///
 /// Supports three connection modes:
-/// - **local**: Direct connection to a local SQLite file
-/// - **remote**: Direct connection to a remote LibSQL/Turso server
+/// - **local**: Direct connection to a local `SQLite` file
+/// - **remote**: Direct connection to a remote `LibSQL`/Turso server
 /// - **remote_replica**: Local replica with automatic sync to remote
 ///
 /// Connection parameters are passed as Elixir keyword list:
-/// - `database` - Path to local database file (required for local/remote_replica modes)
-/// - `uri` - Remote database URI (required for remote/remote_replica modes)
-/// - `auth_token` - Authentication token (required for remote/remote_replica modes)
-/// - `encryption_key` - Optional local encryption key for local database encryption at rest (local/remote_replica modes)
-/// - `remote_encryption_key` - Optional remote encryption key for Turso encrypted databases (remote/remote_replica modes)
+/// - `database` - Path to local database file (required for `local`/`remote_replica` modes)
+/// - `uri` - Remote database URI (required for `remote`/`remote_replica` modes)
+/// - `auth_token` - Authentication token (required for `remote`/`remote_replica` modes)
+/// - `encryption_key` - Optional local encryption key for local database encryption at rest (`local`/`remote_replica` modes)
+/// - `remote_encryption_key` - Optional remote encryption key for Turso encrypted databases (`remote`/`remote_replica` modes)
 ///
 /// **Encryption Support**:
 /// - **Local encryption**: Uses AES-256-CBC for local database files (via `encryption_key`)
@@ -175,10 +175,10 @@ pub fn connect(opts: Term, mode: Term) -> NifResult<String> {
 /// Performs a simple `SELECT 1` query to verify the connection is working.
 /// Returns `true` if the connection is healthy, error otherwise.
 #[rustler::nif(schedule = "DirtyIo")]
-pub fn ping(conn_id: String) -> NifResult<bool> {
+pub fn ping(conn_id: &str) -> NifResult<bool> {
     let conn_map = crate::utils::safe_lock(&CONNECTION_REGISTRY, "ping conn_map")?;
 
-    let maybe_conn = conn_map.get(&conn_id);
+    let maybe_conn = conn_map.get(conn_id);
     if let Some(conn) = maybe_conn {
         let client = conn.clone();
         drop(conn_map); // Release lock before async operation
@@ -249,8 +249,8 @@ pub fn close(id: &str, opt: Atom) -> NifResult<Atom> {
 
 /// Set the busy timeout for a database connection.
 ///
-/// Controls how long SQLite waits for locks before returning `SQLITE_BUSY`.
-/// Default SQLite behavior is to return immediately; setting a timeout allows
+/// Controls how long `SQLite` waits for locks before returning `SQLITE_BUSY`.
+/// Default `SQLite` behaviour is to return immediately; setting a timeout allows
 /// for better concurrency handling in high-contention scenarios.
 ///
 /// # Arguments

@@ -116,7 +116,7 @@ pub async fn enhance_constraint_error(
         .iter()
         .map(|part| {
             let split: Vec<&str> = part.trim().split('.').collect();
-            split.last().unwrap_or(&"").to_string()
+            split.last().copied().unwrap_or("").to_string()
         })
         .collect();
 
