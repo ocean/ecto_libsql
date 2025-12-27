@@ -55,12 +55,9 @@ jobs:
       - name: Run Rust tests
         run: cargo test --manifest-path native/ecto_libsql/Cargo.toml --all-features
 
-      - name: Install cargo-deny
-        run: cargo install cargo-deny --force --locked
-
       - name: Check licences and security advisories
         working-directory: native/ecto_libsql
-        run: cargo deny check licenses
+        run: cargo deny check licenses advisories
 
   rust-fuzz:
     name: Rust Fuzz Testing
@@ -75,9 +72,6 @@ jobs:
         uses: dtolnay/rust-toolchain@nightly
         with:
           components: llvm-tools-preview
-
-      - name: Install cargo-fuzz
-        run: cargo install cargo-fuzz
 
       - name: Cache Rust dependencies
         uses: actions/cache@v4
@@ -353,6 +347,7 @@ jobs:
     needs:
       [
         rust-checks,
+        rust-fuzz,
         elixir-tests-latest,
         elixir-tests-compatibility,
         integration-test,
@@ -364,6 +359,7 @@ jobs:
       - name: Check if all jobs passed
         run: |
           if [ "${{ needs.rust-checks.result }}" != "success" ] || \
+             [ "${{ needs.rust-fuzz.result }}" != "success" ] || \
              [ "${{ needs.elixir-tests-latest.result }}" != "success" ] || \
              [ "${{ needs.elixir-tests-compatibility.result }}" != "success" ] || \
              [ "${{ needs.integration-test.result }}" != "success" ]; then
