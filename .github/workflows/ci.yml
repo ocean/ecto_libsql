@@ -50,12 +50,52 @@ jobs:
         run: cargo fmt --check --manifest-path native/ecto_libsql/Cargo.toml
 
       - name: Run Clippy
-        run: cargo clippy --manifest-path native/ecto_libsql/Cargo.toml --all-targets --all-features
-        # Note: Currently not treating warnings as errors due to await_holding_lock warnings
-        # These should be addressed in a future PR by using async-aware Mutex types
+        run: cargo clippy --manifest-path native/ecto_libsql/Cargo.toml --all-targets --all-features -- -D warnings
 
       - name: Run Rust tests
         run: cargo test --manifest-path native/ecto_libsql/Cargo.toml --all-features
+
+      - name: Check licences and security advisories
+        working-directory: native/ecto_libsql
+        run: cargo deny check licenses advisories
+
+  rust-fuzz:
+    name: Rust Fuzz Testing
+    runs-on: ubuntu-latest
+    needs: [rust-checks]
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Set up Rust nightly
+        uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: llvm-tools-preview
+
+      - name: Cache Rust dependencies
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/bin/
+            ~/.cargo/registry/index/
+            ~/.cargo/registry/cache/
+            ~/.cargo/git/db/
+            native/ecto_libsql/target/
+            native/ecto_libsql/fuzz/target/
+          key: ${{ runner.os }}-fuzz-${{ hashFiles('**/Cargo.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-fuzz-
+
+      - name: Run fuzz tests (30 seconds each)
+        working-directory: native/ecto_libsql
+        run: |
+          for target in $(cargo +nightly fuzz list); do
+            echo "Running $target..."
+            cargo +nightly fuzz run "$target" -- -max_total_time=30
+          done
+
+          echo "All fuzz tests passed!"
 
   elixir-tests-latest:
     name: Elixir ${{ matrix.elixir }} / OTP ${{ matrix.otp }} / ${{ matrix.os }}
@@ -307,6 +347,7 @@ jobs:
     needs:
       [
         rust-checks,
+        rust-fuzz,
         elixir-tests-latest,
         elixir-tests-compatibility,
         integration-test,
@@ -318,6 +359,7 @@ jobs:
       - name: Check if all jobs passed
         run: |
           if [ "${{ needs.rust-checks.result }}" != "success" ] || \
+             [ "${{ needs.rust-fuzz.result }}" != "success" ] || \
              [ "${{ needs.elixir-tests-latest.result }}" != "success" ] || \
              [ "${{ needs.elixir-tests-compatibility.result }}" != "success" ] || \
              [ "${{ needs.integration-test.result }}" != "success" ]; then

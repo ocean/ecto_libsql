@@ -4,6 +4,9 @@
 //! - `detect_query_type()` - Categorizes SQL statements by type
 //! - `should_use_query()` - Determines whether to use query() vs execute()
 
+// Allow unwrap() in tests for cleaner test code - see CLAUDE.md "Test Code Exception"
+#![allow(clippy::unwrap_used)]
+
 use crate::utils::{detect_query_type, should_use_query, QueryType};
 
 /// Tests for query type detection
@@ -319,8 +322,8 @@ mod should_use_query_tests {
         ));
 
         let result = should_use_query("SELECT * /* RETURNING */ FROM users");
-        assert_eq!(
-            result, true,
+        assert!(
+            result,
             "Known limitation: RETURNING in block comments is detected"
         );
     }
@@ -430,7 +433,7 @@ mod should_use_query_tests {
         let long_select = format!(
             "SELECT {} FROM users WHERE id = 1",
             (0..1000)
-                .map(|i| format!("col{}", i))
+                .map(|i| format!("col{i}"))
                 .collect::<Vec<_>>()
                 .join(", ")
         );
@@ -442,7 +445,7 @@ mod should_use_query_tests {
         let long_insert = format!(
             "INSERT INTO users ({}) VALUES ({})",
             (0..500)
-                .map(|i| format!("col{}", i))
+                .map(|i| format!("col{i}"))
                 .collect::<Vec<_>>()
                 .join(", "),
             (0..500)
@@ -458,7 +461,7 @@ mod should_use_query_tests {
         let long_insert_with_returning = format!(
             "INSERT INTO users ({}) VALUES ({}) RETURNING id",
             (0..500)
-                .map(|i| format!("col{}", i))
+                .map(|i| format!("col{i}"))
                 .collect::<Vec<_>>()
                 .join(", "),
             (0..500)

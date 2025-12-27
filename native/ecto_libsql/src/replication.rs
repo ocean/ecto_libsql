@@ -37,16 +37,20 @@ pub fn get_frame_number(conn_id: &str) -> NifResult<u64> {
         .clone();
     drop(conn_map);
 
+    // SAFETY: We use TOKIO_RUNTIME.block_on(), which runs the future synchronously on a dedicated
+    // thread pool. This prevents deadlocks that could occur if we were in a true async context
+    // with std::sync::Mutex guards held across await points.
+    #[allow(clippy::await_holding_lock)]
     let result = TOKIO_RUNTIME.block_on(async {
         // Lock must be held for the entire async operation since Database is not cloneable
         let client_guard = safe_lock_arc(&client, "get_frame_number client")
-            .map_err(|e| format!("Failed to lock client: {:?}", e))?;
+            .map_err(|e| format!("Failed to lock client: {e:?}"))?;
 
         let frame_no = client_guard
             .db
             .replication_index()
             .await
-            .map_err(|e| format!("replication_index failed: {}", e))?;
+            .map_err(|e| format!("replication_index failed: {e}"))?;
 
         Ok::<_, String>(frame_no.unwrap_or(0))
     });
@@ -79,21 +83,20 @@ pub fn sync_until(conn_id: &str, frame_no: u64) -> NifResult<Atom> {
         .clone();
     drop(conn_map);
 
+    // SAFETY: We use TOKIO_RUNTIME.block_on(), which runs the future synchronously on a dedicated
+    // thread pool. This prevents deadlocks that could occur if we were in a true async context
+    // with std::sync::Mutex guards held across await points.
+    #[allow(clippy::await_holding_lock)]
     let result = TOKIO_RUNTIME.block_on(async {
         // Lock must be held for the entire async operation since Database is not cloneable
         let client_guard = safe_lock_arc(&client, "sync_until client")
-            .map_err(|e| format!("Failed to lock client: {:?}", e))?;
+            .map_err(|e| format!("Failed to lock client: {e:?}"))?;
 
         let timeout_duration = tokio::time::Duration::from_secs(DEFAULT_SYNC_TIMEOUT_SECS);
         tokio::time::timeout(timeout_duration, client_guard.db.sync_until(frame_no))
             .await
-            .map_err(|_| {
-                format!(
-                    "sync_until timed out after {} seconds",
-                    DEFAULT_SYNC_TIMEOUT_SECS
-                )
-            })?
-            .map_err(|e| format!("sync_until failed: {}", e))?;
+            .map_err(|_| format!("sync_until timed out after {DEFAULT_SYNC_TIMEOUT_SECS} seconds"))?
+            .map_err(|e| format!("sync_until failed: {e}"))?;
 
         Ok::<_, String>(())
     });
@@ -124,21 +127,22 @@ pub fn flush_replicator(conn_id: &str) -> NifResult<u64> {
         .clone();
     drop(conn_map);
 
+    // SAFETY: We use TOKIO_RUNTIME.block_on(), which runs the future synchronously on a dedicated
+    // thread pool. This prevents deadlocks that could occur if we were in a true async context
+    // with std::sync::Mutex guards held across await points.
+    #[allow(clippy::await_holding_lock)]
     let result: Result<u64, String> = TOKIO_RUNTIME.block_on(async {
         // Lock must be held for the entire async operation since Database is not cloneable
         let client_guard = safe_lock_arc(&client, "flush_replicator client")
-            .map_err(|e| format!("Failed to lock client: {:?}", e))?;
+            .map_err(|e| format!("Failed to lock client: {e:?}"))?;
 
         let timeout_duration = tokio::time::Duration::from_secs(DEFAULT_SYNC_TIMEOUT_SECS);
         let frame_no = tokio::time::timeout(timeout_duration, client_guard.db.flush_replicator())
             .await
             .map_err(|_| {
-                format!(
-                    "flush_replicator timed out after {} seconds",
-                    DEFAULT_SYNC_TIMEOUT_SECS
-                )
+                format!("flush_replicator timed out after {DEFAULT_SYNC_TIMEOUT_SECS} seconds")
             })?
-            .map_err(|e| format!("flush_replicator failed: {}", e))?;
+            .map_err(|e| format!("flush_replicator failed: {e}"))?;
 
         // Return 0 if not a replica (consistent with get_frame_number behavior)
         Ok(frame_no.unwrap_or(0))

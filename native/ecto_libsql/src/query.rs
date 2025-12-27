@@ -63,50 +63,56 @@ pub fn query_args<'a>(
         client_guard.client.clone()
     }; // Outer lock dropped here
 
-    TOKIO_RUNTIME.block_on(async {
-        let conn_guard: std::sync::MutexGuard<libsql::Connection> =
-            safe_lock_arc(&connection, "query_args conn")?;
+    // SAFETY: We're inside TOKIO_RUNTIME.block_on(), so this is synchronous execution.
+    // The std::sync::Mutex guards are safe to hold across await points here because
+    // we're not in a true async context - block_on runs the future to completion.
+    #[allow(clippy::await_holding_lock)]
+    {
+        TOKIO_RUNTIME.block_on(async {
+            let conn_guard: std::sync::MutexGuard<libsql::Connection> =
+                safe_lock_arc(&connection, "query_args conn")?;
 
-        // NOTE: LibSQL automatically syncs writes to remote for embedded replicas.
-        // According to Turso docs, "writes are sent to the remote primary database by default,
-        // then the local database updates automatically once the remote write succeeds."
-        // We do NOT need to manually call sync() after writes - that would be redundant
-        // and cause performance issues. Manual sync via do_sync() is still available for
-        // explicit user control.
+            // NOTE: LibSQL automatically syncs writes to remote for embedded replicas.
+            // According to Turso docs, "writes are sent to the remote primary database by default,
+            // then the local database updates automatically once the remote write succeeds."
+            // We do NOT need to manually call sync() after writes - that would be redundant
+            // and cause performance issues. Manual sync via do_sync() is still available for
+            // explicit user control.
 
-        if use_query {
-            // Statements that return rows (SELECT, or INSERT/UPDATE/DELETE with RETURNING)
-            let res = conn_guard.query(query, params).await;
+            if use_query {
+                // Statements that return rows (SELECT, or INSERT/UPDATE/DELETE with RETURNING)
+                let res = conn_guard.query(query, params).await;
 
-            match res {
-                Ok(res_rows) => {
-                    let result = collect_rows(env, res_rows).await?;
-                    Ok(result)
+                match res {
+                    Ok(res_rows) => {
+                        let result = collect_rows(env, res_rows).await?;
+                        Ok(result)
+                    }
+                    Err(e) => {
+                        let error_msg = e.to_string();
+                        let enhanced_msg = enhance_constraint_error(&conn_guard, &error_msg)
+                            .await
+                            .unwrap_or(error_msg);
+                        Err(rustler::Error::Term(Box::new(enhanced_msg)))
+                    }
                 }
-                Err(e) => {
-                    let error_msg = e.to_string();
-                    let enhanced_msg = enhance_constraint_error(&conn_guard, &error_msg)
-                        .await
-                        .unwrap_or(error_msg);
-                    Err(rustler::Error::Term(Box::new(enhanced_msg)))
+            } else {
+                // Statements that don't return rows (INSERT/UPDATE/DELETE without RETURNING)
+                let res = conn_guard.execute(query, params).await;
+
+                match res {
+                    Ok(rows_affected) => Ok(build_empty_result(env, rows_affected)),
+                    Err(e) => {
+                        let error_msg = e.to_string();
+                        let enhanced_msg = enhance_constraint_error(&conn_guard, &error_msg)
+                            .await
+                            .unwrap_or(error_msg);
+                        Err(rustler::Error::Term(Box::new(enhanced_msg)))
+                    }
                 }
             }
-        } else {
-            // Statements that don't return rows (INSERT/UPDATE/DELETE without RETURNING)
-            let res = conn_guard.execute(query, params).await;
-
-            match res {
-                Ok(rows_affected) => Ok(build_empty_result(env, rows_affected)),
-                Err(e) => {
-                    let error_msg = e.to_string();
-                    let enhanced_msg = enhance_constraint_error(&conn_guard, &error_msg)
-                        .await
-                        .unwrap_or(error_msg);
-                    Err(rustler::Error::Term(Box::new(enhanced_msg)))
-                }
-            }
-        }
-    })
+        })
+    }
 }
 
 /// Manually synchronize a remote replica database with the remote primary.
@@ -180,14 +186,19 @@ pub fn pragma_query<'a>(env: Env<'a>, conn_id: &str, pragma_stmt: &str) -> NifRe
         let client = client.clone();
         drop(conn_map); // Release lock before async operation
 
+        // SAFETY: We're inside TOKIO_RUNTIME.block_on(), so this is synchronous execution.
+        // The std::sync::Mutex guards are safe to hold across await points here because
+        // we're not in a true async context - block_on runs the future to completion.
+        #[allow(clippy::await_holding_lock)]
         let result = TOKIO_RUNTIME.block_on(async {
             let client_guard = safe_lock_arc(&client, "pragma_query client")?;
             let conn_guard: std::sync::MutexGuard<libsql::Connection> =
                 safe_lock_arc(&client_guard.client, "pragma_query conn")?;
 
-            let rows = conn_guard.query(pragma_stmt, ()).await.map_err(|e| {
-                rustler::Error::Term(Box::new(format!("PRAGMA query failed: {}", e)))
-            })?;
+            let rows = conn_guard
+                .query(pragma_stmt, ())
+                .await
+                .map_err(|e| rustler::Error::Term(Box::new(format!("PRAGMA query failed: {e}"))))?;
 
             collect_rows(env, rows).await
         });

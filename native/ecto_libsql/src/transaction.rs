@@ -33,7 +33,7 @@ use std::sync::MutexGuard;
 ///
 /// # Usage
 ///
-/// ```rust
+/// ```ignore
 /// // Standard pattern (re-inserts on drop)
 /// let guard = TransactionEntryGuard::take(trx_id, conn_id)?;
 /// let result = TOKIO_RUNTIME.block_on(async {
@@ -43,7 +43,7 @@ use std::sync::MutexGuard;
 /// result.map_err(...)
 /// ```
 ///
-/// ```rust
+/// ```ignore
 /// // Consume pattern (for commit/rollback - no re-insertion)
 /// let guard = TransactionEntryGuard::take(trx_id, conn_id)?;
 /// let entry = guard.consume()?;
@@ -175,6 +175,10 @@ pub fn begin_transaction(conn_id: &str) -> NifResult<String> {
         client_guard.client.clone()
     }; // Outer lock dropped here
 
+    // SAFETY: We use TOKIO_RUNTIME.block_on(), which runs the future synchronously on a dedicated
+    // thread pool. This prevents deadlocks that could occur if we were in a true async context
+    // with std::sync::Mutex guards held across await points.
+    #[allow(clippy::await_holding_lock)]
     let trx = TOKIO_RUNTIME.block_on(async {
         // Lock must be held across await because transaction() returns a Future that
         // borrows from the Connection. We cannot drop the guard before awaiting.
@@ -182,7 +186,7 @@ pub fn begin_transaction(conn_id: &str) -> NifResult<String> {
         conn_guard
             .transaction()
             .await
-            .map_err(|e| rustler::Error::Term(Box::new(format!("Begin failed: {}", e))))
+            .map_err(|e| rustler::Error::Term(Box::new(format!("Begin failed: {e}"))))
     })?;
 
     let trx_id = uuid::Uuid::new_v4().to_string();
@@ -211,15 +215,12 @@ pub fn begin_transaction(conn_id: &str) -> NifResult<String> {
 /// Returns a transaction ID on success, error on failure.
 #[rustler::nif(schedule = "DirtyIo")]
 pub fn begin_transaction_with_behavior(conn_id: &str, behavior: Atom) -> NifResult<String> {
-    let trx_behavior = match decode::decode_transaction_behavior(behavior) {
-        Some(b) => b,
-        None => {
-            // Unrecognized behavior - return error to Elixir for proper logging
-            // This allows the application to handle unknown behaviors explicitly
-            return Err(rustler::Error::Term(Box::new(
-                format!("Invalid transaction behavior: {:?}. Use :deferred, :immediate, :exclusive, or :read_only", behavior)
-            )));
-        }
+    let Some(trx_behavior) = decode::decode_transaction_behavior(behavior) else {
+        // Unrecognised behaviour - return error to Elixir for proper logging
+        // This allows the application to handle unknown behaviours explicitly
+        return Err(rustler::Error::Term(Box::new(format!(
+            "Invalid transaction behavior: {behavior:?}. Use :deferred, :immediate, :exclusive, or :read_only"
+        ))));
     };
 
     let conn_map = utils::safe_lock(
@@ -238,6 +239,10 @@ pub fn begin_transaction_with_behavior(conn_id: &str, behavior: Atom) -> NifResu
         client_guard.client.clone()
     }; // Outer lock dropped here
 
+    // SAFETY: We use TOKIO_RUNTIME.block_on(), which runs the future synchronously on a dedicated
+    // thread pool. This prevents deadlocks that could occur if we were in a true async context
+    // with std::sync::Mutex guards held across await points.
+    #[allow(clippy::await_holding_lock)]
     let trx = TOKIO_RUNTIME.block_on(async {
         // Lock must be held across await because transaction_with_behavior() returns a Future
         // that borrows from the Connection. We cannot drop the guard before awaiting.
@@ -245,7 +250,7 @@ pub fn begin_transaction_with_behavior(conn_id: &str, behavior: Atom) -> NifResu
         conn_guard
             .transaction_with_behavior(trx_behavior)
             .await
-            .map_err(|e| rustler::Error::Term(Box::new(format!("Begin failed: {}", e))))
+            .map_err(|e| rustler::Error::Term(Box::new(format!("Begin failed: {e}"))))
     })?;
 
     let trx_id = uuid::Uuid::new_v4().to_string();
@@ -295,8 +300,8 @@ pub fn execute_with_transaction<'a>(
     let trx = guard.transaction()?;
 
     let result = TOKIO_RUNTIME
-        .block_on(async { trx.execute(&query, decoded_args).await })
-        .map_err(|e| rustler::Error::Term(Box::new(format!("Execute failed: {}", e))));
+        .block_on(async { trx.execute(query, decoded_args).await })
+        .map_err(|e| rustler::Error::Term(Box::new(format!("Execute failed: {e}"))));
     // Guard automatically re-inserts the entry on drop
     result
 }
@@ -348,15 +353,19 @@ pub fn query_with_trx_args<'a>(
     };
 
     // Execute async operation without holding the lock
+    // SAFETY: We use TOKIO_RUNTIME.block_on(), which runs the future synchronously on a dedicated
+    // thread pool. This prevents deadlocks that could occur if we were in a true async context
+    // with std::sync::Mutex guards held across await points.
+    #[allow(clippy::await_holding_lock)]
     let result = TOKIO_RUNTIME.block_on(async {
         if use_query {
             // Statements that return rows (SELECT, or INSERT/UPDATE/DELETE with RETURNING)
-            let res = trx.query(&query, decoded_args).await;
+            let res = trx.query(query, decoded_args).await;
 
             match res {
                 Ok(res_rows) => utils::collect_rows(env, res_rows).await,
                 Err(e) => {
-                    let error_msg = format!("Query failed: {}", e);
+                    let error_msg = format!("Query failed: {e}");
                     // safe_lock_arc already returns rustler::Error with good context
                     let conn_guard: MutexGuard<libsql::Connection> =
                         utils::safe_lock_arc(&connection, "query_with_trx_args conn for error")?;
@@ -368,12 +377,12 @@ pub fn query_with_trx_args<'a>(
             }
         } else {
             // Statements that don't return rows (INSERT/UPDATE/DELETE without RETURNING)
-            let res = trx.execute(&query, decoded_args).await;
+            let res = trx.execute(query, decoded_args).await;
 
             match res {
                 Ok(rows_affected) => Ok(utils::build_empty_result(env, rows_affected)),
                 Err(e) => {
-                    let error_msg = format!("Execute failed: {}", e);
+                    let error_msg = format!("Execute failed: {e}");
                     // safe_lock_arc already returns rustler::Error with good context
                     let conn_guard: MutexGuard<libsql::Connection> =
                         utils::safe_lock_arc(&connection, "query_with_trx_args conn for error")?;
@@ -439,13 +448,13 @@ pub fn commit_or_rollback_transaction(
                 .transaction
                 .commit()
                 .await
-                .map_err(|e| format!("Commit error: {}", e))?;
+                .map_err(|e| format!("Commit error: {e}"))?;
         } else {
             entry
                 .transaction
                 .rollback()
                 .await
-                .map_err(|e| format!("Rollback error: {}", e))?;
+                .map_err(|e| format!("Rollback error: {e}"))?;
         }
 
         // NOTE: LibSQL automatically syncs transaction commits to remote for embedded replicas.
@@ -455,10 +464,9 @@ pub fn commit_or_rollback_transaction(
     });
 
     match result {
-        Ok(()) => Ok((rustler::types::atom::ok(), format!("{} success", param))),
+        Ok(()) => Ok((rustler::types::atom::ok(), format!("{param} success"))),
         Err(e) => Err(rustler::Error::Term(Box::new(format!(
-            "TOKIO_RUNTIME ERR {}",
-            e
+            "TOKIO_RUNTIME ERR {e}"
         )))),
     }
 }

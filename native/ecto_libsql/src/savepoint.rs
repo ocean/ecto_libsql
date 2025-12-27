@@ -35,14 +35,14 @@ pub fn savepoint(conn_id: &str, trx_id: &str, name: &str) -> NifResult<Atom> {
     // Take transaction entry with ownership verification using guard
     let guard = TransactionEntryGuard::take(trx_id, conn_id)?;
 
-    let sql = format!("SAVEPOINT {}", name);
+    let sql = format!("SAVEPOINT {name}");
 
     TOKIO_RUNTIME.block_on(async {
         guard
             .transaction()?
             .execute(&sql, Vec::<Value>::new())
             .await
-            .map_err(|e| rustler::Error::Term(Box::new(format!("Savepoint failed: {}", e))))
+            .map_err(|e| rustler::Error::Term(Box::new(format!("Savepoint failed: {e}"))))
     })?;
 
     // Guard automatically re-inserts the transaction on drop
@@ -69,14 +69,14 @@ pub fn release_savepoint(conn_id: &str, trx_id: &str, name: &str) -> NifResult<A
     // Take transaction entry with ownership verification using guard
     let guard = TransactionEntryGuard::take(trx_id, conn_id)?;
 
-    let sql = format!("RELEASE SAVEPOINT {}", name);
+    let sql = format!("RELEASE SAVEPOINT {name}");
 
     TOKIO_RUNTIME.block_on(async {
         guard
             .transaction()?
             .execute(&sql, Vec::<Value>::new())
             .await
-            .map_err(|e| rustler::Error::Term(Box::new(format!("Release savepoint failed: {}", e))))
+            .map_err(|e| rustler::Error::Term(Box::new(format!("Release savepoint failed: {e}"))))
     })?;
 
     // Guard automatically re-inserts the transaction on drop
@@ -103,7 +103,7 @@ pub fn rollback_to_savepoint(conn_id: &str, trx_id: &str, name: &str) -> NifResu
     // Take transaction entry with ownership verification using guard
     let guard = TransactionEntryGuard::take(trx_id, conn_id)?;
 
-    let sql = format!("ROLLBACK TO SAVEPOINT {}", name);
+    let sql = format!("ROLLBACK TO SAVEPOINT {name}");
 
     TOKIO_RUNTIME.block_on(async {
         guard
@@ -111,7 +111,7 @@ pub fn rollback_to_savepoint(conn_id: &str, trx_id: &str, name: &str) -> NifResu
             .execute(&sql, Vec::<Value>::new())
             .await
             .map_err(|e| {
-                rustler::Error::Term(Box::new(format!("Rollback to savepoint failed: {}", e)))
+                rustler::Error::Term(Box::new(format!("Rollback to savepoint failed: {e}")))
             })
     })?;
 
