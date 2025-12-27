@@ -17,9 +17,9 @@ pub fn safe_lock<'a, T>(
     mutex: &'a Mutex<T>,
     context: &str,
 ) -> Result<MutexGuard<'a, T>, rustler::Error> {
-    mutex.lock().map_err(|e| {
-        rustler::Error::Term(Box::new(format!("Mutex poisoned in {}: {}", context, e)))
-    })
+    mutex
+        .lock()
+        .map_err(|e| rustler::Error::Term(Box::new(format!("Mutex poisoned in {context}: {e}"))))
 }
 
 /// Safely lock an Arc<Mutex<T>> with proper error handling
@@ -30,10 +30,7 @@ pub fn safe_lock_arc<'a, T>(
     context: &str,
 ) -> Result<MutexGuard<'a, T>, rustler::Error> {
     arc_mutex.lock().map_err(|e| {
-        rustler::Error::Term(Box::new(format!(
-            "Arc mutex poisoned in {}: {}",
-            context, e
-        )))
+        rustler::Error::Term(Box::new(format!("Arc mutex poisoned in {context}: {e}")))
     })
 }
 
@@ -53,16 +50,16 @@ pub async fn sync_with_timeout(
 
     tokio::time::timeout(timeout, async {
         let client_guard =
-            safe_lock_arc(client, "sync_with_timeout client").map_err(|e| format!("{:?}", e))?;
+            safe_lock_arc(client, "sync_with_timeout client").map_err(|e| format!("{e:?}"))?;
         client_guard
             .db
             .sync()
             .await
-            .map_err(|e| format!("Sync error: {}", e))?;
+            .map_err(|e| format!("Sync error: {e}"))?;
         Ok::<_, String>(())
     })
     .await
-    .map_err(|_| format!("Sync timeout after {} seconds", timeout_secs))?
+    .map_err(|_| format!("Sync timeout after {timeout_secs} seconds"))?
 }
 
 /// Build an empty result map for write operations (INSERT/UPDATE/DELETE without RETURNING)
@@ -119,7 +116,7 @@ pub async fn enhance_constraint_error(
         .iter()
         .map(|part| {
             let split: Vec<&str> = part.trim().split('.').collect();
-            split.last().unwrap_or(&"").to_string()
+            split.last().copied().unwrap_or("").to_string()
         })
         .collect();
 
@@ -135,21 +132,21 @@ pub async fn enhance_constraint_error(
     let mut rows = conn
         .query(&pragma_query, params)
         .await
-        .map_err(|e| format!("Failed to query index list: {}", e))?;
+        .map_err(|e| format!("Failed to query index list: {e}"))?;
 
     // Find unique indexes and check their columns
     while let Some(row) = rows
         .next()
         .await
-        .map_err(|e| format!("Failed to read index list row: {}", e))?
+        .map_err(|e| format!("Failed to read index list row: {e}"))?
     {
         // Column 1 is the index name, column 2 is unique flag
         let index_name: String = row
             .get(1)
-            .map_err(|e| format!("Failed to get index name: {}", e))?;
+            .map_err(|e| format!("Failed to get index name: {e}"))?;
         let is_unique: i64 = row
             .get(2)
-            .map_err(|e| format!("Failed to get unique flag: {}", e))?;
+            .map_err(|e| format!("Failed to get unique flag: {e}"))?;
 
         if is_unique != 1 {
             continue;
@@ -161,18 +158,18 @@ pub async fn enhance_constraint_error(
         let mut info_rows = conn
             .query(&info_query, info_params)
             .await
-            .map_err(|e| format!("Failed to query index info: {}", e))?;
+            .map_err(|e| format!("Failed to query index info: {e}"))?;
 
         let mut index_columns = Vec::new();
         while let Some(info_row) = info_rows
             .next()
             .await
-            .map_err(|e| format!("Failed to read index info row: {}", e))?
+            .map_err(|e| format!("Failed to read index info row: {e}"))?
         {
             // Column 2 is the column name
             let col_name: String = info_row
                 .get(2)
-                .map_err(|e| format!("Failed to get column name: {}", e))?;
+                .map_err(|e| format!("Failed to get column name: {e}"))?;
             index_columns.push(col_name);
         }
 
@@ -210,7 +207,7 @@ pub async fn collect_rows<'a>(env: Env<'a>, mut rows: Rows) -> Result<Term<'a>, 
                 if let Some(name) = row_result.column_name(i as i32) {
                     column_names.push(name.to_string());
                 } else {
-                    column_names.push(format!("col{}", i));
+                    column_names.push(format!("col{i}"));
                 }
             }
         }
@@ -228,8 +225,7 @@ pub async fn collect_rows<'a>(env: Env<'a>, mut rows: Rows) -> Result<Term<'a>, 
                             .unwrap_or(&"unknown".to_string())
                             .clone();
                         rustler::Error::Term(Box::new(format!(
-                            "Failed to allocate binary for column '{}' (index {})",
-                            col_name, i
+                            "Failed to allocate binary for column '{col_name}' (index {i})"
                         )))
                     })
                     .map(|mut owned| {
@@ -243,8 +239,7 @@ pub async fn collect_rows<'a>(env: Env<'a>, mut rows: Rows) -> Result<Term<'a>, 
                         .unwrap_or(&"unknown".to_string())
                         .clone();
                     return Err(rustler::Error::Term(Box::new(format!(
-                        "Failed to read column '{}' (index {}): {}",
-                        col_name, i, err
+                        "Failed to read column '{col_name}' (index {i}): {err}"
                     ))));
                 }
             };
@@ -422,7 +417,7 @@ pub fn decode_term_to_value(term: Term) -> Result<Value, String> {
         if atom == blob() {
             Ok(Value::Blob(data))
         } else {
-            Err(format!("Unsupported atom tuple: {:?}", atom))
+            Err(format!("Unsupported atom tuple: {atom:?}"))
         }
     } else if let Ok(v) = term.decode::<Binary>() {
         // Handle Elixir binaries (including BLOBs)
@@ -430,6 +425,6 @@ pub fn decode_term_to_value(term: Term) -> Result<Value, String> {
     } else if let Ok(v) = term.decode::<Vec<u8>>() {
         Ok(Value::Blob(v))
     } else {
-        Err(format!("Unsupported argument type: {:?}", term))
+        Err(format!("Unsupported argument type: {term:?}"))
     }
 }

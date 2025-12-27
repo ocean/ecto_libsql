@@ -430,7 +430,7 @@ mod should_use_query_tests {
         let long_select = format!(
             "SELECT {} FROM users WHERE id = 1",
             (0..1000)
-                .map(|i| format!("col{}", i))
+                .map(|i| format!("col{i}"))
                 .collect::<Vec<_>>()
                 .join(", ")
         );
@@ -442,7 +442,7 @@ mod should_use_query_tests {
         let long_insert = format!(
             "INSERT INTO users ({}) VALUES ({})",
             (0..500)
-                .map(|i| format!("col{}", i))
+                .map(|i| format!("col{i}"))
                 .collect::<Vec<_>>()
                 .join(", "),
             (0..500)
@@ -458,7 +458,7 @@ mod should_use_query_tests {
         let long_insert_with_returning = format!(
             "INSERT INTO users ({}) VALUES ({}) RETURNING id",
             (0..500)
-                .map(|i| format!("col{}", i))
+                .map(|i| format!("col{i}"))
                 .collect::<Vec<_>>()
                 .join(", "),
             (0..500)

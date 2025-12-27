@@ -54,7 +54,7 @@ pub fn prepare_statement(conn_id: &str, sql: &str) -> NifResult<String> {
         conn_guard
             .prepare(&sql_to_prepare)
             .await
-            .map_err(|e| rustler::Error::Term(Box::new(format!("Prepare failed: {}", e))))
+            .map_err(|e| rustler::Error::Term(Box::new(format!("Prepare failed: {e}"))))
     });
 
     match stmt_result {
@@ -133,7 +133,7 @@ pub fn query_prepared<'a>(
             Ok(rows) => {
                 let collected = utils::collect_rows(env, rows)
                     .await
-                    .map_err(|e| rustler::Error::Term(Box::new(format!("{:?}", e))))?;
+                    .map_err(|e| rustler::Error::Term(Box::new(format!("{e:?}"))))?;
 
                 Ok(collected)
             }
@@ -209,7 +209,7 @@ pub fn execute_prepared<'a>(
         let affected = stmt_guard
             .execute(decoded_args)
             .await
-            .map_err(|e| rustler::Error::Term(Box::new(format!("Execute failed: {}", e))))?;
+            .map_err(|e| rustler::Error::Term(Box::new(format!("Execute failed: {e}"))))?;
 
         // NOTE: LibSQL automatically syncs writes to remote for embedded replicas.
         // No manual sync needed here.
@@ -385,7 +385,7 @@ pub fn statement_parameter_name(
     let stmt_guard = utils::safe_lock_arc(&cached_stmt, "statement_parameter_name stmt")?;
 
     // SQLite uses 1-based parameter indices
-    let param_name = stmt_guard.parameter_name(idx).map(|s| s.to_string());
+    let param_name = stmt_guard.parameter_name(idx).map(ToString::to_string);
 
     Ok(param_name)
 }
@@ -502,9 +502,8 @@ pub fn get_statement_columns(
             let name = col.name().to_string();
             let origin_name = col
                 .origin_name()
-                .map(|s| s.to_string())
-                .unwrap_or_else(|| name.clone());
-            let decl_type = col.decl_type().map(|s| s.to_string());
+                .map_or_else(|| name.clone(), ToString::to_string);
+            let decl_type = col.decl_type().map(ToString::to_string);
             (name, origin_name, decl_type)
         })
         .collect();

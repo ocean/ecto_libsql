@@ -46,7 +46,7 @@ pub fn execute_batch<'a>(
     let mut batch_stmts: Vec<(String, Vec<Value>)> = Vec::new();
     for stmt_term in statements {
         let (query, args): (String, Vec<Term>) = stmt_term.decode().map_err(|e| {
-            rustler::Error::Term(Box::new(format!("Failed to decode statement: {:?}", e)))
+            rustler::Error::Term(Box::new(format!("Failed to decode statement: {e:?}")))
         })?;
 
         let decoded_args: Vec<Value> = args
@@ -128,7 +128,7 @@ pub fn execute_transactional_batch<'a>(
     let mut batch_stmts: Vec<(String, Vec<Value>)> = Vec::new();
     for stmt_term in statements {
         let (query, args): (String, Vec<Term>) = stmt_term.decode().map_err(|e| {
-            rustler::Error::Term(Box::new(format!("Failed to decode statement: {:?}", e)))
+            rustler::Error::Term(Box::new(format!("Failed to decode statement: {e:?}")))
         })?;
 
         let decoded_args: Vec<Value> = args
