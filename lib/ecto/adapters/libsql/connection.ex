@@ -318,11 +318,13 @@ defmodule Ecto.Adapters.LibSql.Connection do
       reference_on_update(ref.on_update)
   end
 
+  defp reference_on_delete(nil), do: ""
   defp reference_on_delete(:nothing), do: ""
   defp reference_on_delete(:delete_all), do: " ON DELETE CASCADE"
   defp reference_on_delete(:nilify_all), do: " ON DELETE SET NULL"
   defp reference_on_delete(:restrict), do: " ON DELETE RESTRICT"
 
+  defp reference_on_update(nil), do: ""
   defp reference_on_update(:nothing), do: ""
   defp reference_on_update(:update_all), do: " ON UPDATE CASCADE"
   defp reference_on_update(:nilify_all), do: " ON UPDATE SET NULL"

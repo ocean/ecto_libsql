@@ -462,25 +462,52 @@ defmodule EctoLibSql.Native do
     commit_or_rollback_transaction(trx_id, conn_id, mode, syncx, "rollback")
   end
 
-  @doc false
-  def detect_command(query) do
+  @doc """
+  Detects the SQL command type from a query string.
+
+  Returns an atom representing the command type, or `:unknown` for
+  unrecognised commands.
+
+  ## Examples
+
+      iex> EctoLibSql.Native.detect_command("SELECT * FROM users")
+      :select
+
+      iex> EctoLibSql.Native.detect_command("INSERT INTO users VALUES (1)")
+      :insert
+
+  """
+  @spec detect_command(String.t()) :: EctoLibSql.Result.command_type()
+  def detect_command(query) when is_binary(query) do
     query
-    |> String.downcase()
-    |> String.trim()
-    |> String.split()
-    |> List.first()
-    |> case do
-      "select" -> :select
-      "insert" -> :insert
-      "update" -> :update
-      "delete" -> :delete
-      "begin" -> :begin
-      "commit" -> :commit
-      "create" -> :create
-      "rollback" -> :rollback
-      _ -> :unknown
-    end
+    |> String.trim_leading()
+    |> extract_first_word()
+    |> command_atom()
   end
+
+  def detect_command(_), do: :unknown
+
+  defp extract_first_word(query) do
+    # Extract first word more efficiently - stop at first whitespace
+    case :binary.match(query, [" ", "\t", "\n", "\r", "("]) do
+      {pos, _len} -> binary_part(query, 0, pos)
+      :nomatch -> query
+    end
+    |> String.downcase()
+  end
+
+  defp command_atom("select"), do: :select
+  defp command_atom("insert"), do: :insert
+  defp command_atom("update"), do: :update
+  defp command_atom("delete"), do: :delete
+  defp command_atom("begin"), do: :begin
+  defp command_atom("commit"), do: :commit
+  defp command_atom("create"), do: :create
+  defp command_atom("rollback"), do: :rollback
+  defp command_atom("drop"), do: :create
+  defp command_atom("alter"), do: :create
+  defp command_atom("pragma"), do: :pragma
+  defp command_atom(_), do: :unknown
 
   @doc """
   Prepare a SQL statement for later execution. Returns a statement ID that can be reused.

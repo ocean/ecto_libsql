@@ -73,12 +73,15 @@ defmodule EctoLibSql do
                       Set to 0 to disable (not recommended for production).
 
   """
+  @spec connect(Keyword.t()) :: {:ok, EctoLibSql.State.t()} | {:error, term()}
   def connect(opts) do
-    case EctoLibSql.Native.connect(opts, EctoLibSql.State.detect_mode(opts)) do
+    mode = EctoLibSql.State.detect_mode(opts)
+
+    case EctoLibSql.Native.connect(opts, mode) do
       conn_id when is_binary(conn_id) ->
         state = %EctoLibSql.State{
           conn_id: conn_id,
-          mode: EctoLibSql.State.detect_mode(opts),
+          mode: mode,
           sync: EctoLibSql.State.detect_sync(opts)
         }
 
@@ -90,7 +93,7 @@ defmodule EctoLibSql do
             {:ok, state}
 
           {:error, reason} ->
-            # Log warning but don't fail connection - busy_timeout is an optimization
+            # Log warning but don't fail connection - busy_timeout is an optimisation
             require Logger
             Logger.warning("Failed to set busy_timeout: #{inspect(reason)}")
             {:ok, state}
@@ -108,6 +111,8 @@ defmodule EctoLibSql do
   @doc """
   Pings the current connection to ensure it is still alive.
   """
+  @spec ping(EctoLibSql.State.t()) ::
+          {:ok, EctoLibSql.State.t()} | {:disconnect, :ping_failed, EctoLibSql.State.t()}
   def ping(%EctoLibSql.State{conn_id: conn_id} = state) do
     case EctoLibSql.Native.ping(conn_id) do
       true -> {:ok, state}
@@ -121,8 +126,8 @@ defmodule EctoLibSql do
 
   Removes the connection from the Rust connection registry and cleans up any resources.
   """
-  def disconnect(_opts, %EctoLibSql.State{conn_id: conn_id, trx_id: _trx_id} = state) do
-    # return :ok on success
+  @spec disconnect(Keyword.t(), EctoLibSql.State.t()) :: :ok | {:error, term(), EctoLibSql.State.t()}
+  def disconnect(_opts, %EctoLibSql.State{conn_id: conn_id} = state) do
     EctoLibSql.Native.close_conn(conn_id, :conn_id, state)
   end
 
@@ -131,12 +136,10 @@ defmodule EctoLibSql do
   Executes an SQL query, delegating to transactional or non-transactional logic
   depending on the connection state.
   """
-  def handle_execute(
-        query,
-        args,
-        _opts,
-        %EctoLibSql.State{conn_id: _conn_id, trx_id: trx_id, mode: _mode} = state
-      ) do
+  @spec handle_execute(EctoLibSql.Query.t() | String.t(), list(), Keyword.t(), EctoLibSql.State.t()) ::
+          {:ok, EctoLibSql.Query.t(), EctoLibSql.Result.t(), EctoLibSql.State.t()}
+          | {:error, EctoLibSql.Error.t(), EctoLibSql.State.t()}
+  def handle_execute(query, args, _opts, %EctoLibSql.State{trx_id: trx_id} = state) do
     query_struct =
       case query do
         %EctoLibSql.Query{} -> query

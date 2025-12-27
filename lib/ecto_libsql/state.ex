@@ -20,6 +20,20 @@ defmodule EctoLibSql.State do
 
   """
 
+  @typedoc "Connection mode for LibSQL database connections."
+  @type mode :: :local | :remote | :remote_replica | :unknown
+
+  @typedoc "Sync mode for replica connections."
+  @type sync_mode :: :enable_sync | :disable_sync
+
+  @typedoc "Connection state struct."
+  @type t :: %__MODULE__{
+          conn_id: String.t(),
+          trx_id: String.t() | nil,
+          mode: mode() | nil,
+          sync: sync_mode() | nil
+        }
+
   @enforce_keys [:conn_id]
 
   defstruct [
@@ -44,6 +58,7 @@ defmodule EctoLibSql.State do
       :remote_replica
 
   """
+  @spec detect_mode(Keyword.t()) :: mode()
   def detect_mode(opts) do
     uri = Keyword.get(opts, :uri)
     token = Keyword.get(opts, :auth_token)
@@ -63,20 +78,24 @@ defmodule EctoLibSql.State do
 
   Returns `:enable_sync` if sync is explicitly set to `true`,
   `:disable_sync` otherwise.
+
+  ## Examples
+
+      iex> EctoLibSql.State.detect_sync(sync: true)
+      :enable_sync
+
+      iex> EctoLibSql.State.detect_sync(sync: false)
+      :disable_sync
+
+      iex> EctoLibSql.State.detect_sync([])
+      :disable_sync
+
   """
+  @spec detect_sync(Keyword.t()) :: sync_mode()
   def detect_sync(opts) do
-    has_sync = Keyword.has_key?(opts, :sync)
-
-    case has_sync do
-      true -> get_sync(Keyword.get(opts, :sync))
-      false -> :disable_sync
-    end
-  end
-
-  defp get_sync(val) do
-    case val do
+    case Keyword.get(opts, :sync) do
       true -> :enable_sync
-      false -> :disable_sync
+      _ -> :disable_sync
     end
   end
 end
