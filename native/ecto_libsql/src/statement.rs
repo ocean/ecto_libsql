@@ -44,6 +44,10 @@ pub fn prepare_statement(conn_id: &str, sql: &str) -> NifResult<String> {
         client_guard.client.clone()
     }; // Outer lock dropped here
 
+    // SAFETY: We use TOKIO_RUNTIME.block_on(), which runs the future synchronously on a dedicated
+    // thread pool. This prevents deadlocks that could occur if we were in a true async context
+    // with std::sync::Mutex guards held across await points.
+    #[allow(clippy::await_holding_lock)]
     let stmt_result = TOKIO_RUNTIME.block_on(async {
         let conn_guard = utils::safe_lock_arc(&connection, "prepare_statement conn")?;
 
@@ -112,6 +116,10 @@ pub fn query_prepared<'a>(
     drop(stmt_registry); // Release lock before async operation
     drop(conn_map); // Release lock before async operation
 
+    // SAFETY: We use TOKIO_RUNTIME.block_on(), which runs the future synchronously on a dedicated
+    // thread pool. This prevents deadlocks that could occur if we were in a true async context
+    // with std::sync::Mutex guards held across await points.
+    #[allow(clippy::await_holding_lock)]
     let result = TOKIO_RUNTIME.block_on(async {
         // Use cached statement with reset to clear bindings
         let stmt_guard = utils::safe_lock_arc(&cached_stmt, "query_prepared stmt")?;
@@ -187,6 +195,10 @@ pub fn execute_prepared<'a>(
     drop(stmt_registry); // Release lock before async operation
     drop(conn_map); // Release lock before async operation
 
+    // SAFETY: We use TOKIO_RUNTIME.block_on(), which runs the future synchronously on a dedicated
+    // thread pool. This prevents deadlocks that could occur if we were in a true async context
+    // with std::sync::Mutex guards held across await points.
+    #[allow(clippy::await_holding_lock)]
     let result = TOKIO_RUNTIME.block_on(async {
         // Use cached statement with reset to clear bindings
         let stmt_guard = utils::safe_lock_arc(&cached_stmt, "execute_prepared stmt")?;

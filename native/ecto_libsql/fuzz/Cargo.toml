@@ -1,0 +1,39 @@
+[package]
+name = "ecto_libsql-fuzz"
+version = "0.0.0"
+publish = false
+edition = "2021"
+
+# Standalone workspace to avoid conflicts with parent workspace
+[workspace]
+
+[package.metadata]
+cargo-fuzz = true
+
+[dependencies]
+libfuzzer-sys = "0.4"
+arbitrary = { version = "1", features = ["derive"] }
+
+[dependencies.ecto_libsql]
+path = ".."
+
+[[bin]]
+name = "fuzz_should_use_query"
+path = "fuzz_targets/fuzz_target_1.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_detect_query_type"
+path = "fuzz_targets/fuzz_detect_query_type.rs"
+test = false
+doc = false
+bench = false
+
+[[bin]]
+name = "fuzz_sql_structured"
+path = "fuzz_targets/fuzz_sql_structured.rs"
+test = false
+doc = false
+bench = false

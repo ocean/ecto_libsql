@@ -40,6 +40,11 @@ pub fn safe_lock_arc<'a, T>(
 /// Perform sync with timeout for remote replicas
 ///
 /// Executes a sync operation with a configurable timeout.
+///
+/// # Note on Lock Safety
+/// This function holds a std::sync::Mutex guard across an await point. This is intentional
+/// and safe because it is called within TOKIO_RUNTIME.block_on() which executes synchronously.
+#[allow(clippy::await_holding_lock)]
 pub async fn sync_with_timeout(
     client: &Arc<Mutex<LibSQLConn>>,
     timeout_secs: u64,
@@ -219,7 +224,7 @@ pub async fn collect_rows<'a>(env: Env<'a>, mut rows: Rows) -> Result<Term<'a>, 
                 Ok(Value::Blob(val)) => OwnedBinary::new(val.len())
                     .ok_or_else(|| {
                         let col_name = column_names
-                            .get(i as usize)
+                            .get(i)
                             .unwrap_or(&"unknown".to_string())
                             .clone();
                         rustler::Error::Term(Box::new(format!(
@@ -234,7 +239,7 @@ pub async fn collect_rows<'a>(env: Env<'a>, mut rows: Rows) -> Result<Term<'a>, 
                 Ok(Value::Null) => nil().encode(env),
                 Err(err) => {
                     let col_name = column_names
-                        .get(i as usize)
+                        .get(i)
                         .unwrap_or(&"unknown".to_string())
                         .clone();
                     return Err(rustler::Error::Term(Box::new(format!(
@@ -343,19 +348,17 @@ pub fn should_use_query(sql: &str) -> bool {
     }
 
     // Check if starts with SELECT (case-insensitive)
-    if len - start >= 6 {
-        if (bytes[start] == b'S' || bytes[start] == b's')
-            && (bytes[start + 1] == b'E' || bytes[start + 1] == b'e')
-            && (bytes[start + 2] == b'L' || bytes[start + 2] == b'l')
-            && (bytes[start + 3] == b'E' || bytes[start + 3] == b'e')
-            && (bytes[start + 4] == b'C' || bytes[start + 4] == b'c')
-            && (bytes[start + 5] == b'T' || bytes[start + 5] == b't')
-        {
-            // Verify it's followed by whitespace or end of string
-            if start + 6 >= len || bytes[start + 6].is_ascii_whitespace() {
-                return true;
-            }
-        }
+    if len - start >= 6
+        && (bytes[start] == b'S' || bytes[start] == b's')
+        && (bytes[start + 1] == b'E' || bytes[start + 1] == b'e')
+        && (bytes[start + 2] == b'L' || bytes[start + 2] == b'l')
+        && (bytes[start + 3] == b'E' || bytes[start + 3] == b'e')
+        && (bytes[start + 4] == b'C' || bytes[start + 4] == b'c')
+        && (bytes[start + 5] == b'T' || bytes[start + 5] == b't')
+        // Verify it's followed by whitespace or end of string
+        && (start + 6 >= len || bytes[start + 6].is_ascii_whitespace())
+    {
+        return true;
     }
 
     // Check for RETURNING clause (case-insensitive)

@@ -319,8 +319,8 @@ mod should_use_query_tests {
         ));
 
         let result = should_use_query("SELECT * /* RETURNING */ FROM users");
-        assert_eq!(
-            result, true,
+        assert!(
+            result,
             "Known limitation: RETURNING in block comments is detected"
         );
     }

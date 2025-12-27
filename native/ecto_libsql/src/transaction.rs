@@ -33,7 +33,7 @@ use std::sync::MutexGuard;
 ///
 /// # Usage
 ///
-/// ```rust
+/// ```ignore
 /// // Standard pattern (re-inserts on drop)
 /// let guard = TransactionEntryGuard::take(trx_id, conn_id)?;
 /// let result = TOKIO_RUNTIME.block_on(async {
@@ -43,7 +43,7 @@ use std::sync::MutexGuard;
 /// result.map_err(...)
 /// ```
 ///
-/// ```rust
+/// ```ignore
 /// // Consume pattern (for commit/rollback - no re-insertion)
 /// let guard = TransactionEntryGuard::take(trx_id, conn_id)?;
 /// let entry = guard.consume()?;
@@ -175,6 +175,10 @@ pub fn begin_transaction(conn_id: &str) -> NifResult<String> {
         client_guard.client.clone()
     }; // Outer lock dropped here
 
+    // SAFETY: We use TOKIO_RUNTIME.block_on(), which runs the future synchronously on a dedicated
+    // thread pool. This prevents deadlocks that could occur if we were in a true async context
+    // with std::sync::Mutex guards held across await points.
+    #[allow(clippy::await_holding_lock)]
     let trx = TOKIO_RUNTIME.block_on(async {
         // Lock must be held across await because transaction() returns a Future that
         // borrows from the Connection. We cannot drop the guard before awaiting.
@@ -238,6 +242,10 @@ pub fn begin_transaction_with_behavior(conn_id: &str, behavior: Atom) -> NifResu
         client_guard.client.clone()
     }; // Outer lock dropped here
 
+    // SAFETY: We use TOKIO_RUNTIME.block_on(), which runs the future synchronously on a dedicated
+    // thread pool. This prevents deadlocks that could occur if we were in a true async context
+    // with std::sync::Mutex guards held across await points.
+    #[allow(clippy::await_holding_lock)]
     let trx = TOKIO_RUNTIME.block_on(async {
         // Lock must be held across await because transaction_with_behavior() returns a Future
         // that borrows from the Connection. We cannot drop the guard before awaiting.
@@ -295,7 +303,7 @@ pub fn execute_with_transaction<'a>(
     let trx = guard.transaction()?;
 
     let result = TOKIO_RUNTIME
-        .block_on(async { trx.execute(&query, decoded_args).await })
+        .block_on(async { trx.execute(query, decoded_args).await })
         .map_err(|e| rustler::Error::Term(Box::new(format!("Execute failed: {}", e))));
     // Guard automatically re-inserts the entry on drop
     result
@@ -348,10 +356,14 @@ pub fn query_with_trx_args<'a>(
     };
 
     // Execute async operation without holding the lock
+    // SAFETY: We use TOKIO_RUNTIME.block_on(), which runs the future synchronously on a dedicated
+    // thread pool. This prevents deadlocks that could occur if we were in a true async context
+    // with std::sync::Mutex guards held across await points.
+    #[allow(clippy::await_holding_lock)]
     let result = TOKIO_RUNTIME.block_on(async {
         if use_query {
             // Statements that return rows (SELECT, or INSERT/UPDATE/DELETE with RETURNING)
-            let res = trx.query(&query, decoded_args).await;
+            let res = trx.query(query, decoded_args).await;
 
             match res {
                 Ok(res_rows) => utils::collect_rows(env, res_rows).await,
@@ -368,7 +380,7 @@ pub fn query_with_trx_args<'a>(
             }
         } else {
             // Statements that don't return rows (INSERT/UPDATE/DELETE without RETURNING)
-            let res = trx.execute(&query, decoded_args).await;
+            let res = trx.execute(query, decoded_args).await;
 
             match res {
                 Ok(rows_affected) => Ok(utils::build_empty_result(env, rows_affected)),

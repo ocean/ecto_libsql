@@ -37,6 +37,10 @@ pub fn get_frame_number(conn_id: &str) -> NifResult<u64> {
         .clone();
     drop(conn_map);
 
+    // SAFETY: We use TOKIO_RUNTIME.block_on(), which runs the future synchronously on a dedicated
+    // thread pool. This prevents deadlocks that could occur if we were in a true async context
+    // with std::sync::Mutex guards held across await points.
+    #[allow(clippy::await_holding_lock)]
     let result = TOKIO_RUNTIME.block_on(async {
         // Lock must be held for the entire async operation since Database is not cloneable
         let client_guard = safe_lock_arc(&client, "get_frame_number client")
@@ -79,6 +83,10 @@ pub fn sync_until(conn_id: &str, frame_no: u64) -> NifResult<Atom> {
         .clone();
     drop(conn_map);
 
+    // SAFETY: We use TOKIO_RUNTIME.block_on(), which runs the future synchronously on a dedicated
+    // thread pool. This prevents deadlocks that could occur if we were in a true async context
+    // with std::sync::Mutex guards held across await points.
+    #[allow(clippy::await_holding_lock)]
     let result = TOKIO_RUNTIME.block_on(async {
         // Lock must be held for the entire async operation since Database is not cloneable
         let client_guard = safe_lock_arc(&client, "sync_until client")
@@ -124,6 +132,10 @@ pub fn flush_replicator(conn_id: &str) -> NifResult<u64> {
         .clone();
     drop(conn_map);
 
+    // SAFETY: We use TOKIO_RUNTIME.block_on(), which runs the future synchronously on a dedicated
+    // thread pool. This prevents deadlocks that could occur if we were in a true async context
+    // with std::sync::Mutex guards held across await points.
+    #[allow(clippy::await_holding_lock)]
     let result: Result<u64, String> = TOKIO_RUNTIME.block_on(async {
         // Lock must be held for the entire async operation since Database is not cloneable
         let client_guard = safe_lock_arc(&client, "flush_replicator client")

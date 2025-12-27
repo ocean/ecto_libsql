@@ -58,20 +58,18 @@ pub fn execute_batch<'a>(
         batch_stmts.push((query, decoded_args));
     }
 
+    // SAFETY: We use TOKIO_RUNTIME.block_on(), which runs the future synchronously on a dedicated
+    // thread pool. This prevents deadlocks that could occur if we were in a true async context
+    // with std::sync::Mutex guards held across await points.
+    #[allow(clippy::await_holding_lock)]
     TOKIO_RUNTIME.block_on(async {
         let mut all_results: Vec<Term<'a>> = Vec::new();
 
         // Execute each statement sequentially
         for (sql, args) in &batch_stmts {
-            // SAFETY: We're inside TOKIO_RUNTIME.block_on(), so this is synchronous execution.
-            // The std::sync::Mutex guards are safe to hold across await points here because
-            // we're not in a true async context - block_on runs the future to completion.
-            #[allow(clippy::await_holding_lock)]
-            let result = {
-                let client_guard = safe_lock_arc(&client, "execute_batch client")?;
-                let conn_guard = safe_lock_arc(&client_guard.client, "execute_batch conn")?;
-                conn_guard.query(sql, args.clone()).await
-            };
+            let client_guard = safe_lock_arc(&client, "execute_batch client")?;
+            let conn_guard = safe_lock_arc(&client_guard.client, "execute_batch conn")?;
+            let result = conn_guard.query(sql, args.clone()).await;
 
             match result {
                 Ok(rows) => {
@@ -142,19 +140,19 @@ pub fn execute_transactional_batch<'a>(
         batch_stmts.push((query, decoded_args));
     }
 
+    // SAFETY: We use TOKIO_RUNTIME.block_on(), which runs the future synchronously on a dedicated
+    // thread pool. This prevents deadlocks that could occur if we were in a true async context
+    // with std::sync::Mutex guards held across await points.
+    #[allow(clippy::await_holding_lock)]
     TOKIO_RUNTIME.block_on(async {
-        // SAFETY: We're inside TOKIO_RUNTIME.block_on(), so this is synchronous execution.
-        // The std::sync::Mutex guards are safe to hold across await points here because
-        // we're not in a true async context - block_on runs the future to completion.
-        #[allow(clippy::await_holding_lock)]
-        let trx = {
-            let client_guard = safe_lock_arc(&client, "execute_transactional_batch client")?;
-            let conn_guard =
-                safe_lock_arc(&client_guard.client, "execute_transactional_batch conn")?;
-            conn_guard.transaction().await.map_err(|e| {
-                rustler::Error::Term(Box::new(format!("Begin transaction failed: {e}")))
-            })?
-        };
+        let client_guard = safe_lock_arc(&client, "execute_transactional_batch client")?;
+        let conn_guard = safe_lock_arc(&client_guard.client, "execute_transactional_batch conn")?;
+        let trx = conn_guard.transaction().await.map_err(|e| {
+            rustler::Error::Term(Box::new(format!("Begin transaction failed: {e}")))
+        })?;
+        // Drop guards after transaction is started - the transaction owns its own connection
+        drop(conn_guard);
+        drop(client_guard);
 
         let mut all_results: Vec<Term<'a>> = Vec::new();
 
@@ -209,19 +207,20 @@ pub fn execute_batch_native<'a>(env: Env<'a>, conn_id: &str, sql: &str) -> NifRe
         let client = client.clone();
         drop(conn_map); // Release lock before async operation
 
+        // SAFETY: We use TOKIO_RUNTIME.block_on(), which runs the future synchronously on a dedicated
+        // thread pool. This prevents deadlocks that could occur if we were in a true async context
+        // with std::sync::Mutex guards held across await points.
+        #[allow(clippy::await_holding_lock)]
         let result = TOKIO_RUNTIME.block_on(async {
-            // SAFETY: We're inside TOKIO_RUNTIME.block_on(), so this is synchronous execution.
-            // The std::sync::Mutex guards are safe to hold across await points here because
-            // we're not in a true async context - block_on runs the future to completion.
-            #[allow(clippy::await_holding_lock)]
-            let mut batch_rows = {
-                let client_guard = safe_lock_arc(&client, "execute_batch_native client")?;
-                let conn_guard = safe_lock_arc(&client_guard.client, "execute_batch_native conn")?;
-                conn_guard
-                    .execute_batch(sql)
-                    .await
-                    .map_err(|e| rustler::Error::Term(Box::new(format!("batch failed: {e}"))))?
-            };
+            let client_guard = safe_lock_arc(&client, "execute_batch_native client")?;
+            let conn_guard = safe_lock_arc(&client_guard.client, "execute_batch_native conn")?;
+            let mut batch_rows = conn_guard
+                .execute_batch(sql)
+                .await
+                .map_err(|e| rustler::Error::Term(Box::new(format!("batch failed: {e}"))))?;
+            // Drop guards after batch is retrieved
+            drop(conn_guard);
+            drop(client_guard);
 
             // Collect all results
             let mut results: Vec<Term<'a>> = Vec::new();
@@ -279,25 +278,26 @@ pub fn execute_transactional_batch_native<'a>(
         let client = client.clone();
         drop(conn_map); // Release lock before async operation
 
+        // SAFETY: We use TOKIO_RUNTIME.block_on(), which runs the future synchronously on a dedicated
+        // thread pool. This prevents deadlocks that could occur if we were in a true async context
+        // with std::sync::Mutex guards held across await points.
+        #[allow(clippy::await_holding_lock)]
         let result = TOKIO_RUNTIME.block_on(async {
-            // SAFETY: We're inside TOKIO_RUNTIME.block_on(), so this is synchronous execution.
-            // The std::sync::Mutex guards are safe to hold across await points here because
-            // we're not in a true async context - block_on runs the future to completion.
-            #[allow(clippy::await_holding_lock)]
-            let mut batch_rows = {
-                let client_guard =
-                    safe_lock_arc(&client, "execute_transactional_batch_native client")?;
-                let conn_guard = safe_lock_arc(
-                    &client_guard.client,
-                    "execute_transactional_batch_native conn",
-                )?;
+            let client_guard = safe_lock_arc(&client, "execute_transactional_batch_native client")?;
+            let conn_guard = safe_lock_arc(
+                &client_guard.client,
+                "execute_transactional_batch_native conn",
+            )?;
+            let mut batch_rows =
                 conn_guard
                     .execute_transactional_batch(sql)
                     .await
                     .map_err(|e| {
                         rustler::Error::Term(Box::new(format!("transactional batch failed: {e}")))
-                    })?
-            };
+                    })?;
+            // Drop guards after batch is retrieved
+            drop(conn_guard);
+            drop(client_guard);
 
             // Collect all results
             let mut results: Vec<Term<'a>> = Vec::new();
