@@ -60,13 +60,13 @@ done
 ## Understanding Output
 
 A successful run looks like:
-```
+```bash
 #123456	DONE   cov: 74 ft: 250 corp: 147/6759b
 Done 123456 runs in 5 second(s)
 ```
 
 If a crash is found:
-```
+```bash
 ==12345== ERROR: libFuzzer: deadly signal
 Crash saved to artifacts/fuzz_should_use_query/crash-...
 ```
