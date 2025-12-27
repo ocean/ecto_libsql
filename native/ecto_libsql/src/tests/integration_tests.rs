@@ -231,18 +231,18 @@ async fn test_prepared_statement() {
         .prepare("SELECT name FROM users WHERE id = ?1")
         .await
         .unwrap();
-    let mut rows1 = stmt1.query(vec![Value::Integer(1)]).await.unwrap();
-    let row1 = rows1.next().await.unwrap().unwrap();
-    assert_eq!(row1.get::<String>(0).unwrap(), "Alice");
+    let mut result_rows_1 = stmt1.query(vec![Value::Integer(1)]).await.unwrap();
+    let first_row = result_rows_1.next().await.unwrap().unwrap();
+    assert_eq!(first_row.get::<String>(0).unwrap(), "Alice");
 
     // Test prepared statement with second parameter (prepare again, mimicking NIF behavior)
     let stmt2 = conn
         .prepare("SELECT name FROM users WHERE id = ?1")
         .await
         .unwrap();
-    let mut rows2 = stmt2.query(vec![Value::Integer(2)]).await.unwrap();
-    let row2 = rows2.next().await.unwrap().unwrap();
-    assert_eq!(row2.get::<String>(0).unwrap(), "Bob");
+    let mut result_rows_2 = stmt2.query(vec![Value::Integer(2)]).await.unwrap();
+    let second_row = result_rows_2.next().await.unwrap().unwrap();
+    assert_eq!(second_row.get::<String>(0).unwrap(), "Bob");
 
     cleanup_test_db(&db_path);
 }

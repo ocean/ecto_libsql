@@ -1,6 +1,6 @@
-//! EctoLibSql: Ecto adapter for LibSQL/Turso databases
+//! `EctoLibSql`: Ecto adapter for `LibSQL`/Turso databases
 //!
-//! This is the root module for the EctoLibSql NIF (Native Implemented Function) library.
+//! This is the root module for the `EctoLibSql` NIF (Native Implemented Function) library.
 //! It declares and organizes all submodules handling different aspects of database operations.
 pub mod batch;
 pub mod connection;

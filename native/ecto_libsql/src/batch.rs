@@ -1,9 +1,9 @@
-/// Batch operations for LibSQL/Turso databases
+/// Batch operations for `LibSQL`/Turso databases
 ///
 /// This module handles batch execution of multiple SQL statements, both with
 /// and without transactional semantics. Supports both statement-level batch
 /// execution (with parameterized queries) and native SQL batch execution.
-use crate::constants::*;
+use crate::constants::{CONNECTION_REGISTRY, TOKIO_RUNTIME};
 use crate::utils::{collect_rows, decode_term_to_value, safe_lock, safe_lock_arc};
 use libsql::Value;
 use rustler::types::atom::nil;
@@ -14,14 +14,14 @@ use rustler::{Atom, Encoder, Env, NifResult, Term};
 /// Each statement is executed independently - if one fails, others may still complete.
 /// Statements are provided as a list of `{sql, params}` tuples.
 ///
-/// **Automatic Sync**: For remote replicas, LibSQL automatically syncs writes to the
+/// **Automatic Sync**: For remote replicas, `LibSQL` automatically syncs writes to the
 /// remote database. No manual sync is needed.
 ///
 /// # Arguments
 /// - `env`: Elixir environment
 /// - `conn_id`: Database connection ID
 /// - `_mode`: Connection mode (unused, kept for API compatibility)
-/// - `_syncx`: Sync mode (unused, LibSQL handles sync automatically)
+/// - `_syncx`: Sync mode (unused, `LibSQL` handles sync automatically)
 /// - `statements`: List of `{sql, params}` tuples
 ///
 /// Returns a list of result maps (one per statement)
@@ -62,21 +62,27 @@ pub fn execute_batch<'a>(
         let mut all_results: Vec<Term<'a>> = Vec::new();
 
         // Execute each statement sequentially
-        for (sql, args) in batch_stmts.iter() {
-            let client_guard = safe_lock_arc(&client, "execute_batch client")?;
-            let conn_guard = safe_lock_arc(&client_guard.client, "execute_batch conn")?;
+        for (sql, args) in &batch_stmts {
+            // SAFETY: We're inside TOKIO_RUNTIME.block_on(), so this is synchronous execution.
+            // The std::sync::Mutex guards are safe to hold across await points here because
+            // we're not in a true async context - block_on runs the future to completion.
+            #[allow(clippy::await_holding_lock)]
+            let result = {
+                let client_guard = safe_lock_arc(&client, "execute_batch client")?;
+                let conn_guard = safe_lock_arc(&client_guard.client, "execute_batch conn")?;
+                conn_guard.query(sql, args.clone()).await
+            };
 
-            match conn_guard.query(sql, args.clone()).await {
+            match result {
                 Ok(rows) => {
                     let collected = collect_rows(env, rows)
                         .await
-                        .map_err(|e| rustler::Error::Term(Box::new(format!("{:?}", e))))?;
+                        .map_err(|e| rustler::Error::Term(Box::new(format!("{e:?}"))))?;
                     all_results.push(collected);
                 }
                 Err(e) => {
                     return Err(rustler::Error::Term(Box::new(format!(
-                        "Batch statement error: {}",
-                        e
+                        "Batch statement error: {e}"
                     ))));
                 }
             }
@@ -91,14 +97,14 @@ pub fn execute_batch<'a>(
 /// All statements execute in a single transaction. If any statement fails,
 /// all changes are rolled back. Statements are provided as `{sql, params}` tuples.
 ///
-/// **Automatic Sync**: For remote replicas, LibSQL automatically syncs writes to the
+/// **Automatic Sync**: For remote replicas, `LibSQL` automatically syncs writes to the
 /// remote database after the transaction commits.
 ///
 /// # Arguments
 /// - `env`: Elixir environment
 /// - `conn_id`: Database connection ID
 /// - `_mode`: Connection mode (unused, kept for API compatibility)
-/// - `_syncx`: Sync mode (unused, LibSQL handles sync automatically)
+/// - `_syncx`: Sync mode (unused, `LibSQL` handles sync automatically)
 /// - `statements`: List of `{sql, params}` tuples
 ///
 /// Returns a list of result maps (one per statement) on success, or rolls back all
@@ -137,31 +143,35 @@ pub fn execute_transactional_batch<'a>(
     }
 
     TOKIO_RUNTIME.block_on(async {
-        // Start a transaction
-        let client_guard = safe_lock_arc(&client, "execute_transactional_batch client")?;
-        let conn_guard = safe_lock_arc(&client_guard.client, "execute_transactional_batch conn")?;
-
-        let trx = conn_guard.transaction().await.map_err(|e| {
-            rustler::Error::Term(Box::new(format!("Begin transaction failed: {}", e)))
-        })?;
+        // SAFETY: We're inside TOKIO_RUNTIME.block_on(), so this is synchronous execution.
+        // The std::sync::Mutex guards are safe to hold across await points here because
+        // we're not in a true async context - block_on runs the future to completion.
+        #[allow(clippy::await_holding_lock)]
+        let trx = {
+            let client_guard = safe_lock_arc(&client, "execute_transactional_batch client")?;
+            let conn_guard =
+                safe_lock_arc(&client_guard.client, "execute_transactional_batch conn")?;
+            conn_guard.transaction().await.map_err(|e| {
+                rustler::Error::Term(Box::new(format!("Begin transaction failed: {e}")))
+            })?
+        };
 
         let mut all_results: Vec<Term<'a>> = Vec::new();
 
         // Execute each statement in the transaction
-        for (sql, args) in batch_stmts.iter() {
+        for (sql, args) in &batch_stmts {
             match trx.query(sql, args.clone()).await {
                 Ok(rows) => {
                     let collected = collect_rows(env, rows)
                         .await
-                        .map_err(|e| rustler::Error::Term(Box::new(format!("{:?}", e))))?;
+                        .map_err(|e| rustler::Error::Term(Box::new(format!("{e:?}"))))?;
                     all_results.push(collected);
                 }
                 Err(e) => {
                     // Rollback on error
                     let _ = trx.rollback().await;
                     return Err(rustler::Error::Term(Box::new(format!(
-                        "Batch statement error: {}",
-                        e
+                        "Batch statement error: {e}"
                     ))));
                 }
             }
@@ -170,7 +180,7 @@ pub fn execute_transactional_batch<'a>(
         // Commit the transaction
         trx.commit()
             .await
-            .map_err(|e| rustler::Error::Term(Box::new(format!("Commit failed: {}", e))))?;
+            .map_err(|e| rustler::Error::Term(Box::new(format!("Commit failed: {e}"))))?;
 
         Ok(all_results.encode(env))
     })
@@ -178,7 +188,7 @@ pub fn execute_transactional_batch<'a>(
 
 /// Execute multiple SQL statements from a single string (semicolon-separated).
 ///
-/// Uses LibSQL's native batch execution for better performance. Each statement
+/// Uses `LibSQL`'s native batch execution for better performance. Each statement
 /// is executed independently - if one fails, others may still complete.
 ///
 /// This is useful for running SQL scripts or migrations where multiple statements
@@ -200,13 +210,18 @@ pub fn execute_batch_native<'a>(env: Env<'a>, conn_id: &str, sql: &str) -> NifRe
         drop(conn_map); // Release lock before async operation
 
         let result = TOKIO_RUNTIME.block_on(async {
-            let client_guard = safe_lock_arc(&client, "execute_batch_native client")?;
-            let conn_guard = safe_lock_arc(&client_guard.client, "execute_batch_native conn")?;
-
-            let mut batch_rows = conn_guard
-                .execute_batch(sql)
-                .await
-                .map_err(|e| rustler::Error::Term(Box::new(format!("batch failed: {}", e))))?;
+            // SAFETY: We're inside TOKIO_RUNTIME.block_on(), so this is synchronous execution.
+            // The std::sync::Mutex guards are safe to hold across await points here because
+            // we're not in a true async context - block_on runs the future to completion.
+            #[allow(clippy::await_holding_lock)]
+            let mut batch_rows = {
+                let client_guard = safe_lock_arc(&client, "execute_batch_native client")?;
+                let conn_guard = safe_lock_arc(&client_guard.client, "execute_batch_native conn")?;
+                conn_guard
+                    .execute_batch(sql)
+                    .await
+                    .map_err(|e| rustler::Error::Term(Box::new(format!("batch failed: {e}"))))?
+            };
 
             // Collect all results
             let mut results: Vec<Term<'a>> = Vec::new();
@@ -235,7 +250,7 @@ pub fn execute_batch_native<'a>(env: Env<'a>, conn_id: &str, sql: &str) -> NifRe
 
 /// Execute multiple SQL statements atomically in a transaction.
 ///
-/// Uses LibSQL's native transactional batch execution. All statements succeed
+/// Uses `LibSQL`'s native transactional batch execution. All statements succeed
 /// or all are rolled back. The SQL string contains multiple semicolon-separated
 /// statements.
 ///
@@ -265,19 +280,24 @@ pub fn execute_transactional_batch_native<'a>(
         drop(conn_map); // Release lock before async operation
 
         let result = TOKIO_RUNTIME.block_on(async {
-            let client_guard = safe_lock_arc(&client, "execute_transactional_batch_native client")?;
-            let conn_guard = safe_lock_arc(
-                &client_guard.client,
-                "execute_transactional_batch_native conn",
-            )?;
-
-            let mut batch_rows =
+            // SAFETY: We're inside TOKIO_RUNTIME.block_on(), so this is synchronous execution.
+            // The std::sync::Mutex guards are safe to hold across await points here because
+            // we're not in a true async context - block_on runs the future to completion.
+            #[allow(clippy::await_holding_lock)]
+            let mut batch_rows = {
+                let client_guard =
+                    safe_lock_arc(&client, "execute_transactional_batch_native client")?;
+                let conn_guard = safe_lock_arc(
+                    &client_guard.client,
+                    "execute_transactional_batch_native conn",
+                )?;
                 conn_guard
                     .execute_transactional_batch(sql)
                     .await
                     .map_err(|e| {
-                        rustler::Error::Term(Box::new(format!("transactional batch failed: {}", e)))
-                    })?;
+                        rustler::Error::Term(Box::new(format!("transactional batch failed: {e}")))
+                    })?
+            };
 
             // Collect all results
             let mut results: Vec<Term<'a>> = Vec::new();

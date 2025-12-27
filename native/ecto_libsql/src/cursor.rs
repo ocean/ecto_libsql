@@ -46,6 +46,10 @@ pub fn declare_cursor(conn_id: &str, sql: &str, args: Vec<Term>) -> NifResult<St
         .collect::<Result<_, _>>()
         .map_err(|e| rustler::Error::Term(Box::new(e)))?;
 
+    // SAFETY: We're inside TOKIO_RUNTIME.block_on(), so this is synchronous execution.
+    // The std::sync::Mutex guards are safe to hold across await points here because
+    // we're not in a true async context - block_on runs the future to completion.
+    #[allow(clippy::await_holding_lock)]
     let (columns, rows) = TOKIO_RUNTIME.block_on(async {
         let client_guard = utils::safe_lock_arc(&client, "declare_cursor client")?;
         let conn_guard = utils::safe_lock_arc(&client_guard.client, "declare_cursor conn")?;
@@ -53,7 +57,7 @@ pub fn declare_cursor(conn_id: &str, sql: &str, args: Vec<Term>) -> NifResult<St
         let mut result_rows = conn_guard
             .query(sql, decoded_args)
             .await
-            .map_err(|e| rustler::Error::Term(Box::new(format!("Query failed: {}", e))))?;
+            .map_err(|e| rustler::Error::Term(Box::new(format!("Query failed: {e}"))))?;
 
         let mut columns: Vec<String> = Vec::new();
         let mut rows: Vec<Vec<Value>> = Vec::new();
@@ -198,13 +202,17 @@ pub fn declare_cursor_with_context(
             client_guard.client.clone()
         }; // Outer lock dropped here
 
+        // SAFETY: We're inside TOKIO_RUNTIME.block_on(), so this is synchronous execution.
+        // The std::sync::Mutex guards are safe to hold across await points here because
+        // we're not in a true async context - block_on runs the future to completion.
+        #[allow(clippy::await_holding_lock)]
         let (cols, rows) = TOKIO_RUNTIME.block_on(async {
             let conn_guard = utils::safe_lock_arc(&connection, "declare_cursor_with_context conn")?;
 
             let mut result_rows = conn_guard
                 .query(sql, decoded_args)
                 .await
-                .map_err(|e| rustler::Error::Term(Box::new(format!("Query failed: {}", e))))?;
+                .map_err(|e| rustler::Error::Term(Box::new(format!("Query failed: {e}"))))?;
 
             let mut columns: Vec<String> = Vec::new();
             let mut rows: Vec<Vec<Value>> = Vec::new();

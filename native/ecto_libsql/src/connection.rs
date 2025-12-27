@@ -187,16 +187,20 @@ pub fn ping(conn_id: String) -> NifResult<bool> {
         let client = conn.clone();
         drop(conn_map); // Release lock before async operation
 
+        // SAFETY: We're inside TOKIO_RUNTIME.block_on(), so this is synchronous execution.
+        // The std::sync::Mutex guards are safe to hold across await points here because
+        // we're not in a true async context - block_on runs the future to completion.
+        #[allow(clippy::await_holding_lock)]
         let result = TOKIO_RUNTIME.block_on(async {
             let client_guard =
-                safe_lock_arc(&client, "ping client").map_err(|e| format!("{:?}", e))?;
+                safe_lock_arc(&client, "ping client").map_err(|e| format!("{e:?}"))?;
             let conn_guard: std::sync::MutexGuard<libsql::Connection> =
-                safe_lock_arc(&client_guard.client, "ping conn").map_err(|e| format!("{:?}", e))?;
+                safe_lock_arc(&client_guard.client, "ping conn").map_err(|e| format!("{e:?}"))?;
 
             conn_guard
                 .query("SELECT 1", ())
                 .await
-                .map_err(|e| format!("{:?}", e))
+                .map_err(|e| format!("{e:?}"))
         });
         match result {
             Ok(_) => Ok(true),
@@ -305,14 +309,20 @@ pub fn reset_connection(conn_id: &str) -> NifResult<Atom> {
         let client = client.clone();
         drop(conn_map); // Release lock before blocking operation
 
-        TOKIO_RUNTIME.block_on(async {
-            let client_guard = safe_lock_arc(&client, "reset_connection client")?;
-            let conn_guard: std::sync::MutexGuard<libsql::Connection> =
-                safe_lock_arc(&client_guard.client, "reset_connection conn")?;
+        // SAFETY: We're inside TOKIO_RUNTIME.block_on(), so this is synchronous execution.
+        // The std::sync::Mutex guards are safe to hold across await points here because
+        // we're not in a true async context - block_on runs the future to completion.
+        #[allow(clippy::await_holding_lock)]
+        {
+            TOKIO_RUNTIME.block_on(async {
+                let client_guard = safe_lock_arc(&client, "reset_connection client")?;
+                let conn_guard: std::sync::MutexGuard<libsql::Connection> =
+                    safe_lock_arc(&client_guard.client, "reset_connection conn")?;
 
-            conn_guard.reset().await;
-            Ok::<(), rustler::Error>(())
-        })?;
+                conn_guard.reset().await;
+                Ok::<(), rustler::Error>(())
+            })?;
+        }
 
         Ok(rustler::types::atom::ok())
     } else {
