@@ -27,7 +27,7 @@ defmodule EctoLibSql.ConnectionFeaturesTest do
       {:ok, state} = EctoLibSql.connect(database: database)
 
       # Verify connection works
-      {:ok, _, result, _} =
+      {:ok, _query, result, _state} =
         EctoLibSql.handle_execute("SELECT 1 + 1", [], [], state)
 
       assert result.rows == [[2]]
@@ -40,7 +40,7 @@ defmodule EctoLibSql.ConnectionFeaturesTest do
       {:ok, state} = EctoLibSql.connect(database: database, busy_timeout: 10_000)
 
       # Verify connection works
-      {:ok, _, result, _} =
+      {:ok, _query, result, _state} =
         EctoLibSql.handle_execute("SELECT 1 + 1", [], [], state)
 
       assert result.rows == [[2]]
@@ -55,7 +55,7 @@ defmodule EctoLibSql.ConnectionFeaturesTest do
       assert :ok = EctoLibSql.Native.busy_timeout(state, 15_000)
 
       # Verify connection still works
-      {:ok, _, result, _} =
+      {:ok, _query, result, _state} =
         EctoLibSql.handle_execute("SELECT 1", [], [], state)
 
       assert result.rows == [[1]]
@@ -66,7 +66,7 @@ defmodule EctoLibSql.ConnectionFeaturesTest do
     test "busy_timeout of 0 is valid (disables handler)", %{database: database} do
       {:ok, state} = EctoLibSql.connect(database: database, busy_timeout: 0)
 
-      {:ok, _, result, _} =
+      {:ok, _query, result, _state} =
         EctoLibSql.handle_execute("SELECT 1", [], [], state)
 
       assert result.rows == [[1]]
@@ -84,7 +84,7 @@ defmodule EctoLibSql.ConnectionFeaturesTest do
       {:ok, state} = EctoLibSql.connect(database: database)
 
       # Create a table
-      {:ok, _, _, state} =
+      {:ok, _query, _result, state} =
         EctoLibSql.handle_execute(
           "CREATE TABLE reset_test (id INTEGER PRIMARY KEY)",
           [],
@@ -96,7 +96,7 @@ defmodule EctoLibSql.ConnectionFeaturesTest do
       assert :ok = EctoLibSql.Native.reset(state)
 
       # Connection should still work after reset
-      {:ok, _, result, _} =
+      {:ok, _query, result, _state} =
         EctoLibSql.handle_execute("SELECT 1", [], [], state)
 
       assert result.rows == [[1]]
@@ -117,7 +117,7 @@ defmodule EctoLibSql.ConnectionFeaturesTest do
       assert :ok = EctoLibSql.Native.interrupt(state)
 
       # Connection should still work
-      {:ok, _, result, _} =
+      {:ok, _query, result, _state} =
         EctoLibSql.handle_execute("SELECT 42", [], [], state)
 
       assert result.rows == [[42]]
@@ -140,7 +140,7 @@ defmodule EctoLibSql.ConnectionFeaturesTest do
 
       {:ok, state} = EctoLibSql.connect(opts)
 
-      {:ok, _, result, _} =
+      {:ok, _query, result, _state} =
         EctoLibSql.handle_execute("SELECT 1 + 2", [], [], state)
 
       assert result.rows == [[3]]

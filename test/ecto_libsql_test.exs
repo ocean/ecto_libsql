@@ -30,12 +30,12 @@ defmodule EctoLibSqlTest do
   end
 
   test "connection remote replica", state do
-    assert {:ok, _} = EctoLibSql.connect(state[:opts])
+    assert {:ok, _state} = EctoLibSql.connect(state[:opts])
   end
 
   test "ping connection", state do
     {:ok, conn} = EctoLibSql.connect(state[:opts])
-    assert {:ok, _} = EctoLibSql.ping(conn)
+    assert {:ok, _ping_state} = EctoLibSql.ping(conn)
   end
 
   test "prepare and execute a simple select", state do
@@ -43,7 +43,7 @@ defmodule EctoLibSqlTest do
 
     query = %EctoLibSql.Query{statement: "SELECT 1 + 1"}
     res_execute = EctoLibSql.handle_execute(query, [], [], state)
-    assert {:ok, _, _, _} = res_execute
+    assert {:ok, _query, _result, _state} = res_execute
   end
 
   test "create table", state do
@@ -54,14 +54,14 @@ defmodule EctoLibSqlTest do
         "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, email TEXT)"
     }
 
-    assert {:ok, _, _, _} = EctoLibSql.handle_execute(query, [], [], state)
+    assert {:ok, _query, _result, _state} = EctoLibSql.handle_execute(query, [], [], state)
   end
 
   test "transaction and param", state do
     {:ok, state} = EctoLibSql.connect(state[:opts])
 
     # trx_id here
-    {:ok, _, new_state} = EctoLibSql.handle_begin([], state)
+    {:ok, _begin_result, new_state} = EctoLibSql.handle_begin([], state)
 
     query = %EctoLibSql.Query{statement: "INSERT INTO users (name, email) values (?1, ?2)"}
     param = ["foo", "bar@mail.com"]
@@ -76,7 +76,7 @@ defmodule EctoLibSqlTest do
 
     commit = EctoLibSql.handle_commit([], new_state)
     # handle_commit return :ok, result, and new_state
-    assert {:ok, _, _} = commit
+    assert {:ok, _commit_result, _committed_state} = commit
   end
 
   # passed
@@ -97,7 +97,7 @@ defmodule EctoLibSqlTest do
 
     res_query = EctoLibSql.handle_execute(%EctoLibSql.Query{statement: select}, [], [], conn)
 
-    assert {:ok, _, _, _} = res_query
+    assert {:ok, _query, _result, _state} = res_query
   end
 
   test "disconnect", state do
@@ -113,7 +113,7 @@ defmodule EctoLibSqlTest do
 
     query = %EctoLibSql.Query{statement: "SELECT * FROM not_existing_table"}
 
-    assert {:error, %EctoLibSql.Error{}, _} = EctoLibSql.handle_execute(query, [], [], state)
+    assert {:error, %EctoLibSql.Error{}, _state} = EctoLibSql.handle_execute(query, [], [], state)
   end
 
   # libSQL supports multiple statements in one execution
@@ -126,7 +126,7 @@ defmodule EctoLibSqlTest do
         "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, email TEXT)"
     }
 
-    {:ok, _, _, state} = EctoLibSql.handle_execute(create_table, [], [], state)
+    {:ok, _query, _result, state} = EctoLibSql.handle_execute(create_table, [], [], state)
 
     query = %EctoLibSql.Query{
       statement: """
@@ -136,7 +136,7 @@ defmodule EctoLibSqlTest do
     }
 
     # libSQL now supports multiple statements, so this should succeed
-    assert {:ok, _, _, _} = EctoLibSql.handle_execute(query, [], [], state)
+    assert {:ok, _query, _result, _state} = EctoLibSql.handle_execute(query, [], [], state)
   end
 
   test "select with parameter", state do
@@ -146,7 +146,7 @@ defmodule EctoLibSqlTest do
       statement: "SELECT ?1 + ?2"
     }
 
-    assert {:ok, _, result, _} = EctoLibSql.handle_execute(query, [10, 5], [], state)
+    assert {:ok, _query, result, _state} = EctoLibSql.handle_execute(query, [10, 5], [], state)
     assert result.rows == [[15]]
   end
 
@@ -162,14 +162,14 @@ defmodule EctoLibSqlTest do
         "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, email TEXT)"
     }
 
-    {:ok, _, _, state} = EctoLibSql.handle_execute(create_table, [], [], state)
+    {:ok, _query, _result, state} = EctoLibSql.handle_execute(create_table, [], [], state)
 
     query = %EctoLibSql.Query{statement: "INSERT INTO users (name, email) values (?1, ?2)"}
 
     params = ["danawanb", "nosync@gmail.com"]
     res_execute = EctoLibSql.handle_execute(query, params, [], state)
 
-    assert {:ok, _, _, _} = res_execute
+    assert {:ok, _query, _result, _state} = res_execute
 
     # Skip remote connection test if env vars are not set
     if System.get_env("LIBSQL_URI") && System.get_env("LIBSQL_TOKEN") do
@@ -185,7 +185,8 @@ defmodule EctoLibSqlTest do
       select_execute =
         EctoLibSql.handle_execute(query_select, ["nosync@gmail.com"], [], remote_state)
 
-      assert {:ok, _, %EctoLibSql.Result{command: :select, columns: [], rows: [], num_rows: 0}, _} =
+      assert {:ok, _query,
+              %EctoLibSql.Result{command: :select, columns: [], rows: [], num_rows: 0}, _state} =
                select_execute
     end
   end
@@ -202,14 +203,14 @@ defmodule EctoLibSqlTest do
         "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, email TEXT)"
     }
 
-    {:ok, _, _, state} = EctoLibSql.handle_execute(create_table, [], [], state)
+    {:ok, _query, _result, state} = EctoLibSql.handle_execute(create_table, [], [], state)
 
     query = %EctoLibSql.Query{statement: "INSERT INTO users (name, email) values (?1, ?2)"}
 
     params = ["danawanb", "manualsync@gmail.com"]
     res_execute = EctoLibSql.handle_execute(query, params, [], state)
 
-    assert {:ok, _, _, _} = res_execute
+    assert {:ok, _query, _result, _state} = res_execute
 
     remote_only = [
       uri: System.get_env("LIBSQL_URI"),
@@ -227,7 +228,7 @@ defmodule EctoLibSqlTest do
     select_execute =
       EctoLibSql.handle_execute(query_select, ["manualsync@gmail.com"], [], remote_state)
 
-    assert {:ok, _, _, _} = select_execute
+    assert {:ok, _query, _result, _state} = select_execute
   end
 
   test "transaction behaviours - deferred and read_only", state do
@@ -236,12 +237,12 @@ defmodule EctoLibSqlTest do
     # Test DEFERRED (default)
     {:ok, deferred_state} = EctoLibSql.Native.begin(state, behavior: :deferred)
     assert deferred_state.trx_id != nil
-    {:ok, _} = EctoLibSql.Native.rollback(deferred_state)
+    {:ok, _rolled_back_state} = EctoLibSql.Native.rollback(deferred_state)
 
     # Test READ_ONLY
     {:ok, readonly_state} = EctoLibSql.Native.begin(state, behavior: :read_only)
     assert readonly_state.trx_id != nil
-    {:ok, _} = EctoLibSql.Native.rollback(readonly_state)
+    {:ok, _rolled_back_state} = EctoLibSql.Native.rollback(readonly_state)
   end
 
   test "metadata functions - last_insert_rowid and changes", state do
@@ -253,10 +254,10 @@ defmodule EctoLibSqlTest do
         "CREATE TABLE IF NOT EXISTS metadata_test (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT)"
     }
 
-    {:ok, _, _, state} = EctoLibSql.handle_execute(create_table, [], [], state)
+    {:ok, _query, _result, state} = EctoLibSql.handle_execute(create_table, [], [], state)
 
     # Insert and check rowid
-    {:ok, _, _, state} =
+    {:ok, _query, _result, state} =
       EctoLibSql.handle_execute(
         "INSERT INTO metadata_test (name) VALUES (?)",
         ["First"],
@@ -271,7 +272,7 @@ defmodule EctoLibSqlTest do
     assert changes1 == 1
 
     # Insert another
-    {:ok, _, _, state} =
+    {:ok, _query, _result, state} =
       EctoLibSql.handle_execute(
         "INSERT INTO metadata_test (name) VALUES (?)",
         ["Second"],
@@ -283,7 +284,7 @@ defmodule EctoLibSqlTest do
     assert rowid2 > rowid1
 
     # Update multiple rows
-    {:ok, _, _, state} =
+    {:ok, _query, _result, state} =
       EctoLibSql.handle_execute(
         "UPDATE metadata_test SET name = ? WHERE id <= ?",
         ["Updated", rowid2],
@@ -313,7 +314,7 @@ defmodule EctoLibSqlTest do
     assert EctoLibSql.Native.get_is_autocommit(trx_state) == false
 
     # Commit transaction
-    {:ok, _, committed_state} = EctoLibSql.handle_commit([], trx_state)
+    {:ok, _commit_result, committed_state} = EctoLibSql.handle_commit([], trx_state)
 
     # Should be back in autocommit mode
     assert EctoLibSql.Native.get_is_autocommit(committed_state) == true
@@ -332,7 +333,7 @@ defmodule EctoLibSqlTest do
     # Create table with vector column using helper
     vector_col = EctoLibSql.Native.vector_type(3, :f32)
 
-    {:ok, _, _, state} =
+    {:ok, _query, _result, state} =
       EctoLibSql.handle_execute(
         "CREATE TABLE IF NOT EXISTS embeddings (id INTEGER PRIMARY KEY, vec #{vector_col})",
         [],
@@ -348,7 +349,7 @@ defmodule EctoLibSqlTest do
     assert vec2 == "[4,5,6]"
 
     # Insert vectors
-    {:ok, _, _, state} =
+    {:ok, _query, _result, state} =
       EctoLibSql.handle_execute(
         "INSERT INTO embeddings (id, vec) VALUES (?, vector(?))",
         [1, vec1],
@@ -356,7 +357,7 @@ defmodule EctoLibSqlTest do
         state
       )
 
-    {:ok, _, _, state} =
+    {:ok, _query, _result, state} =
       EctoLibSql.handle_execute(
         "INSERT INTO embeddings (id, vec) VALUES (?, vector(?))",
         [2, vec2],
@@ -370,7 +371,7 @@ defmodule EctoLibSqlTest do
     assert String.contains?(distance_sql, "vec")
 
     # Use in query
-    {:ok, _, result, _} =
+    {:ok, _query, result, _state} =
       EctoLibSql.handle_execute(
         "SELECT id, #{distance_sql} as distance FROM embeddings ORDER BY distance LIMIT 1",
         [],
@@ -385,7 +386,7 @@ defmodule EctoLibSqlTest do
     {:ok, state} = EctoLibSql.connect(state[:opts])
 
     # Create table for JSON-like data
-    {:ok, _, _, state} =
+    {:ok, _query, _result, state} =
       EctoLibSql.handle_execute(
         "CREATE TABLE IF NOT EXISTS json_test (id INTEGER PRIMARY KEY, data TEXT)",
         [],
@@ -396,7 +397,7 @@ defmodule EctoLibSqlTest do
     # Store JSON-encoded data
     json_data = Jason.encode!(%{name: "Alice", age: 30, tags: ["developer", "elixir"]})
 
-    {:ok, _, _, state} =
+    {:ok, _query, _result, state} =
       EctoLibSql.handle_execute(
         "INSERT INTO json_test (data) VALUES (?)",
         [json_data],
@@ -405,7 +406,7 @@ defmodule EctoLibSqlTest do
       )
 
     # Retrieve and decode
-    {:ok, _, result, _} =
+    {:ok, _query, result, _state} =
       EctoLibSql.handle_execute(
         "SELECT data FROM json_test LIMIT 1",
         [],
@@ -520,7 +521,7 @@ defmodule EctoLibSqlTest do
           assert match?({:error, _, _}, result)
           EctoLibSql.disconnect([], state_no_key)
 
-        {:error, _} ->
+        {:error, _reason} ->
           # Connection itself might fail, which is also acceptable
           :ok
       end
@@ -574,17 +575,17 @@ defmodule EctoLibSqlTest do
 
           # Should either error or return corrupted data
           case result do
-            {:error, _, _} ->
+            {:error, _reason, _state} ->
               :ok
 
-            {:ok, _query, result_data, _} ->
+            {:ok, _query, result_data, _final_state} ->
               # Data should not match the original
               refute result_data.rows == [["secret"]]
           end
 
           EctoLibSql.disconnect([], state_wrong)
 
-        {:error, _} ->
+        {:error, _reason} ->
           # Connection might fail, which is acceptable
           :ok
       end

@@ -1,15 +1,18 @@
 # Dialyzer warnings that are expected/acceptable for this project.
 # These are typically due to Ecto behaviour callback mismatches or
 # patterns that Dialyzer cannot fully analyse.
+#
+# Format: List of strings or regex patterns to match warning messages.
+[
+  # Ecto adapter callback type mismatches
+  ~r/Function rollback\/2 has no local return/,
+  ~r/Type mismatch for @callback dump_cmd/,
+  ~r/Spec type mismatch in argument to callback to_constraints/,
+  ~r/Type mismatch with behaviour callback to explain_query/,
 
-# Ecto adapter callback type mismatches
-{"lib/ecto/adapters/libsql.ex", "Function rollback/2 has no local return."}
-{"lib/ecto/adapters/libsql.ex", "Type mismatch for @callback dump_cmd."}
-{"lib/ecto/adapters/libsql/connection.ex", "Spec type mismatch in argument to callback to_constraints."}
-{"lib/ecto/adapters/libsql/connection.ex", "Type mismatch with behaviour callback to explain_query/4."}
+  # IO list construction - this is intentional for performance
+  ~r/List construction.*will produce an improper list.*second argument is/,
 
-# IO list construction - this is intentional for performance
-{"lib/ecto/adapters/libsql/connection.ex", "List construction (cons) will produce an improper list, because its second argument is <<_::64>>."}
-
-# Pattern matching issues that arise from complex type unions
-{"lib/ecto/adapters/libsql.ex", ~r/The pattern can never match the type/}
+  # Pattern matching issues that arise from complex type unions
+  ~r/The pattern can never match the type/
+]

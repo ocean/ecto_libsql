@@ -126,7 +126,7 @@ defmodule EctoLibSql do
 
   Removes the connection from the Rust connection registry and cleans up any resources.
   """
-  @spec disconnect(Keyword.t(), EctoLibSql.State.t()) ::
+  @spec disconnect(term(), EctoLibSql.State.t()) ::
           :ok | {:error, term(), EctoLibSql.State.t()}
   def disconnect(_opts, %EctoLibSql.State{conn_id: conn_id} = state) do
     EctoLibSql.Native.close_conn(conn_id, :conn_id, state)
@@ -286,7 +286,7 @@ defmodule EctoLibSql do
           num_rows: length(rows)
         }
 
-        if length(rows) == 0 do
+        if rows == [] do
           # No more rows, signal halt
           {:halt, result, state}
         else

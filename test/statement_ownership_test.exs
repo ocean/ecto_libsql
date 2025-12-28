@@ -273,7 +273,7 @@ defmodule EctoLibSql.StatementOwnershipTest do
       result = Native.fetch_cursor(conn_id1, cursor_id, 100)
       assert {columns, rows, count} = result
       assert columns == ["id", "value"]
-      assert length(rows) > 0
+      assert rows != []
       assert count >= 0
     end
 

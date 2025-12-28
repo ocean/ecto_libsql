@@ -49,9 +49,9 @@ defmodule TursoRemoteTest do
     case EctoLibSql.Native.sync(state) do
       :ok -> :ok
       # Some versions return {:ok, message}
-      {:ok, _} -> :ok
+      {:ok, _msg} -> :ok
       # Ignore sync errors, will retry
-      {:error, _} -> :ok
+      {:error, _reason} -> :ok
     end
 
     # Poll to verify table exists
@@ -119,7 +119,7 @@ defmodule TursoRemoteTest do
 
     test "ping remote connection", %{table_name: _table} do
       {:ok, state} = EctoLibSql.connect(uri: @turso_uri, auth_token: @turso_token)
-      assert {:ok, _} = EctoLibSql.ping(state)
+      assert {:ok, _ping_state} = EctoLibSql.ping(state)
       EctoLibSql.disconnect([], state)
     end
 

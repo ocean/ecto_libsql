@@ -49,7 +49,7 @@ defmodule EctoLibSql.AdvancedFeaturesTest do
       {:ok, state} = EctoLibSql.connect(database: db_path)
 
       # Create table and insert data
-      {:ok, _, _, state} =
+      {:ok, _query, _result, state} =
         EctoLibSql.handle_execute(
           "CREATE TABLE test (id INTEGER PRIMARY KEY, data TEXT)",
           [],
@@ -57,7 +57,7 @@ defmodule EctoLibSql.AdvancedFeaturesTest do
           state
         )
 
-      {:ok, _, _, state} =
+      {:ok, _query, _result, state} =
         EctoLibSql.handle_execute(
           "INSERT INTO test (data) VALUES (?)",
           ["test_data"],
@@ -137,7 +137,7 @@ defmodule EctoLibSql.AdvancedFeaturesTest do
       {:ok, state} = EctoLibSql.connect(database: ":memory:")
 
       # Create a table and insert data
-      {:ok, _, _, state} =
+      {:ok, _query, _result, state} =
         EctoLibSql.handle_execute(
           "CREATE TABLE test (id INTEGER PRIMARY KEY, data TEXT)",
           [],
@@ -145,7 +145,7 @@ defmodule EctoLibSql.AdvancedFeaturesTest do
           state
         )
 
-      {:ok, _, _, state} =
+      {:ok, _query, _result, state} =
         EctoLibSql.handle_execute(
           "INSERT INTO test (data) VALUES (?)",
           ["test_value"],
@@ -154,11 +154,11 @@ defmodule EctoLibSql.AdvancedFeaturesTest do
         )
 
       # Call freeze - should return unsupported and not affect data
-      result = EctoLibSql.Native.freeze_replica(state)
-      assert result == {:error, :unsupported}
+      freeze_result = EctoLibSql.Native.freeze_replica(state)
+      assert freeze_result == {:error, :unsupported}
 
       # Verify data is still accessible (freeze didn't break connection)
-      {:ok, _, result, _state} =
+      {:ok, _query, select_result, _state} =
         EctoLibSql.handle_execute(
           "SELECT data FROM test WHERE id = 1",
           [],
@@ -166,7 +166,7 @@ defmodule EctoLibSql.AdvancedFeaturesTest do
           state
         )
 
-      assert result.rows == [["test_value"]]
+      assert select_result.rows == [["test_value"]]
 
       EctoLibSql.disconnect([], state)
     end
@@ -240,7 +240,7 @@ defmodule EctoLibSql.AdvancedFeaturesTest do
     test "execute query with named parameters" do
       {:ok, state} = EctoLibSql.connect(database: ":memory:")
 
-      {:ok, _, _, state} =
+      {:ok, _query, _result, state} =
         EctoLibSql.handle_execute(
           "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, age INTEGER)",
           [],
@@ -249,7 +249,7 @@ defmodule EctoLibSql.AdvancedFeaturesTest do
         )
 
       # Should support named parameters like :name and :age
-      {:ok, _, _, state} =
+      {:ok, _query, _result, state} =
         EctoLibSql.handle_execute(
           "INSERT INTO users VALUES (:id, :name, :age)",
           [id: 1, name: "Alice", age: 30],
@@ -257,7 +257,7 @@ defmodule EctoLibSql.AdvancedFeaturesTest do
           state
         )
 
-      {:ok, _, result, _} =
+      {:ok, _query, result, _state} =
         EctoLibSql.handle_execute("SELECT * FROM users WHERE id = 1", [], [], state)
 
       assert [[1, "Alice", 30]] = result.rows

@@ -556,8 +556,7 @@ defmodule Ecto.Adapters.LibSql.Connection do
   defp on_conflict({:raise, _, _}, _header, _placeholders), do: []
 
   # Pattern: {:nothing, _, conflict_target}
-  defp on_conflict({:nothing, _, targets}, _header, _placeholders)
-       when is_list(targets) and length(targets) > 0 do
+  defp on_conflict({:nothing, _, [_ | _] = targets}, _header, _placeholders) do
     [" ON CONFLICT ", conflict_target(targets), "DO NOTHING"]
   end
 
@@ -579,8 +578,8 @@ defmodule Ecto.Adapters.LibSql.Connection do
   end
 
   # Pattern: {fields_list, _, conflict_target} - for custom field replacement
-  defp on_conflict({fields, _, targets}, _header, _placeholders)
-       when is_list(fields) and is_list(targets) and length(targets) > 0 do
+  defp on_conflict({fields, _, [_ | _] = targets}, _header, _placeholders)
+       when is_list(fields) do
     [" ON CONFLICT ", conflict_target(targets), "DO ", replace(fields)]
   end
 

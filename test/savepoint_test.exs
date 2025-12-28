@@ -48,7 +48,7 @@ defmodule EctoLibSql.SavepointTest do
       assert :ok = Native.create_savepoint(trx_state, "sp1")
 
       # Commit transaction
-      {:ok, _} = Native.commit(trx_state)
+      {:ok, _committed_state} = Native.commit(trx_state)
     end
 
     test "create nested savepoints (3 levels deep)", %{state: state} do
@@ -59,7 +59,7 @@ defmodule EctoLibSql.SavepointTest do
       assert :ok = Native.create_savepoint(trx_state, "sp3")
 
       # Cleanup
-      {:ok, _} = Native.commit(trx_state)
+      {:ok, _committed_state} = Native.commit(trx_state)
     end
 
     test "create savepoint with custom name", %{state: state} do
@@ -67,7 +67,7 @@ defmodule EctoLibSql.SavepointTest do
 
       assert :ok = Native.create_savepoint(trx_state, "my_custom_savepoint")
 
-      {:ok, _} = Native.commit(trx_state)
+      {:ok, _committed_state} = Native.commit(trx_state)
     end
 
     test "create duplicate savepoint name may return error or succeed", %{state: state} do
@@ -87,7 +87,7 @@ defmodule EctoLibSql.SavepointTest do
           # SQLite might allow duplicate savepoints, just replacing the old one
       end
 
-      {:ok, _} = Native.rollback(trx_state)
+      {:ok, _rolled_back_state} = Native.rollback(trx_state)
     end
 
     test "create savepoint outside transaction returns error", %{state: state} do
@@ -124,7 +124,7 @@ defmodule EctoLibSql.SavepointTest do
       :ok = Native.rollback_to_savepoint_by_name(trx_state, "sp1")
 
       # Commit transaction
-      {:ok, _} = Native.commit(trx_state)
+      {:ok, _committed_state} = Native.commit(trx_state)
 
       # Verify only Alice exists
       {:ok, _query, result, _state} = exec_sql(state, "SELECT * FROM users")
@@ -149,11 +149,11 @@ defmodule EctoLibSql.SavepointTest do
       :ok = Native.rollback_to_savepoint_by_name(trx_state, "sp1")
 
       # Commit transaction
-      {:ok, _} = Native.commit(trx_state)
+      {:ok, _committed_state} = Native.commit(trx_state)
 
       # Verify no users exist
       {:ok, _query, result, _state} = exec_sql(state, "SELECT * FROM users")
-      assert length(result.rows) == 0
+      assert result.rows == []
     end
 
     test "rollback to savepoint allows continuing transaction", %{state: state} do
@@ -185,7 +185,7 @@ defmodule EctoLibSql.SavepointTest do
         ])
 
       # Commit
-      {:ok, _} = Native.commit(trx_state)
+      {:ok, _committed_state} = Native.commit(trx_state)
 
       # Verify Alice and Charlie exist, not Bob
       {:ok, _query, result, _state} = exec_sql(state, "SELECT * FROM users ORDER BY id")
@@ -201,7 +201,7 @@ defmodule EctoLibSql.SavepointTest do
 
       assert {:error, _reason} = result
 
-      {:ok, _} = Native.rollback(trx_state)
+      {:ok, _rolled_back_state} = Native.rollback(trx_state)
     end
 
     test "rollback middle savepoint preserves outer and inner", %{state: state} do
@@ -235,7 +235,7 @@ defmodule EctoLibSql.SavepointTest do
       # Rollback to sp1 (removes Bob and Charlie, keeps Alice)
       :ok = Native.rollback_to_savepoint_by_name(trx_state, "sp1")
 
-      {:ok, _} = Native.commit(trx_state)
+      {:ok, _committed_state} = Native.commit(trx_state)
 
       # Verify only Alice exists
       {:ok, _query, result, _state} = exec_sql(state, "SELECT * FROM users")
@@ -260,7 +260,7 @@ defmodule EctoLibSql.SavepointTest do
       :ok = Native.release_savepoint_by_name(trx_state, "sp1")
 
       # Commit transaction
-      {:ok, _} = Native.commit(trx_state)
+      {:ok, _committed_state} = Native.commit(trx_state)
 
       # Verify Alice exists
       {:ok, _query, result, _state} = exec_sql(state, "SELECT * FROM users")
@@ -282,7 +282,7 @@ defmodule EctoLibSql.SavepointTest do
       :ok = Native.release_savepoint_by_name(trx_state, "sp1")
 
       # Should be able to commit after releasing savepoint
-      {:ok, _} = Native.commit(trx_state)
+      {:ok, _committed_state} = Native.commit(trx_state)
     end
 
     test "release non-existent savepoint returns error", %{state: state} do
@@ -292,7 +292,7 @@ defmodule EctoLibSql.SavepointTest do
 
       assert {:error, _reason} = result
 
-      {:ok, _} = Native.rollback(trx_state)
+      {:ok, _rolled_back_state} = Native.rollback(trx_state)
     end
 
     test "release all savepoints then commit works", %{state: state} do
@@ -312,7 +312,7 @@ defmodule EctoLibSql.SavepointTest do
       :ok = Native.release_savepoint_by_name(trx_state, "sp1")
 
       # Commit
-      {:ok, _} = Native.commit(trx_state)
+      {:ok, _committed_state} = Native.commit(trx_state)
 
       # Verify data committed
       {:ok, _query, result, _state} = exec_sql(state, "SELECT * FROM users")
@@ -351,7 +351,7 @@ defmodule EctoLibSql.SavepointTest do
           "Charlie"
         ])
 
-      {:ok, _} = Native.commit(trx_state)
+      {:ok, _committed_state} = Native.commit(trx_state)
 
       # Verify Alice and Charlie exist
       {:ok, _query, result, _state} = exec_sql(state, "SELECT * FROM users ORDER BY id")
@@ -389,7 +389,7 @@ defmodule EctoLibSql.SavepointTest do
           "Charlie"
         ])
 
-      {:ok, _} = Native.commit(trx_state)
+      {:ok, _committed_state} = Native.commit(trx_state)
 
       # Only Charlie should exist
       {:ok, _query, result, _state} = exec_sql(state, "SELECT * FROM users")
@@ -443,7 +443,7 @@ defmodule EctoLibSql.SavepointTest do
       # Rollback to sp1 (removes Bob and David, keeps Alice)
       :ok = Native.rollback_to_savepoint_by_name(trx_state, "sp1")
 
-      {:ok, _} = Native.commit(trx_state)
+      {:ok, _committed_state} = Native.commit(trx_state)
 
       # Only Alice should exist
       {:ok, _query, result, _state} = exec_sql(state, "SELECT * FROM users")
@@ -476,12 +476,12 @@ defmodule EctoLibSql.SavepointTest do
         {:ok, _query, _result, trx_state} ->
           # Audit succeeded, release savepoint
           :ok = Native.release_savepoint_by_name(trx_state, "audit")
-          {:ok, _} = Native.commit(trx_state)
+          {:ok, _committed_state} = Native.commit(trx_state)
 
         {:error, _reason, trx_state} ->
           # Audit failed, rollback savepoint but keep main operation
           :ok = Native.rollback_to_savepoint_by_name(trx_state, "audit")
-          {:ok, _} = Native.commit(trx_state)
+          {:ok, _committed_state} = Native.commit(trx_state)
       end
 
       # User should still be inserted regardless of audit log

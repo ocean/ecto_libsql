@@ -56,6 +56,7 @@ defmodule EctoLibSql.MixProject do
       {:ex_doc, "~> 0.31", only: :dev, runtime: false},
       {:jason, "~> 1.4"},
       {:rustler, "~> 0.37.1"},
+      {:sobelow, "~> 0.13", only: [:dev, :test], runtime: false},
       {:stream_data, "~> 1.0", only: [:dev, :test]}
     ]
   end

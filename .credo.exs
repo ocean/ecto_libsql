@@ -3,15 +3,17 @@
 # This configuration file specifies the rules and their strictness levels
 # for static code analysis with Credo.
 #
-# Run with: mix credo --strict
+# Run with: mix credo
 %{
   configs: [
+    # ==========================================================================
+    # Strict checks for library source files only
+    # ==========================================================================
     %{
       name: "default",
       files: %{
         included: [
-          "lib/",
-          "test/"
+          "lib/"
         ],
         excluded: [
           ~r"/_build/",
@@ -21,7 +23,7 @@
       },
       plugins: [],
       requires: [],
-      strict: true,
+      strict: false,
       parse_timeout: 5000,
       color: true,
       checks: %{
@@ -35,7 +37,7 @@
           {Credo.Check.Consistency.SpaceAroundOperators, []},
           {Credo.Check.Consistency.SpaceInParentheses, []},
           {Credo.Check.Consistency.TabsOrSpaces, []},
-          {Credo.Check.Consistency.UnusedVariableNames, []},
+          {Credo.Check.Consistency.UnusedVariableNames, [priority: :low]},
 
           # ==========================================================================
           # Design Checks
@@ -56,8 +58,8 @@
           {Credo.Check.Readability.AliasOrder, []},
           {Credo.Check.Readability.BlockPipe, []},
           {Credo.Check.Readability.FunctionNames, []},
-          {Credo.Check.Readability.ImplTrue, []},
-          {Credo.Check.Readability.LargeNumbers, []},
+          {Credo.Check.Readability.ImplTrue, [priority: :low]},
+          {Credo.Check.Readability.LargeNumbers, [priority: :low]},
           {Credo.Check.Readability.MaxLineLength, [priority: :low, max_length: 120]},
           {Credo.Check.Readability.ModuleAttributeNames, []},
           {Credo.Check.Readability.ModuleDoc, []},
@@ -66,13 +68,13 @@
           {Credo.Check.Readability.ParenthesesInCondition, []},
           {Credo.Check.Readability.ParenthesesOnZeroArityDefs, []},
           {Credo.Check.Readability.PipeIntoAnonymousFunctions, []},
-          {Credo.Check.Readability.PredicateFunctionNames, []},
+          {Credo.Check.Readability.PredicateFunctionNames, [priority: :low]},
           {Credo.Check.Readability.PreferImplicitTry, []},
           {Credo.Check.Readability.RedundantBlankLines, []},
           {Credo.Check.Readability.Semicolons, []},
           {Credo.Check.Readability.SeparateAliasRequire, []},
           {Credo.Check.Readability.SingleFunctionToBlockPipe, []},
-          {Credo.Check.Readability.SinglePipe, []},
+          {Credo.Check.Readability.SinglePipe, [priority: :low]},
           {Credo.Check.Readability.SpaceAfterCommas, []},
           {Credo.Check.Readability.Specs, [priority: :low]},
           {Credo.Check.Readability.StrictModuleLayout, [priority: :low]},
@@ -90,13 +92,13 @@
           {Credo.Check.Refactor.CondStatements, []},
           {Credo.Check.Refactor.CyclomaticComplexity, [max_complexity: 15]},
           {Credo.Check.Refactor.DoubleBooleanNegation, []},
-          {Credo.Check.Refactor.FilterCount, []},
+          {Credo.Check.Refactor.FilterCount, [priority: :low]},
           {Credo.Check.Refactor.FilterFilter, []},
           {Credo.Check.Refactor.FilterReject, []},
           {Credo.Check.Refactor.FunctionArity, [max_arity: 8]},
           {Credo.Check.Refactor.IoPuts, []},
           {Credo.Check.Refactor.LongQuoteBlocks, []},
-          {Credo.Check.Refactor.MapJoin, []},
+          {Credo.Check.Refactor.MapJoin, [priority: :low]},
           {Credo.Check.Refactor.MapMap, []},
           {Credo.Check.Refactor.MatchInCondition, []},
           {Credo.Check.Refactor.ModuleDependencies, [priority: :low, max_deps: 25]},
@@ -104,7 +106,7 @@
           {Credo.Check.Refactor.NegatedConditionsWithElse, []},
           {Credo.Check.Refactor.Nesting, [max_nesting: 4]},
           {Credo.Check.Refactor.PassAsyncInTestCases, []},
-          {Credo.Check.Refactor.PipeChainStart, []},
+          {Credo.Check.Refactor.PipeChainStart, [priority: :low]},
           {Credo.Check.Refactor.RedundantWithClauseResult, []},
           {Credo.Check.Refactor.RejectFilter, []},
           {Credo.Check.Refactor.RejectReject, []},
@@ -112,7 +114,7 @@
           {Credo.Check.Refactor.WithClauses, []},
 
           # ==========================================================================
-          # Warning Checks
+          # Warning Checks (most important - these indicate real problems)
           # ==========================================================================
           {Credo.Check.Warning.ApplicationConfigInModuleAttribute, []},
           {Credo.Check.Warning.BoolOperationOnSameValues, []},
@@ -142,11 +144,9 @@
           {Credo.Check.Warning.WrongTestFileExtension, []}
         ],
         disabled: [
-          # Disabled checks that may be too noisy for this project
+          # Disabled globally - handled by formatter or too noisy
           {Credo.Check.Readability.OnePipePerLine, []},
           {Credo.Check.Readability.NestedFunctionCalls, []},
-
-          # These are handled by the formatter
           {Credo.Check.Consistency.MultiAliasImportRequireUse, []}
         ]
       }

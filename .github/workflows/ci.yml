@@ -141,6 +141,12 @@ jobs:
       - name: Compile (warnings as errors)
         run: mix compile --force --warnings-as-errors
 
+      - name: Run Credo code quality checks
+        run: mix credo
+
+      - name: Run Sobelow security audit
+        run: mix sobelow --config
+
       - name: Debug .so files
         run: find . -name '*.so' -print
 

@@ -270,6 +270,7 @@ defmodule EctoLibSql.Native do
   - Sync happens synchronously and may take time depending on data size
 
   """
+  @spec sync(EctoLibSql.State.t()) :: {:ok, String.t()} | {:error, term()}
   def sync(%EctoLibSql.State{conn_id: conn_id, mode: mode} = _state) do
     do_sync(conn_id, mode)
   end
@@ -416,6 +417,8 @@ defmodule EctoLibSql.Native do
       {:ok, new_state} = EctoLibSql.Native.begin(state, behavior: :immediate)
 
   """
+  @spec begin(EctoLibSql.State.t(), Keyword.t()) ::
+          {:ok, EctoLibSql.State.t()} | {:error, term()}
   def begin(%EctoLibSql.State{conn_id: conn_id, mode: mode} = _state, opts \\ []) do
     behavior = Keyword.get(opts, :behavior, :deferred)
 
@@ -440,6 +443,7 @@ defmodule EctoLibSql.Native do
       {:ok, _} = EctoLibSql.Native.commit(state)
 
   """
+  @spec commit(EctoLibSql.State.t()) :: {:ok, EctoLibSql.State.t()} | {:error, term()}
   def commit(
         %EctoLibSql.State{conn_id: conn_id, trx_id: trx_id, mode: mode, sync: syncx} = _state
       ) do
@@ -456,6 +460,7 @@ defmodule EctoLibSql.Native do
       {:ok, _} = EctoLibSql.Native.rollback(state)
 
   """
+  @spec rollback(EctoLibSql.State.t()) :: {:ok, EctoLibSql.State.t()} | {:error, term()}
   def rollback(
         %EctoLibSql.State{conn_id: conn_id, trx_id: trx_id, mode: mode, sync: syncx} = _state
       ) do
@@ -719,7 +724,8 @@ defmodule EctoLibSql.Native do
 
   ## Parameters
     - state: The connection state
-    - statements: A list of tuples {sql, args} where sql is the SQL string and args is a list of parameters
+    - statements: A list of tuples {sql, args} where sql is the SQL string
+      and args is a list of parameters
 
   ## Example
       statements = [
@@ -729,31 +735,12 @@ defmodule EctoLibSql.Native do
       ]
       {:ok, results} = EctoLibSql.Native.batch(state, statements)
   """
+  @spec batch(EctoLibSql.State.t(), list({String.t(), list()})) ::
+          {:ok, list(EctoLibSql.Result.t())} | {:error, term()}
   def batch(%EctoLibSql.State{conn_id: conn_id, mode: mode, sync: syncx} = _state, statements) do
-    case execute_batch(conn_id, mode, syncx, statements) do
-      results when is_list(results) ->
-        # Convert each result to EctoLibSql.Result struct
-        parsed_results =
-          Enum.map(results, fn result ->
-            case result do
-              %{"columns" => columns, "rows" => rows, "num_rows" => num_rows} ->
-                %EctoLibSql.Result{
-                  command: :batch,
-                  columns: columns,
-                  rows: rows,
-                  num_rows: num_rows
-                }
-
-              _ ->
-                %EctoLibSql.Result{command: :batch}
-            end
-          end)
-
-        {:ok, parsed_results}
-
-      {:error, message} ->
-        {:error, message}
-    end
+    conn_id
+    |> execute_batch(mode, syncx, statements)
+    |> parse_batch_results()
   end
 
   @doc """
@@ -762,7 +749,8 @@ defmodule EctoLibSql.Native do
 
   ## Parameters
     - state: The connection state
-    - statements: A list of tuples {sql, args} where sql is the SQL string and args is a list of parameters
+    - statements: A list of tuples {sql, args} where sql is the SQL string
+      and args is a list of parameters
 
   ## Example
       statements = [
@@ -772,35 +760,39 @@ defmodule EctoLibSql.Native do
       ]
       {:ok, results} = EctoLibSql.Native.batch_transactional(state, statements)
   """
+  @spec batch_transactional(EctoLibSql.State.t(), list({String.t(), list()})) ::
+          {:ok, list(EctoLibSql.Result.t())} | {:error, term()}
   def batch_transactional(
         %EctoLibSql.State{conn_id: conn_id, mode: mode, sync: syncx} = _state,
         statements
       ) do
-    case execute_transactional_batch(conn_id, mode, syncx, statements) do
-      results when is_list(results) ->
-        # Convert each result to EctoLibSql.Result struct
-        parsed_results =
-          Enum.map(results, fn result ->
-            case result do
-              %{"columns" => columns, "rows" => rows, "num_rows" => num_rows} ->
-                %EctoLibSql.Result{
-                  command: :batch,
-                  columns: columns,
-                  rows: rows,
-                  num_rows: num_rows
-                }
-
-              _ ->
-                %EctoLibSql.Result{command: :batch}
-            end
-          end)
-
-        {:ok, parsed_results}
-
-      {:error, message} ->
-        {:error, message}
-    end
+    conn_id
+    |> execute_transactional_batch(mode, syncx, statements)
+    |> parse_batch_results()
   end
+
+  # Parse batch execution results into EctoLibSql.Result structs.
+  @spec parse_batch_results(list(map()) | {:error, term()}) ::
+          {:ok, list(EctoLibSql.Result.t())} | {:error, term()}
+  defp parse_batch_results(results) when is_list(results) do
+    parsed_results =
+      Enum.map(results, fn
+        %{"columns" => columns, "rows" => rows, "num_rows" => num_rows} ->
+          %EctoLibSql.Result{
+            command: :batch,
+            columns: columns,
+            rows: rows,
+            num_rows: num_rows
+          }
+
+        _other ->
+          %EctoLibSql.Result{command: :batch}
+      end)
+
+    {:ok, parsed_results}
+  end
+
+  defp parse_batch_results({:error, message}), do: {:error, message}
 
   @doc """
   Set the busy timeout for the connection.

@@ -15,7 +15,7 @@ defmodule EctoLibSql.StatementFeaturesTest do
     {:ok, state} = EctoLibSql.connect(database: test_db)
 
     # Create a test table
-    {:ok, _, _, state} =
+    {:ok, _query, _result, state} =
       EctoLibSql.handle_execute(
         "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, age INTEGER)",
         [],
@@ -50,7 +50,7 @@ defmodule EctoLibSql.StatementFeaturesTest do
 
     test "columns work with complex queries", %{state: state} do
       # Create posts table
-      {:ok, _, _, state} =
+      {:ok, _query, _result, state} =
         EctoLibSql.handle_execute(
           "CREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER, title TEXT)",
           [],
@@ -101,8 +101,8 @@ defmodule EctoLibSql.StatementFeaturesTest do
       assert name_2 == "age"
 
       # Out-of-bounds indices should return error
-      assert {:error, _} = EctoLibSql.Native.stmt_column_name(state, stmt_id, count)
-      assert {:error, _} = EctoLibSql.Native.stmt_column_name(state, stmt_id, 100)
+      assert {:error, _reason} = EctoLibSql.Native.stmt_column_name(state, stmt_id, count)
+      assert {:error, _reason} = EctoLibSql.Native.stmt_column_name(state, stmt_id, 100)
 
       # Cleanup
       EctoLibSql.Native.close_stmt(stmt_id)
@@ -123,7 +123,7 @@ defmodule EctoLibSql.StatementFeaturesTest do
   describe "Statement reset and caching ✅" do
     test "reset statement for reuse without re-prepare", %{state: state} do
       # Create logs table
-      {:ok, _, _, state} =
+      {:ok, _query, _result, state} =
         EctoLibSql.handle_execute(
           "CREATE TABLE logs (id INTEGER PRIMARY KEY AUTOINCREMENT, message TEXT)",
           [],
@@ -146,7 +146,7 @@ defmodule EctoLibSql.StatementFeaturesTest do
       end
 
       # Verify all inserts succeeded
-      {:ok, _, result, _} =
+      {:ok, _query, result, _state} =
         EctoLibSql.handle_execute("SELECT COUNT(*) FROM logs", [], [], state)
 
       assert [[5]] = result.rows
@@ -175,7 +175,7 @@ defmodule EctoLibSql.StatementFeaturesTest do
         ])
 
       # Verify both inserts
-      {:ok, _, result, _} =
+      {:ok, _query, result, _state} =
         EctoLibSql.handle_execute("SELECT name FROM users ORDER BY id", [], [], state)
 
       assert [["Alice"], ["Bob"]] = result.rows
@@ -200,13 +200,14 @@ defmodule EctoLibSql.StatementFeaturesTest do
       EctoLibSql.Native.close_stmt(stmt_id)
 
       # Verify all inserts succeeded
-      {:ok, _, result, _} =
+      {:ok, _query, result, _state} =
         EctoLibSql.handle_execute("SELECT COUNT(*) FROM users", [], [], state)
 
       assert [[100]] = result.rows
 
       # Clear for next benchmark
-      {:ok, _, _, state} = EctoLibSql.handle_execute("DELETE FROM users", [], [], state)
+      {:ok, _query, _result, state} =
+        EctoLibSql.handle_execute("DELETE FROM users", [], [], state)
 
       # Time re-prepare approach (prepare and close each time)
       {time_with_prepare, _} =
@@ -258,7 +259,7 @@ defmodule EctoLibSql.StatementFeaturesTest do
         ])
 
       # Verify both inserts succeeded
-      {:ok, _, result, _} =
+      {:ok, _query, result, _state} =
         EctoLibSql.handle_execute("SELECT name FROM users ORDER BY id", [], [], state)
 
       assert [["Alice"], ["Bob"]] = result.rows
@@ -283,7 +284,7 @@ defmodule EctoLibSql.StatementFeaturesTest do
       end
 
       # Verify all inserts
-      {:ok, _, result, _} =
+      {:ok, _query, result, _state} =
         EctoLibSql.handle_execute("SELECT COUNT(*) FROM users", [], [], state)
 
       assert [[5]] = result.rows
@@ -293,7 +294,7 @@ defmodule EctoLibSql.StatementFeaturesTest do
 
     test "reset_stmt returns error for invalid statement", %{state: state} do
       # Try to reset non-existent statement
-      assert {:error, _} = EctoLibSql.Native.reset_stmt(state, "invalid_stmt_id")
+      assert {:error, _reason} = EctoLibSql.Native.reset_stmt(state, "invalid_stmt_id")
     end
   end
 
@@ -379,7 +380,7 @@ defmodule EctoLibSql.StatementFeaturesTest do
 
     test "get_stmt_columns returns error for invalid statement", %{state: state} do
       # Try to get columns for non-existent statement
-      assert {:error, _} = EctoLibSql.Native.get_stmt_columns(state, "invalid_stmt_id")
+      assert {:error, _reason} = EctoLibSql.Native.get_stmt_columns(state, "invalid_stmt_id")
     end
   end
 
@@ -414,7 +415,7 @@ defmodule EctoLibSql.StatementFeaturesTest do
       create_sql =
         "CREATE TABLE many_cols (#{Enum.map(1..20, fn i -> "col#{i} TEXT" end) |> Enum.join(", ")})"
 
-      {:ok, _, _, state} = EctoLibSql.handle_execute(create_sql, [], [], state)
+      {:ok, _query, _result, state} = EctoLibSql.handle_execute(create_sql, [], [], state)
 
       # Prepare INSERT with 20 parameters
       insert_sql = "INSERT INTO many_cols (#{columns}) VALUES (#{placeholders})"
@@ -436,7 +437,7 @@ defmodule EctoLibSql.StatementFeaturesTest do
 
     test "parameter_count for complex nested queries", %{state: state} do
       # Create posts table for JOIN query
-      {:ok, _, _, state} =
+      {:ok, _query, _result, state} =
         EctoLibSql.handle_execute(
           "CREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER, title TEXT)",
           [],
@@ -608,7 +609,7 @@ defmodule EctoLibSql.StatementFeaturesTest do
 
     test "column metadata for JOIN with multiple tables", %{state: state} do
       # Create posts table
-      {:ok, _, _, state} =
+      {:ok, _query, _result, state} =
         EctoLibSql.handle_execute(
           "CREATE TABLE posts (id INTEGER PRIMARY KEY, user_id INTEGER, title TEXT, content TEXT)",
           [],
