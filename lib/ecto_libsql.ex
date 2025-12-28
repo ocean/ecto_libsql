@@ -126,7 +126,8 @@ defmodule EctoLibSql do
 
   Removes the connection from the Rust connection registry and cleans up any resources.
   """
-  @spec disconnect(Keyword.t(), EctoLibSql.State.t()) :: :ok | {:error, term(), EctoLibSql.State.t()}
+  @spec disconnect(Keyword.t(), EctoLibSql.State.t()) ::
+          :ok | {:error, term(), EctoLibSql.State.t()}
   def disconnect(_opts, %EctoLibSql.State{conn_id: conn_id} = state) do
     EctoLibSql.Native.close_conn(conn_id, :conn_id, state)
   end
@@ -136,7 +137,12 @@ defmodule EctoLibSql do
   Executes an SQL query, delegating to transactional or non-transactional logic
   depending on the connection state.
   """
-  @spec handle_execute(EctoLibSql.Query.t() | String.t(), list(), Keyword.t(), EctoLibSql.State.t()) ::
+  @spec handle_execute(
+          EctoLibSql.Query.t() | String.t(),
+          list(),
+          Keyword.t(),
+          EctoLibSql.State.t()
+        ) ::
           {:ok, EctoLibSql.Query.t(), EctoLibSql.Result.t(), EctoLibSql.State.t()}
           | {:error, EctoLibSql.Error.t(), EctoLibSql.State.t()}
   def handle_execute(query, args, _opts, %EctoLibSql.State{trx_id: trx_id} = state) do
