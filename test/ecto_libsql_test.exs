@@ -185,10 +185,8 @@ defmodule EctoLibSqlTest do
       select_execute =
         EctoLibSql.handle_execute(query_select, ["nosync@gmail.com"], [], remote_state)
 
-      assert {:ok, _query,
-              %EctoLibSql.Result{command: :select, columns: [], rows: [], num_rows: 0},
-              _state} =
-               select_execute
+      assert {:ok, _query, result, _state} = select_execute
+      assert %EctoLibSql.Result{command: :select, columns: [], rows: [], num_rows: 0} = result
     end
   end
 

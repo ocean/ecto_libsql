@@ -443,7 +443,7 @@ defmodule EctoLibSql.Native do
       {:ok, _} = EctoLibSql.Native.commit(state)
 
   """
-  @spec commit(EctoLibSql.State.t()) :: {:ok, EctoLibSql.State.t()} | {:error, term()}
+  @spec commit(EctoLibSql.State.t()) :: {:ok, String.t()} | {:error, term()}
   def commit(
         %EctoLibSql.State{conn_id: conn_id, trx_id: trx_id, mode: mode, sync: syncx} = _state
       ) do
@@ -460,7 +460,7 @@ defmodule EctoLibSql.Native do
       {:ok, _} = EctoLibSql.Native.rollback(state)
 
   """
-  @spec rollback(EctoLibSql.State.t()) :: {:ok, EctoLibSql.State.t()} | {:error, term()}
+  @spec rollback(EctoLibSql.State.t()) :: {:ok, String.t()} | {:error, term()}
   def rollback(
         %EctoLibSql.State{conn_id: conn_id, trx_id: trx_id, mode: mode, sync: syncx} = _state
       ) do
@@ -503,17 +503,28 @@ defmodule EctoLibSql.Native do
     String.downcase(first_word)
   end
 
+  # DML commands - data manipulation.
   defp command_atom("select"), do: :select
   defp command_atom("insert"), do: :insert
   defp command_atom("update"), do: :update
   defp command_atom("delete"), do: :delete
+
+  # Transaction control commands.
   defp command_atom("begin"), do: :begin
   defp command_atom("commit"), do: :commit
-  defp command_atom("create"), do: :create
   defp command_atom("rollback"), do: :rollback
+
+  # DDL commands - schema modifications are grouped under :create since they
+  # all modify database structure rather than data, and don't require distinct
+  # handling in result processing.
+  defp command_atom("create"), do: :create
   defp command_atom("drop"), do: :create
   defp command_atom("alter"), do: :create
+
+  # SQLite-specific.
   defp command_atom("pragma"), do: :pragma
+
+  # Catch-all for unrecognised commands.
   defp command_atom(_), do: :unknown
 
   @doc """

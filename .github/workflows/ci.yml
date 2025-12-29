@@ -55,6 +55,15 @@ jobs:
       - name: Run Rust tests
         run: cargo test --manifest-path native/ecto_libsql/Cargo.toml --all-features
 
+      - name: Install cargo-deny if not present
+        run: |
+          if ! command -v cargo-deny &> /dev/null; then
+            echo "cargo-deny not found, installing..."
+            cargo install cargo-deny --locked
+          else
+            echo "cargo-deny already installed: $(cargo-deny --version)"
+          fi
+
       - name: Check licences and security advisories
         working-directory: native/ecto_libsql
         run: cargo deny check licenses advisories

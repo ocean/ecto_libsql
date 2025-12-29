@@ -131,7 +131,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **License and Security Advisory Checking**
   - Added `cargo-deny` configuration (`deny.toml`) for dependency auditing
-  - Checks for: license compliance, security advisories, duplicate dependencies
+  - Checks for license compliance, security advisories, duplicate dependencies
   - Integrated into CI pipeline
 
 - **SQLite Hook Investigation (Documented as Unsupported)**
