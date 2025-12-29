@@ -20,6 +20,15 @@ defmodule EctoLibSql.Query do
 
   """
 
+  @typedoc "Query struct for EctoLibSql."
+  @type t :: %__MODULE__{
+          statement: String.t() | nil,
+          name: String.t() | nil,
+          prepared: boolean() | nil,
+          param_types: [atom()] | nil,
+          type: :binary | :text
+        }
+
   defstruct [:statement, :name, :prepared, :param_types, type: :binary]
 
   defimpl DBConnection.Query do

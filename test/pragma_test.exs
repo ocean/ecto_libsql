@@ -78,7 +78,7 @@ defmodule EctoLibSql.PragmaTest do
 
     test "journal_mode queries current mode", %{state: state} do
       # Set to WAL first
-      {:ok, _} = Pragma.set_journal_mode(state, :wal)
+      {:ok, _set_result} = Pragma.set_journal_mode(state, :wal)
 
       # Query should return WAL
       {:ok, result} = Pragma.journal_mode(state)
@@ -117,7 +117,7 @@ defmodule EctoLibSql.PragmaTest do
   describe "table_info" do
     test "returns column information for a table", %{state: state} do
       # Create a test table
-      {:ok, _, _, state} =
+      {:ok, _query, _result, state} =
         EctoLibSql.handle_execute(
           "CREATE TABLE pragma_test (id INTEGER PRIMARY KEY, name TEXT NOT NULL, age INTEGER)",
           [],
@@ -140,7 +140,7 @@ defmodule EctoLibSql.PragmaTest do
 
     test "accepts table name as string", %{state: state} do
       # Create a test table
-      {:ok, _, _, state} =
+      {:ok, _query, _result, state} =
         EctoLibSql.handle_execute(
           "CREATE TABLE pragma_test2 (id INTEGER)",
           [],
@@ -155,7 +155,7 @@ defmodule EctoLibSql.PragmaTest do
 
     test "accepts table name as atom", %{state: state} do
       # Create a test table
-      {:ok, _, _, state} =
+      {:ok, _query, _result, state} =
         EctoLibSql.handle_execute(
           "CREATE TABLE pragma_test3 (id INTEGER)",
           [],
@@ -172,10 +172,10 @@ defmodule EctoLibSql.PragmaTest do
   describe "table_list" do
     test "returns list of tables", %{state: state} do
       # Create some test tables
-      {:ok, _, _, state} =
+      {:ok, _query, _result, state} =
         EctoLibSql.handle_execute("CREATE TABLE test_table1 (id INTEGER)", [], [], state)
 
-      {:ok, _, _, state} =
+      {:ok, _query, _result, state} =
         EctoLibSql.handle_execute("CREATE TABLE test_table2 (id INTEGER)", [], [], state)
 
       # Get table list
@@ -199,7 +199,7 @@ defmodule EctoLibSql.PragmaTest do
       assert result.rows == [[0]]
 
       # Set to 42
-      {:ok, _} = Pragma.set_user_version(state, 42)
+      {:ok, _set_result} = Pragma.set_user_version(state, 42)
 
       # Verify
       {:ok, result} = Pragma.user_version(state)
@@ -208,7 +208,7 @@ defmodule EctoLibSql.PragmaTest do
 
     test "set_user_version accepts integers", %{state: state} do
       for version <- [1, 100, 999, 12345] do
-        {:ok, _} = Pragma.set_user_version(state, version)
+        {:ok, _set_result} = Pragma.set_user_version(state, version)
         {:ok, result} = Pragma.user_version(state)
         assert result.rows == [[version]]
       end
@@ -239,8 +239,8 @@ defmodule EctoLibSql.PragmaTest do
     test "multiple PRAGMAs can be set in sequence", %{state: state} do
       # Set multiple PRAGMAs
       assert :ok = Pragma.enable_foreign_keys(state)
-      assert {:ok, _} = Pragma.set_journal_mode(state, :wal)
-      assert {:ok, _} = Pragma.set_synchronous(state, :normal)
+      assert {:ok, _jm_result} = Pragma.set_journal_mode(state, :wal)
+      assert {:ok, _sync_result} = Pragma.set_synchronous(state, :normal)
 
       # Verify all settings
       {:ok, fk_result} = Pragma.foreign_keys(state)

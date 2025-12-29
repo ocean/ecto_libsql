@@ -96,6 +96,93 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Updated documentation in README.md with examples for all encryption scenarios
   - See [Turso Encryption Documentation](https://docs.turso.tech/cloud/encryption) for key generation and requirements
 
+- **Comprehensive Elixir Code Quality Tooling**
+  - Added **Credo** for static code analysis with strict configuration (`.credo.exs`)
+  - Added **Dialyxir** for type checking with proper ignore patterns (`.dialyzer_ignore.exs`)
+  - Added **Sobelow** security scanner for vulnerability detection
+  - All three tools integrated into GitHub CI pipeline for automated quality checks
+
+- **Property-Based Fuzz Testing (Elixir)**
+  - New `test/fuzz_test.exs` with comprehensive property-based tests using StreamData
+  - **SQL injection prevention tests** - Verifies parameters are safely escaped
+  - **Transaction behaviour fuzzing** - Tests `:deferred`, `:immediate`, `:exclusive` modes
+  - **Prepared statement fuzzing** - Tests various parameter types (integers, strings, floats)
+  - **Edge case numeric tests** - Tests 64-bit integer bounds and special float values
+  - **Binary/BLOB data handling** - Tests arbitrary binary data and round-trip integrity
+  - **Savepoint name validation** - Tests SQL injection prevention in nested transactions
+  - **Connection ID handling** - Tests graceful handling of invalid connection IDs
+
+- **Ecto SQL Adapter Compatibility Tests**
+  - `test/ecto_sql_compatibility_test.exs` - Core SQL compatibility tests
+  - `test/ecto_sql_transaction_compat_test.exs` - Transaction compatibility tests
+  - `test/ecto_stream_compat_test.exs` - Streaming compatibility tests
+  - Ported key tests from Ecto.Adapters.SQL test suite to verify compatibility
+
+- **Rust Fuzz Testing Infrastructure**
+  - Added `cargo-fuzz` based fuzzing in `native/ecto_libsql/fuzz/`
+  - Fuzz targets: `fuzz_detect_query_type`, `fuzz_should_use_query`, `fuzz_sql_structured`
+  - CI integration runs each fuzz target for 30 seconds per build
+  - Documentation in `native/ecto_libsql/FUZZING.md`
+
+- **Rust Property-Based Testing**
+  - Added `proptest` crate for property-based testing
+  - New `tests/proptest_tests.rs` with structured SQL generation tests
+  - Tests query type detection with generated SQL patterns
+
+- **License and Security Advisory Checking**
+  - Added `cargo-deny` configuration (`deny.toml`) for dependency auditing
+  - Checks for license compliance, security advisories, duplicate dependencies
+  - Integrated into CI pipeline
+
+- **SQLite Hook Investigation (Documented as Unsupported)**
+  - Researched SQLite update hooks and authorizer hooks for CDC and RLS
+  - Added `src/hooks.rs` with explicit `:unsupported` returns
+  - Documented Rustler threading limitations preventing implementation
+  - Added `test/hooks_test.exs` verifying unsupported behaviour
+  - Comprehensive documentation of alternative approaches in CHANGELOG
+
+### Changed
+
+- **Elixir Code Quality Improvements**
+  - **Eliminated duplicate code** in `batch/2` and `batch_transactional/2` functions
+    - Extracted common `parse_batch_results/1` helper function
+  - **Improved unused variable naming consistency** across all test files
+    - Changed `{:ok, _, _, state}` patterns to `{:ok, _query, _result, state}`
+    - Changed `{:error, _}` patterns to `{:error, _reason}`
+  - **Added typespecs** to key public functions:
+    - `sync/1`, `begin/2`, `commit/1`, `rollback/1` in `EctoLibSql.Native`
+    - `batch/2`, `batch_transactional/2` in `EctoLibSql.Native`
+    - `query/2`, `enable_foreign_keys/1` in `EctoLibSql.Pragma`
+  - **Fixed Dialyzer ignore file format** - Changed from tuples to regex list
+
+- **Rust Code Modernisation**
+  - Replaced `lazy_static!` with `std::sync::LazyLock` (Rust 1.80+ feature)
+  - Added stricter Clippy lints: `clippy::unwrap_used`, `clippy::expect_used`
+  - Fixed all Clippy warnings across the codebase
+  - Improved error handling patterns throughout
+
+- **CI Pipeline Enhancements**
+  - Added Credo and Sobelow checks to `elixir-tests-latest` job
+  - Added Rust fuzz testing job with 30-second per-target runs
+  - Added `cargo-deny` license and advisory checking
+  - Improved caching for faster builds
+
+### Fixed
+
+- **Security: SQL Injection Prevention in Pragma Module**
+  - Added `valid_identifier?/1` function to sanitise table names in `table_info/2`
+  - Prevents potential SQL injection via malicious table names
+  - Returns `{:error, {:invalid_identifier, name}}` for invalid identifiers
+
+- **Dialyzer Type Errors**
+  - Fixed `disconnect/2` spec type mismatch with DBConnection behaviour
+  - Changed first argument type from `Keyword.t()` to `term()`
+
+- **Fuzz Test Stability**
+  - Fixed savepoint fuzz tests to handle transaction conflicts gracefully
+  - Fixed handling of non-UTF8 binary data in NIF calls
+  - Added proper try/rescue blocks for ArgumentError in fuzz tests
+
 ### Clarifications
 
 - **ALTER TABLE ALTER COLUMN Support (Already Implemented)**

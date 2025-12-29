@@ -318,11 +318,13 @@ defmodule Ecto.Adapters.LibSql.Connection do
       reference_on_update(ref.on_update)
   end
 
+  defp reference_on_delete(nil), do: ""
   defp reference_on_delete(:nothing), do: ""
   defp reference_on_delete(:delete_all), do: " ON DELETE CASCADE"
   defp reference_on_delete(:nilify_all), do: " ON DELETE SET NULL"
   defp reference_on_delete(:restrict), do: " ON DELETE RESTRICT"
 
+  defp reference_on_update(nil), do: ""
   defp reference_on_update(:nothing), do: ""
   defp reference_on_update(:update_all), do: " ON UPDATE CASCADE"
   defp reference_on_update(:nilify_all), do: " ON UPDATE SET NULL"
@@ -353,7 +355,7 @@ defmodule Ecto.Adapters.LibSql.Connection do
           "SQLite does not support array types. Use JSON or separate tables instead."
   end
 
-  defp column_type(type, _opts) when is_atom(type), do: Atom.to_string(type) |> String.upcase()
+  defp column_type(type, _opts) when is_atom(type), do: String.upcase(Atom.to_string(type))
   defp column_type(type, _opts), do: type
 
   defp size_constraint(opts) do
@@ -554,8 +556,7 @@ defmodule Ecto.Adapters.LibSql.Connection do
   defp on_conflict({:raise, _, _}, _header, _placeholders), do: []
 
   # Pattern: {:nothing, _, conflict_target}
-  defp on_conflict({:nothing, _, targets}, _header, _placeholders)
-       when is_list(targets) and length(targets) > 0 do
+  defp on_conflict({:nothing, _, [_ | _] = targets}, _header, _placeholders) do
     [" ON CONFLICT ", conflict_target(targets), "DO NOTHING"]
   end
 
@@ -577,8 +578,8 @@ defmodule Ecto.Adapters.LibSql.Connection do
   end
 
   # Pattern: {fields_list, _, conflict_target} - for custom field replacement
-  defp on_conflict({fields, _, targets}, _header, _placeholders)
-       when is_list(fields) and is_list(targets) and length(targets) > 0 do
+  defp on_conflict({fields, _, [_ | _] = targets}, _header, _placeholders)
+       when is_list(fields) do
     [" ON CONFLICT ", conflict_target(targets), "DO ", replace(fields)]
   end
 
@@ -664,7 +665,7 @@ defmodule Ecto.Adapters.LibSql.Connection do
   ## Helpers for query generation
 
   defp create_names(%{sources: sources}) do
-    create_names(sources, 0, tuple_size(sources)) |> List.to_tuple()
+    List.to_tuple(create_names(sources, 0, tuple_size(sources)))
   end
 
   defp create_names(sources, pos, limit) when pos < limit do
@@ -827,8 +828,7 @@ defmodule Ecto.Adapters.LibSql.Connection do
   defp boolean(_name, [], _sources, _query), do: []
 
   defp boolean(name, [%{expr: expr, op: op} | query_exprs], sources, query) do
-    [
-      name,
+    reduced =
       Enum.reduce(query_exprs, {op, paren_expr(expr, sources, query)}, fn
         %{expr: expr, op: op}, {op, acc} ->
           {op, [acc, operator_to_boolean(op), paren_expr(expr, sources, query)]}
@@ -836,8 +836,8 @@ defmodule Ecto.Adapters.LibSql.Connection do
         %{expr: expr, op: op}, {_, acc} ->
           {op, [?(, acc, ?), operator_to_boolean(op), paren_expr(expr, sources, query)]}
       end)
-      |> elem(1)
-    ]
+
+    [name, elem(reduced, 1)]
   end
 
   defp operator_to_boolean(:and), do: " AND "

@@ -48,13 +48,16 @@ defmodule EctoLibSql.MixProject do
 
   defp deps do
     [
+      {:credo, "~> 1.7", only: [:dev, :test], runtime: false},
       {:db_connection, "~> 2.1"},
       {:dialyxir, "~> 1.4", only: [:dev], runtime: false},
       {:ecto, "~> 3.11"},
       {:ecto_sql, "~> 3.11"},
       {:ex_doc, "~> 0.31", only: :dev, runtime: false},
       {:jason, "~> 1.4"},
-      {:rustler, "~> 0.37.1"}
+      {:rustler, "~> 0.37.1"},
+      {:sobelow, "~> 0.13", only: [:dev, :test], runtime: false},
+      {:stream_data, "~> 1.0", only: [:dev, :test]}
     ]
   end
 

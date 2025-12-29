@@ -158,7 +158,8 @@ defmodule Ecto.Adapters.LibSql do
 
     File.mkdir_p!(Path.dirname(path))
 
-    case System.cmd("sqlite3", [database, ".schema"]) do
+    # Clear environment to avoid leaking sensitive variables to subprocess.
+    case System.cmd("sqlite3", [database, ".schema"], env: []) do
       {output, 0} ->
         File.write!(path, output)
         {:ok, path}

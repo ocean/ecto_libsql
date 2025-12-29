@@ -8,7 +8,7 @@ defmodule EctoLibSql.Result do
 
   ## Fields
 
-  - `:command` - The type of SQL command (`:select`, `:insert`, `:update`, `:delete`, or `:other`)
+  - `:command` - The type of SQL command (`:select`, `:insert`, `:update`, `:delete`, `:create`, `:begin`, `:commit`, `:rollback`, `:pragma`, `:batch`, `:unknown`, `:other`, or `nil`)
   - `:columns` - List of column names (for SELECT queries), or `nil`
   - `:rows` - List of rows, where each row is a list of values, or `nil`
   - `:num_rows` - Number of rows affected or returned
@@ -38,12 +38,27 @@ defmodule EctoLibSql.Result do
             rows: nil,
             num_rows: 0
 
-  @type command_type :: :select | :insert | :update | :delete | :other
+  @typedoc "The type of SQL command that was executed."
+  @type command_type ::
+          :select
+          | :insert
+          | :update
+          | :delete
+          | :batch
+          | :create
+          | :begin
+          | :commit
+          | :rollback
+          | :pragma
+          | :unknown
+          | :other
+          | nil
 
+  @typedoc "Result struct containing query results."
   @type t :: %__MODULE__{
-          command: command_type,
+          command: command_type(),
           columns: [String.t()] | nil,
-          rows: [[term]] | nil,
+          rows: [[term()]] | nil,
           num_rows: non_neg_integer()
         }
 

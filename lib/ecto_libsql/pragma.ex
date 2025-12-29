@@ -67,6 +67,8 @@ defmodule EctoLibSql.Pragma do
       {:ok, result} = EctoLibSql.Pragma.query(state, "PRAGMA table_info(users)")
 
   """
+  @spec query(State.t(), String.t()) ::
+          {:ok, EctoLibSql.Result.t()} | {:error, term()}
   def query(%State{conn_id: conn_id} = _state, pragma_stmt) when is_binary(pragma_stmt) do
     case Native.pragma_query(conn_id, pragma_stmt) do
       # Handle map response from NIF (standard format)
@@ -124,6 +126,7 @@ defmodule EctoLibSql.Pragma do
   Consider setting it in your Repo's `after_connect` callback.
 
   """
+  @spec enable_foreign_keys(State.t()) :: :ok | {:error, term()}
   def enable_foreign_keys(%State{} = state) do
     case query(state, "PRAGMA foreign_keys = ON") do
       {:ok, _} -> :ok
@@ -332,7 +335,20 @@ defmodule EctoLibSql.Pragma do
   end
 
   def table_info(%State{} = state, table_name) when is_binary(table_name) do
-    query(state, "PRAGMA table_info(#{table_name})")
+    # Sanitise table name to prevent SQL injection.
+    # Only allow alphanumeric characters and underscores.
+    if valid_identifier?(table_name) do
+      query(state, "PRAGMA table_info(#{table_name})")
+    else
+      {:error, {:invalid_identifier, table_name}}
+    end
+  end
+
+  # Validate SQL identifier (table/column name).
+  # Only allows alphanumeric characters, underscores, and dots (for schema.table).
+  @spec valid_identifier?(String.t()) :: boolean()
+  defp valid_identifier?(name) when is_binary(name) do
+    name != "" and Regex.match?(~r/^[a-zA-Z_][a-zA-Z0-9_.]*$/, name)
   end
 
   @doc """

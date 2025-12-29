@@ -34,7 +34,7 @@ defmodule EctoLibSql.BatchFeaturesTest do
 
       # Should have results for all statements
       assert is_list(results)
-      assert length(results) >= 1
+      assert results != []
 
       EctoLibSql.disconnect([], state)
     end
@@ -43,7 +43,7 @@ defmodule EctoLibSql.BatchFeaturesTest do
       {:ok, state} = EctoLibSql.connect(database: database)
 
       # First create a table
-      {:ok, _, _, state} =
+      {:ok, _query, _result, state} =
         EctoLibSql.handle_execute(
           "CREATE TABLE atomic_test (id INTEGER PRIMARY KEY, value INTEGER)",
           [],
@@ -52,7 +52,7 @@ defmodule EctoLibSql.BatchFeaturesTest do
         )
 
       # Insert initial value
-      {:ok, _, _, state} =
+      {:ok, _query, _result, state} =
         EctoLibSql.handle_execute(
           "INSERT INTO atomic_test (id, value) VALUES (1, 100)",
           [],
@@ -67,10 +67,10 @@ defmodule EctoLibSql.BatchFeaturesTest do
       """
 
       # Should error due to duplicate key
-      assert {:error, _} = EctoLibSql.Native.execute_transactional_batch_sql(state, sql)
+      assert {:error, _reason} = EctoLibSql.Native.execute_transactional_batch_sql(state, sql)
 
       # Verify the UPDATE was rolled back
-      {:ok, _, result, _} =
+      {:ok, _query, result, _state} =
         EctoLibSql.handle_execute(
           "SELECT value FROM atomic_test WHERE id = 1",
           [],
@@ -107,7 +107,7 @@ defmodule EctoLibSql.BatchFeaturesTest do
         statement: "CREATE TABLE IF NOT EXISTS batch_test (id INTEGER PRIMARY KEY, value TEXT)"
       }
 
-      {:ok, _, _, state} = EctoLibSql.handle_execute(create_table, [], [], state)
+      {:ok, _query, _result, state} = EctoLibSql.handle_execute(create_table, [], [], state)
 
       # Execute batch of statements
       statements = [
@@ -139,10 +139,10 @@ defmodule EctoLibSql.BatchFeaturesTest do
         statement: "CREATE TABLE IF NOT EXISTS accounts (id INTEGER PRIMARY KEY, balance REAL)"
       }
 
-      {:ok, _, _, state} = EctoLibSql.handle_execute(create_table, [], [], state)
+      {:ok, _query, _result, state} = EctoLibSql.handle_execute(create_table, [], [], state)
 
       # Insert initial account with float
-      {:ok, _, _, state} =
+      {:ok, _query, _result, state} =
         EctoLibSql.handle_execute(
           "INSERT INTO accounts (id, balance) VALUES (?, ?)",
           [1, 100.50],
@@ -158,10 +158,10 @@ defmodule EctoLibSql.BatchFeaturesTest do
       ]
 
       # Should return error
-      assert {:error, _} = EctoLibSql.Native.batch_transactional(state, statements)
+      assert {:error, _reason} = EctoLibSql.Native.batch_transactional(state, statements)
 
       # Verify balance wasn't changed (rollback worked)
-      {:ok, _, result, _} =
+      {:ok, _query, result, _state} =
         EctoLibSql.handle_execute(
           "SELECT balance FROM accounts WHERE id = ?",
           [1],
@@ -179,7 +179,7 @@ defmodule EctoLibSql.BatchFeaturesTest do
       {:ok, state} = EctoLibSql.connect(database: database)
 
       # Create table
-      {:ok, _, _, state} =
+      {:ok, _query, _result, state} =
         EctoLibSql.handle_execute(
           "CREATE TABLE IF NOT EXISTS mixed_batch (id INTEGER PRIMARY KEY, val TEXT)",
           [],
@@ -218,7 +218,7 @@ defmodule EctoLibSql.BatchFeaturesTest do
       {:ok, state} = EctoLibSql.connect(database: database)
 
       # Create table
-      {:ok, _, _, state} =
+      {:ok, _query, _result, state} =
         EctoLibSql.handle_execute(
           "CREATE TABLE IF NOT EXISTS large_test (id INTEGER PRIMARY KEY, category TEXT, value INTEGER)",
           [],
@@ -233,10 +233,10 @@ defmodule EctoLibSql.BatchFeaturesTest do
           {"INSERT INTO large_test (id, category, value) VALUES (?, ?, ?)", [i, category, i * 10]}
         end
 
-      {:ok, _} = EctoLibSql.Native.batch(state, insert_statements)
+      {:ok, _results} = EctoLibSql.Native.batch(state, insert_statements)
 
       # Query with filter
-      {:ok, _, result, _} =
+      {:ok, _query, result, _state} =
         EctoLibSql.handle_execute(
           "SELECT COUNT(*) FROM large_test WHERE category = ?",
           ["even"],
