@@ -5,6 +5,15 @@ defmodule EctoLibSqlTest do
   setup_all do
     # Clean up any existing test database from previous runs
     File.rm("z_ecto_libsql_test-bar.db")
+    File.rm("z_ecto_libsql_test-bar.db-shm")
+    File.rm("z_ecto_libsql_test-bar.db-wal")
+
+    on_exit(fn ->
+      # Clean up bar.db at end of all tests too
+      File.rm("z_ecto_libsql_test-bar.db")
+      File.rm("z_ecto_libsql_test-bar.db-shm")
+      File.rm("z_ecto_libsql_test-bar.db-wal")
+    end)
 
     :ok
   end
@@ -24,6 +33,8 @@ defmodule EctoLibSqlTest do
     # Clean up database file after test completes
     on_exit(fn ->
       File.rm(test_db)
+      File.rm(test_db <> "-shm")
+      File.rm(test_db <> "-wal")
     end)
 
     {:ok, opts: opts}

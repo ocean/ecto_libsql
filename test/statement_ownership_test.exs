@@ -21,7 +21,11 @@ defmodule EctoLibSql.StatementOwnershipTest do
       Native.close(conn_id1, :conn_id)
       Native.close(conn_id2, :conn_id)
       File.rm(db_file1)
+      File.rm(db_file1 <> "-shm")
+      File.rm(db_file1 <> "-wal")
       File.rm(db_file2)
+      File.rm(db_file2 <> "-shm")
+      File.rm(db_file2 <> "-wal")
     end)
 
     {:ok, state1: state1, state2: state2, conn_id1: conn_id1, conn_id2: conn_id2}

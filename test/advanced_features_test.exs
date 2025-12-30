@@ -74,6 +74,8 @@ defmodule EctoLibSql.AdvancedFeaturesTest do
 
       # Cleanup
       File.rm(db_path)
+      File.rm(db_path <> "-shm")
+      File.rm(db_path <> "-wal")
     end
 
     test "max_write_replication_index returns error for invalid connection" do
