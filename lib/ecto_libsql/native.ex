@@ -509,6 +509,10 @@ defmodule EctoLibSql.Native do
   defp command_atom("update"), do: :update
   defp command_atom("delete"), do: :delete
 
+  # CTEs (Common Table Expressions) - WITH clauses are treated as select
+  # since they typically return rows (the main query following the CTE is usually SELECT).
+  defp command_atom("with"), do: :select
+
   # Transaction control commands.
   defp command_atom("begin"), do: :begin
   defp command_atom("commit"), do: :commit

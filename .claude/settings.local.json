@@ -31,11 +31,47 @@
       "Bash(cargo clippy:*)",
       "Bash(find:*)",
       "Bash(cargo doc:*)",
-      "WebSearch"
+      "WebSearch",
+      "Bash(ls:*)",
+      "Bash(wc:*)",
+      "Bash(pkill:*)",
+      "Bash(timeout 300 mix test:*)",
+      "Bash(cargo search:*)",
+      "Bash(cargo tree:*)",
+      "Bash(mix credo:*)",
+      "Bash(mix dialyzer:*)",
+      "Bash(mix sobelow:*)",
+      "Bash(git stash:*)",
+      "Bash(git --no-pager log:*)",
+      "Bash(bd:*)"
     ],
     "deny": [],
     "ask": []
   },
   "enableAllProjectMcpServers": true,
-  "enabledMcpjsonServers": []
+  "enabledMcpjsonServers": [],
+  "hooks": {
+    "PreCompact": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bd prime"
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "bd prime"
+          }
+        ]
+      }
+    ]
+  }
 }

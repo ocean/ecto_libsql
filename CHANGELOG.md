@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **CTE (Common Table Expression) Support**
+  - Full support for SQL WITH clauses in Ecto queries
+  - Both simple and recursive CTEs supported
+  - SQL generation in `Ecto.Adapters.LibSql.Connection` (connection.ex:843-883)
+  - Rust NIF support for CTE detection in `utils.rs:should_use_query()`
+  - CTEs treated as SELECT-like queries (return rows) for proper query/execute routing
+  - Example usage:
+    ```elixir
+    cte_query = from(e in Employee, where: e.level >= 2, select: %{id: e.id, name: e.name})
+    query = "high_level_employees"
+            |> with_cte("high_level_employees", as: ^cte_query)
+            |> select([h], h.name)
+    Repo.all(query)
+    ```
+  - Recursive CTE example:
+    ```elixir
+    query = "hierarchy"
+            |> with_cte("hierarchy", as: ^base_query)
+            |> recursive_ctes(true)
+            |> select([h], h.name)
+    ```
+  - 9 new CTE tests covering simple, recursive, and edge cases
+
+## [0.8.3] - 2025-12-29
+
+### Added
+
 - **RANDOM ROWID Support (libSQL Extension)**
   - Added support for libSQL's RANDOM ROWID table option to generate pseudorandom rowid values instead of consecutive integers
   - **Security/Privacy Benefits**: Prevents ID enumeration attacks and leaking business metrics through sequential IDs

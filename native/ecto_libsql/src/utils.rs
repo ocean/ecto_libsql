@@ -356,6 +356,19 @@ pub fn should_use_query(sql: &str) -> bool {
         return true;
     }
 
+    // Check if starts with WITH (CTEs - Common Table Expressions)
+    // CTEs typically return rows and should use query() path
+    if len - start >= 4
+        && (bytes[start] == b'W' || bytes[start] == b'w')
+        && (bytes[start + 1] == b'I' || bytes[start + 1] == b'i')
+        && (bytes[start + 2] == b'T' || bytes[start + 2] == b't')
+        && (bytes[start + 3] == b'H' || bytes[start + 3] == b'h')
+        // Verify it's followed by whitespace or end of string
+        && (start + 4 >= len || bytes[start + 4].is_ascii_whitespace())
+    {
+        return true;
+    }
+
     // Check for RETURNING clause (case-insensitive)
     if len >= 9 {
         let target = b"RETURNING";

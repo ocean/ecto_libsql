@@ -18,6 +18,8 @@ defmodule Ecto.Adapters.LibSql.MigrationTest do
 
     on_exit(fn ->
       File.rm(test_db)
+      File.rm(test_db <> "-shm")
+      File.rm(test_db <> "-wal")
     end)
 
     # Foreign keys are disabled by default in SQLite - tests that need them will enable them explicitly.

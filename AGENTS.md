@@ -60,7 +60,7 @@ Add to your `mix.exs`:
 ```elixir
 def deps do
   [
-    {:ecto_libsql, "~> 0.7.0"}
+    {:ecto_libsql, "~> 0.8.0"}
   ]
 end
 ```
@@ -1148,7 +1148,7 @@ Add `ecto_libsql` to your dependencies (it already includes `ecto_sql`):
 ```elixir
 def deps do
   [
-    {:ecto_libsql, "~> 0.4.0"}
+    {:ecto_libsql, "~> 0.8.0"}
   ]
 end
 ```
@@ -2283,6 +2283,37 @@ Get column name by index from prepared statement.
 
 **Returns:** `{:ok, name}` or `{:error, reason}`
 
+#### `EctoLibSql.Native.stmt_parameter_name/3` (v0.8.3+)
+
+Get parameter name by index from prepared statement.
+
+**Parameters:**
+- `state` (EctoLibSql.State): Connection state
+- `stmt_id` (String.t()): Statement ID
+- `index` (integer): Parameter index (1-based)
+
+**Returns:** `{:ok, name}` for named parameters (`:name`, `@name`, `$name`), `{:ok, nil}` for positional `?` placeholders, or `{:error, reason}`
+
+#### `EctoLibSql.Native.reset_stmt/2` (v0.8.3+)
+
+Reset a prepared statement to its initial state for reuse.
+
+**Parameters:**
+- `state` (EctoLibSql.State): Connection state
+- `stmt_id` (String.t()): Statement ID
+
+**Returns:** `:ok` or `{:error, reason}`
+
+#### `EctoLibSql.Native.get_stmt_columns/2` (v0.8.3+)
+
+Get column metadata for a prepared statement.
+
+**Parameters:**
+- `state` (EctoLibSql.State): Connection state
+- `stmt_id` (String.t()): Statement ID
+
+**Returns:** `{:ok, [{name, origin_name, decl_type}]}` or `{:error, reason}`
+
 ### Batch SQL Functions
 
 #### `EctoLibSql.Native.execute_batch_sql/2` (v0.7.0+)
@@ -2304,6 +2335,33 @@ Execute multiple SQL statements atomically in a transaction.
 - `sql` (String.t()): Multiple SQL statements separated by semicolons
 
 **Returns:** `{:ok, state}` or `{:error, reason}`
+
+### Extension Loading Functions (v0.8.3+)
+
+#### `EctoLibSql.Native.enable_extensions/2`
+
+Enable or disable SQLite extension loading for a connection.
+
+**Parameters:**
+- `state` (EctoLibSql.State): Connection state
+- `enabled` (boolean): `true` to enable, `false` to disable
+
+**Returns:** `:ok` or `{:error, reason}`
+
+**Security Warning:** Only enable extension loading if you trust the extensions being loaded.
+
+#### `EctoLibSql.Native.load_ext/3`
+
+Load a SQLite extension from a dynamic library file.
+
+**Parameters:**
+- `state` (EctoLibSql.State): Connection state
+- `path` (String.t()): Path to extension (.so, .dylib, or .dll)
+- `entry_point` (String.t() | nil): Optional custom entry point function
+
+**Returns:** `:ok` or `{:error, reason}`
+
+**Note:** Extension loading must be enabled first via `enable_extensions/2`.
 
 ---
 

@@ -33,6 +33,8 @@ defmodule EctoLibSql.SecurityTest do
       end
 
       File.rm(db_path)
+      File.rm(db_path <> "-shm")
+      File.rm(db_path <> "-wal")
     end)
 
     {:ok, state: state}

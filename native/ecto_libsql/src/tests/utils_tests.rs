@@ -361,18 +361,18 @@ mod should_use_query_tests {
     // ===== CTE (Common Table Expressions) Tests =====
 
     #[test]
-    fn test_cte_with_select_not_detected() {
-        // CTEs are NOT detected by the current implementation.
-        // These start with WITH, not SELECT, so they return false.
-        assert!(!should_use_query(
+    fn test_cte_with_select_detected() {
+        // CTEs (Common Table Expressions) starting with WITH are now detected.
+        // They typically contain SELECT queries and return rows.
+        assert!(should_use_query(
             "WITH active_users AS (SELECT * FROM users WHERE active = 1) SELECT * FROM active_users"
         ));
 
-        assert!(!should_use_query(
+        assert!(should_use_query(
             "WITH RECURSIVE cte AS (SELECT 1 AS n UNION ALL SELECT n+1 FROM cte WHERE n < 10) SELECT * FROM cte"
         ));
 
-        assert!(!should_use_query(
+        assert!(should_use_query(
             "WITH
                 admins AS (SELECT * FROM users WHERE role = 'admin'),
                 posts AS (SELECT * FROM posts WHERE published = 1)
@@ -381,11 +381,41 @@ mod should_use_query_tests {
     }
 
     #[test]
-    fn test_cte_with_insert_returning_detected_via_returning() {
-        // CTE with INSERT...RETURNING IS detected, but only because of the RETURNING keyword.
+    fn test_cte_with_whitespace() {
+        // CTEs with leading whitespace should also be detected.
+        assert!(should_use_query(
+            "  WITH cte AS (SELECT 1) SELECT * FROM cte"
+        ));
+        assert!(should_use_query(
+            "\nWITH cte AS (SELECT 1) SELECT * FROM cte"
+        ));
+        assert!(should_use_query(
+            "\t  WITH cte AS (SELECT 1) SELECT * FROM cte"
+        ));
+    }
+
+    #[test]
+    fn test_cte_case_insensitive() {
+        // WITH keyword should be case-insensitive.
+        assert!(should_use_query("WITH cte AS (SELECT 1) SELECT * FROM cte"));
+        assert!(should_use_query("with cte AS (SELECT 1) SELECT * FROM cte"));
+        assert!(should_use_query("With cte AS (SELECT 1) SELECT * FROM cte"));
+        assert!(should_use_query("wItH cte AS (SELECT 1) SELECT * FROM cte"));
+    }
+
+    #[test]
+    fn test_cte_with_insert_returning_detected() {
+        // CTE with INSERT...RETURNING is detected (via both WITH and RETURNING).
         assert!(should_use_query(
             "WITH inserted AS (INSERT INTO users (name) VALUES ('Alice') RETURNING id) SELECT * FROM inserted"
         ));
+    }
+
+    #[test]
+    fn test_not_cte_if_part_of_word() {
+        // "WITHDRAW" should not match WITH.
+        assert!(!should_use_query("WITHDRAW funds FROM account"));
+        assert!(!should_use_query("WITHIN range SELECT * FROM users"));
     }
 
     // ===== EXPLAIN Query Tests =====
@@ -585,8 +615,8 @@ mod should_use_query_tests {
 
     #[test]
     fn test_select_with_cte_pattern() {
-        // CTEs start with WITH, not SELECT, so they won't be detected.
-        assert!(!should_use_query(
+        // CTEs start with WITH and are now detected as queries that return rows.
+        assert!(should_use_query(
             "WITH active_users AS (SELECT * FROM users WHERE active = 1) SELECT * FROM active_users"
         ));
     }

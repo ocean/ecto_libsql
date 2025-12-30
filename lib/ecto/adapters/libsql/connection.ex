@@ -22,6 +22,12 @@ defmodule Ecto.Adapters.LibSql.Connection do
 
   @behaviour Ecto.Adapters.SQL.Connection
 
+  # Module attribute for parent query aliasing in CTEs and subqueries.
+  @parent_as __MODULE__
+
+  # Alias for CTE (Common Table Expression) handling.
+  alias Ecto.Query.{ByExpr, QueryExpr, WithExpr}
+
   ## Query Generation
 
   @impl true
@@ -462,9 +468,10 @@ defmodule Ecto.Adapters.LibSql.Connection do
   ## Query generation for CRUD operations
 
   @impl true
-  def all(query) do
-    sources = create_names(query)
+  def all(query, as_prefix \\ []) do
+    sources = create_names(query, as_prefix)
 
+    cte = cte(query, sources)
     from = "FROM #{from(query, sources)}"
     select = select(query, sources)
     join = join(query, sources)
@@ -472,13 +479,14 @@ defmodule Ecto.Adapters.LibSql.Connection do
     group_by = group_by(query, sources)
     having = having(query, sources)
     window = window(query, sources)
-    combination = combination(query)
+    combination = combination(query, as_prefix)
     order_by = order_by(query, sources)
     limit = limit(query, sources)
     offset = offset(query, sources)
     lock = lock(query, sources)
 
     [
+      cte,
       select,
       from,
       join,
@@ -495,7 +503,7 @@ defmodule Ecto.Adapters.LibSql.Connection do
 
   @impl true
   def update_all(query) do
-    sources = create_names(query)
+    sources = create_names(query, [])
     {from, name} = get_source(query, sources, 0)
 
     fields = update_fields(query, sources)
@@ -507,7 +515,7 @@ defmodule Ecto.Adapters.LibSql.Connection do
 
   @impl true
   def delete_all(query) do
-    sources = create_names(query)
+    sources = create_names(query, [])
     {from, name} = get_source(query, sources, 0)
 
     {join, wheres} = using_join(query, :delete_all, "USING", sources)
@@ -664,28 +672,28 @@ defmodule Ecto.Adapters.LibSql.Connection do
 
   ## Helpers for query generation
 
-  defp create_names(%{sources: sources}) do
-    List.to_tuple(create_names(sources, 0, tuple_size(sources)))
+  defp create_names(%{sources: sources}, as_prefix) do
+    List.to_tuple(create_names(sources, 0, tuple_size(sources), as_prefix))
   end
 
-  defp create_names(sources, pos, limit) when pos < limit do
-    [create_name(sources, pos) | create_names(sources, pos + 1, limit)]
+  defp create_names(sources, pos, limit, as_prefix) when pos < limit do
+    [create_name(sources, pos, as_prefix) | create_names(sources, pos + 1, limit, as_prefix)]
   end
 
-  defp create_names(_sources, pos, pos) do
+  defp create_names(_sources, pos, pos, _as_prefix) do
     []
   end
 
-  defp create_name(sources, pos) do
+  defp create_name(sources, pos, as_prefix) do
     case elem(sources, pos) do
       {:fragment, _, _} ->
-        {nil, nil}
+        {nil, as_prefix ++ [?f] ++ Integer.to_charlist(pos), nil}
 
-      %Ecto.SubQuery{} ->
-        {nil, nil}
+      %Ecto.SubQuery{query: query} ->
+        {nil, as_prefix ++ [?s] ++ Integer.to_charlist(pos), query}
 
       {table, schema, _} ->
-        {quote_table(nil, table), schema}
+        {quote_table(nil, table), as_prefix ++ [?s] ++ Integer.to_charlist(pos), schema}
     end
   end
 
@@ -695,12 +703,13 @@ defmodule Ecto.Adapters.LibSql.Connection do
   end
 
   defp get_source(_query, sources, ix) do
-    {source, _schema} = elem(sources, ix)
-    {source, [?s, Integer.to_string(ix)]}
+    {source, name, _schema} = elem(sources, ix)
+    {source, name}
   end
 
-  defp quote_qualified_name(_source, _sources, ix) do
-    [?s, Integer.to_string(ix)]
+  defp quote_qualified_name(_source, sources, ix) do
+    {_, name, _} = elem(sources, ix)
+    name
   end
 
   defp select(%{select: select} = query, sources) do
@@ -710,8 +719,8 @@ defmodule Ecto.Adapters.LibSql.Connection do
   defp select_fields(%{fields: fields}, sources, query) do
     intersperse_map(fields, ", ", fn
       {:&, _, [idx]} ->
-        {source, schema} = elem(sources, idx)
-        qualifier = quote_qualified_name(source, sources, idx)
+        {_source, _name, schema} = elem(sources, idx)
+        qualifier = quote_qualified_name(nil, sources, idx)
 
         if schema do
           Enum.map_join(schema.__schema__(:fields), ", ", &[qualifier, ?., quote_name(&1)])
@@ -759,9 +768,9 @@ defmodule Ecto.Adapters.LibSql.Connection do
   defp group_by(%{group_bys: group_bys} = query, sources) do
     [
       " GROUP BY "
-      | intersperse_map(group_bys, ", ", fn
-          %Ecto.Query.QueryExpr{expr: expr} ->
-            intersperse_map(expr, ", ", &expr(&1, sources, query))
+      | Enum.map_intersperse(group_bys, ", ", fn
+          %ByExpr{expr: expr} ->
+            Enum.map_intersperse(expr, ", ", &expr(&1, sources, query))
         end)
     ]
   end
@@ -824,6 +833,54 @@ defmodule Ecto.Adapters.LibSql.Connection do
   end
 
   defp lock(_query, _sources), do: []
+
+  ## CTE (Common Table Expression) support
+
+  # Generate WITH clause for CTEs.
+  defp cte(%{with_ctes: %WithExpr{queries: [_ | _]}} = query, sources) do
+    %{with_ctes: with_expr} = query
+    recursive_opt = if with_expr.recursive, do: "RECURSIVE ", else: ""
+    ctes = Enum.map_intersperse(with_expr.queries, ", ", &cte_expr(&1, sources, query))
+    ["WITH ", recursive_opt, ctes, " "]
+  end
+
+  defp cte(%{with_ctes: _}, _sources), do: []
+
+  # Generate a single CTE definition: name AS (query).
+  defp cte_expr({name, opts, cte}, sources, query) do
+    operation_opt = Map.get(opts, :operation)
+    [quote_name(name), " AS ", cte_query(cte, sources, query, operation_opt)]
+  end
+
+  # Generate the query part of a CTE.
+  defp cte_query(query, sources, parent_query, nil) do
+    cte_query(query, sources, parent_query, :all)
+  end
+
+  defp cte_query(%Ecto.Query{} = query, sources, parent_query, :update_all) do
+    query = put_in(query.aliases[@parent_as], {parent_query, sources})
+    ["(", update_all(query), ")"]
+  end
+
+  defp cte_query(%Ecto.Query{} = query, sources, parent_query, :delete_all) do
+    query = put_in(query.aliases[@parent_as], {parent_query, sources})
+    ["(", delete_all(query), ")"]
+  end
+
+  defp cte_query(%Ecto.Query{} = query, sources, parent_query, :all) do
+    query = put_in(query.aliases[@parent_as], {parent_query, sources})
+    ["(", all(query, subquery_as_prefix(sources)), ")"]
+  end
+
+  defp cte_query(%QueryExpr{expr: expr}, sources, query, _operation) do
+    expr(expr, sources, query)
+  end
+
+  # Generate prefix for subquery aliases.
+  defp subquery_as_prefix(sources) do
+    {_, name, _} = :erlang.element(tuple_size(sources), sources)
+    [?s] ++ name
+  end
 
   defp boolean(_name, [], _sources, _query), do: []
 
@@ -997,11 +1054,20 @@ defmodule Ecto.Adapters.LibSql.Connection do
     "?"
   end
 
-  defp combination(%{combinations: []}), do: []
+  defp combination(%{combinations: []}, _as_prefix), do: []
 
-  defp combination(%{combinations: _combinations}) do
-    []
+  defp combination(%{combinations: combinations}, as_prefix) do
+    Enum.map(combinations, fn {type, query} ->
+      [combination_type(type), all(query, as_prefix)]
+    end)
   end
+
+  defp combination_type(:union), do: " UNION "
+  defp combination_type(:union_all), do: " UNION ALL "
+  defp combination_type(:except), do: " EXCEPT "
+  defp combination_type(:except_all), do: " EXCEPT ALL "
+  defp combination_type(:intersect), do: " INTERSECT "
+  defp combination_type(:intersect_all), do: " INTERSECT ALL "
 
   defp update_fields(%{updates: updates} = query, sources) do
     for(
