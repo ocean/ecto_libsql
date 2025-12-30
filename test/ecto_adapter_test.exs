@@ -8,7 +8,13 @@ defmodule Ecto.Adapters.LibSqlTest do
   setup do
     # Clean up any existing test database
     File.rm(@test_db)
-    on_exit(fn -> File.rm(@test_db) end)
+
+    on_exit(fn ->
+      File.rm(@test_db)
+      File.rm(@test_db <> "-shm")
+      File.rm(@test_db <> "-wal")
+    end)
+
     :ok
   end
 

@@ -30,6 +30,8 @@ defmodule EctoLibSql.PreparedStatementTest do
     on_exit(fn ->
       Native.close(state.conn_id, :conn_id)
       File.rm(db_file)
+      File.rm(db_file <> "-shm")
+      File.rm(db_file <> "-wal")
     end)
 
     {:ok, state: state}
