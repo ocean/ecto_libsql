@@ -217,7 +217,7 @@ git checkout -b feature-descriptive-name   # or bugfix-descriptive-name
 - Features: `feature-<descriptive-name>`
 - Bug fixes: `bugfix-<descriptive-name>`
 
-**⚠️ CRITICAL: Preserving Untracked Files**
+#### ⚠️ CRITICAL: Preserving Untracked Files
 
 The repository often has untracked/uncommitted files (docs, notes, etc.) that must NOT be lost when switching branches. Git preserves untracked files across branch switches automatically, but:
 - **NEVER run `git clean`** without explicit user approval
