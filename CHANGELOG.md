@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Query-Based UPSERT Support (on_conflict with Ecto.Query)**
+  - Extended `on_conflict` support to handle query-based updates
+  - Allows using keyword list syntax for dynamic update operations:
+    ```elixir
+    Repo.insert(changeset,
+      on_conflict: [set: [name: "updated", updated_at: DateTime.utc_now()]],
+      conflict_target: [:email]
+    )
+    ```
+  - Supports `:set` and `:inc` operations in the update clause
+  - Generates proper `ON CONFLICT (...) DO UPDATE SET ...` SQL
+  - Requires explicit `:conflict_target` (LibSQL/SQLite requirement)
+  - Implementation in `connection.ex:594-601` with `update_all_for_on_conflict/1` helper
+  - 3 new tests covering query-based on_conflict with set, inc, and error cases
+
 - **CTE (Common Table Expression) Support**
   - Full support for SQL WITH clauses in Ecto queries
   - Both simple and recursive CTEs supported

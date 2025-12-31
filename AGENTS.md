@@ -222,6 +222,53 @@ changes = EctoLibSql.Native.get_changes(state)
 IO.puts("Rows affected: #{changes}")
 ```
 
+### UPSERT (INSERT ... ON CONFLICT)
+
+EctoLibSql supports all Ecto `on_conflict` options for upsert operations:
+
+```elixir
+# Ignore conflicts (do nothing on duplicate key)
+{:ok, user} = Repo.insert(changeset,
+  on_conflict: :nothing,
+  conflict_target: [:email]
+)
+
+# Replace all fields on conflict
+{:ok, user} = Repo.insert(changeset,
+  on_conflict: :replace_all,
+  conflict_target: [:email]
+)
+
+# Replace specific fields only
+{:ok, user} = Repo.insert(changeset,
+  on_conflict: {:replace, [:name, :updated_at]},
+  conflict_target: [:email]
+)
+
+# Replace all except specific fields
+{:ok, user} = Repo.insert(changeset,
+  on_conflict: {:replace_all_except, [:id, :inserted_at]},
+  conflict_target: [:email]
+)
+
+# Query-based update with keyword list syntax
+{:ok, user} = Repo.insert(changeset,
+  on_conflict: [set: [name: "Updated Name", updated_at: DateTime.utc_now()]],
+  conflict_target: [:email]
+)
+
+# Increment counter on conflict
+{:ok, counter} = Repo.insert(counter_changeset,
+  on_conflict: [inc: [count: 1]],
+  conflict_target: [:key]
+)
+```
+
+**Notes:**
+- `:conflict_target` is required for LibSQL/SQLite (unlike PostgreSQL)
+- Composite unique indexes work: `conflict_target: [:slug, :parent_slug]`
+- Named constraints (`ON CONFLICT ON CONSTRAINT name`) are not supported
+
 ### SELECT
 
 ```elixir

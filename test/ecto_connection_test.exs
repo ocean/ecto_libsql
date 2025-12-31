@@ -709,5 +709,91 @@ defmodule Ecto.Adapters.LibSql.ConnectionTest do
       assert sql =~ "VALUES (?, ?)"
       refute sql =~ "ON CONFLICT"
     end
+
+    test "generates INSERT with ON CONFLICT DO UPDATE from query" do
+      # Build a query with update clause (simulating what Ecto does with keyword list on_conflict)
+      # The query must have sources set up as Ecto's planner does
+      query = %Ecto.Query{
+        from: %Ecto.Query.FromExpr{source: {"users", nil}},
+        sources: {{"users", nil, nil}},
+        updates: [
+          %Ecto.Query.QueryExpr{
+            expr: [set: [name: "updated_name"]]
+          }
+        ]
+      }
+
+      sql =
+        Connection.insert(
+          nil,
+          "users",
+          [:name, :email],
+          [[:name, :email]],
+          {query, [], [:email]},
+          [],
+          []
+        )
+        |> IO.iodata_to_binary()
+
+      assert sql =~ ~s[INSERT INTO "users"]
+      assert sql =~ ~s[("name", "email")]
+      assert sql =~ "VALUES (?, ?)"
+      assert sql =~ ~s[ON CONFLICT ("email") DO UPDATE SET]
+      assert sql =~ ~s["name" = 'updated_name']
+    end
+
+    test "generates INSERT with ON CONFLICT DO UPDATE with inc operation" do
+      query = %Ecto.Query{
+        from: %Ecto.Query.FromExpr{source: {"counters", nil}},
+        sources: {{"counters", nil, nil}},
+        updates: [
+          %Ecto.Query.QueryExpr{
+            expr: [inc: [count: 1]]
+          }
+        ]
+      }
+
+      sql =
+        Connection.insert(
+          nil,
+          "counters",
+          [:name, :count],
+          [[:name, :count]],
+          {query, [], [:name]},
+          [],
+          []
+        )
+        |> IO.iodata_to_binary()
+
+      assert sql =~ ~s[INSERT INTO "counters"]
+      assert sql =~ ~s[ON CONFLICT ("name") DO UPDATE SET]
+      assert sql =~ ~s["count" = "count" + 1]
+    end
+
+    test "raises error for query-based on_conflict without conflict_target" do
+      query = %Ecto.Query{
+        from: %Ecto.Query.FromExpr{source: {"users", nil}},
+        sources: {{"users", nil, nil}},
+        updates: [
+          %Ecto.Query.QueryExpr{
+            expr: [set: [name: "updated_name"]]
+          }
+        ]
+      }
+
+      assert_raise ArgumentError,
+                   "Upsert in LibSQL requires :conflict_target for query-based on_conflict",
+                   fn ->
+                     Connection.insert(
+                       nil,
+                       "users",
+                       [:name, :email],
+                       [[:name, :email]],
+                       {query, [], []},
+                       [],
+                       []
+                     )
+                   end
+    end
   end
 end

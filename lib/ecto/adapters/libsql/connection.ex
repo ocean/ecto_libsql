@@ -591,6 +591,15 @@ defmodule Ecto.Adapters.LibSql.Connection do
     [" ON CONFLICT ", conflict_target(targets), "DO ", replace(fields)]
   end
 
+  # Pattern: {%Ecto.Query{}, _, conflict_target} - for query-based updates
+  defp on_conflict({%Ecto.Query{} = _query, _, []}, _header, _placeholders) do
+    raise ArgumentError, "Upsert in LibSQL requires :conflict_target for query-based on_conflict"
+  end
+
+  defp on_conflict({%Ecto.Query{} = query, _, targets}, _header, _placeholders) do
+    [" ON CONFLICT ", conflict_target(targets), "DO ", update_all_for_on_conflict(query)]
+  end
+
   # Fallback for other on_conflict values (including plain :raise, etc.)
   defp on_conflict(_on_conflict, _header, _placeholders), do: []
 
@@ -607,6 +616,13 @@ defmodule Ecto.Adapters.LibSql.Connection do
   defp replace_field(field) do
     quoted = quote_name(field)
     [quoted, " = ", "excluded.", quoted]
+  end
+
+  # Generates UPDATE SET clause from a query for on_conflict
+  defp update_all_for_on_conflict(%Ecto.Query{} = query) do
+    sources = create_names(query, [])
+    fields = update_fields(query, sources)
+    ["UPDATE SET " | fields]
   end
 
   @impl true
