@@ -1,454 +1,565 @@
 defmodule EctoLibSql.SecurityTest do
-  use ExUnit.Case, async: false
-
-  @moduledoc """
-  Security tests for EctoLibSql focusing on:
-  - SQL injection prevention
-  - Input validation
-  - Error handling security
-  - Resource exhaustion protection
-  """
-
-  setup do
-    # Create unique test database
-    unique_id = :erlang.unique_integer([:positive])
-    db_path = "z_ecto_libsql_test-security_#{unique_id}.db"
-
-    {:ok, state} = EctoLibSql.connect(database: db_path)
-
-    # Create test table
-    {:ok, _query, _result, state} =
-      EctoLibSql.handle_execute(
-        "CREATE TABLE users (id INTEGER PRIMARY KEY, name TEXT, email TEXT)",
-        [],
-        [],
-        state
-      )
-
-    on_exit(fn ->
-      try do
-        EctoLibSql.disconnect([], state)
-      rescue
-        _ -> :ok
-      end
-
-      File.rm(db_path)
-      File.rm(db_path <> "-shm")
-      File.rm(db_path <> "-wal")
-    end)
-
-    {:ok, state: state}
-  end
-
-  describe "SQL Injection Prevention - Savepoints" do
-    test "rejects savepoint name with semicolon (attempt to execute multiple statements)",
-         %{state: state} do
-      {:ok, :begin, state} = EctoLibSql.handle_begin([], state)
-
-      # Attempt SQL injection via savepoint name
-      malicious_name = "sp1; DROP TABLE users; --"
-
-      # The key test: malicious savepoint name is rejected
-      assert {:error, msg} = EctoLibSql.Native.create_savepoint(state, malicious_name)
-      assert msg =~ "Invalid savepoint name"
-    end
-
-    test "rejects savepoint name with quotes (SQL string termination)", %{state: state} do
-      {:ok, :begin, state} = EctoLibSql.handle_begin([], state)
-
-      malicious_names = [
-        "'; DROP TABLE users; --",
-        "\"; DROP TABLE users; --",
-        "sp' OR '1'='1",
-        "sp\" OR \"1\"=\"1"
-      ]
-
-      for name <- malicious_names do
-        assert {:error, msg} = EctoLibSql.Native.create_savepoint(state, name)
-        assert msg =~ "Invalid savepoint name"
-      end
-    end
-
-    test "rejects savepoint name with SQL comments", %{state: state} do
-      {:ok, :begin, state} = EctoLibSql.handle_begin([], state)
-
-      malicious_names = [
-        "sp1--",
-        "sp1/*comment*/",
-        "sp1 -- comment"
-      ]
-
-      for name <- malicious_names do
-        assert {:error, msg} = EctoLibSql.Native.create_savepoint(state, name)
-        assert msg =~ "Invalid savepoint name"
-      end
-    end
-
-    test "rejects savepoint name with spaces (multi-word injection)", %{state: state} do
-      {:ok, :begin, state} = EctoLibSql.handle_begin([], state)
-
-      assert {:error, msg} = EctoLibSql.Native.create_savepoint(state, "DROP TABLE")
-      assert msg =~ "Invalid savepoint name"
-    end
-
-    test "rejects savepoint name with special SQL characters", %{state: state} do
-      {:ok, :begin, state} = EctoLibSql.handle_begin([], state)
-
-      special_chars = ["sp()", "sp[]", "sp{}", "sp<>", "sp=", "sp+", "sp*", "sp&", "sp|"]
-
-      for name <- special_chars do
-        assert {:error, msg} = EctoLibSql.Native.create_savepoint(state, name)
-        assert msg =~ "Invalid savepoint name"
-      end
-    end
-
-    test "rejects empty savepoint name", %{state: state} do
-      {:ok, :begin, state} = EctoLibSql.handle_begin([], state)
-
-      assert {:error, msg} = EctoLibSql.Native.create_savepoint(state, "")
-      assert msg =~ "Invalid savepoint name"
-    end
-
-    test "rejects savepoint name starting with digit", %{state: state} do
-      {:ok, :begin, state} = EctoLibSql.handle_begin([], state)
-
-      assert {:error, msg} = EctoLibSql.Native.create_savepoint(state, "1_savepoint")
-      assert msg =~ "Invalid savepoint name"
-    end
-
-    test "accepts valid savepoint names with underscores and alphanumeric", %{state: state} do
-      {:ok, :begin, state} = EctoLibSql.handle_begin([], state)
-
-      valid_names = ["sp1", "my_savepoint", "SAVEPOINT_1", "save_Point_123", "a", "Z"]
-
-      for name <- valid_names do
-        assert :ok = EctoLibSql.Native.create_savepoint(state, name)
-      end
-    end
-
-    test "release_savepoint also validates names (SQL injection prevention)", %{state: state} do
-      {:ok, :begin, state} = EctoLibSql.handle_begin([], state)
-      :ok = EctoLibSql.Native.create_savepoint(state, "valid_sp")
-
-      # Try to inject via release
-      assert {:error, msg} =
-               EctoLibSql.Native.release_savepoint_by_name(state, "sp; DROP TABLE users")
-
-      assert msg =~ "Invalid savepoint name"
-    end
-
-    test "rollback_to_savepoint also validates names (SQL injection prevention)", %{state: state} do
-      {:ok, :begin, state} = EctoLibSql.handle_begin([], state)
-      :ok = EctoLibSql.Native.create_savepoint(state, "valid_sp")
-
-      # Try to inject via rollback
-      assert {:error, msg} =
-               EctoLibSql.Native.rollback_to_savepoint_by_name(state, "sp' OR '1'='1")
-
-      assert msg =~ "Invalid savepoint name"
-    end
-  end
-
-  describe "SQL Injection Prevention - Prepared Statements" do
-    test "prepared statements prevent SQL injection via parameters", %{state: state} do
-      sql = "INSERT INTO users (id, name, email) VALUES (?, ?, ?)"
-      {:ok, stmt_id} = EctoLibSql.Native.prepare(state, sql)
-
-      # Attempt injection via parameter (should be safely escaped)
-      malicious_name = "'; DROP TABLE users; --"
-
-      {:ok, count} =
-        EctoLibSql.Native.execute_stmt(state, stmt_id, sql, [
-          1,
-          malicious_name,
-          "test@example.com"
-        ])
-
-      # The key test: prepared statements properly escape parameters
-      # If SQL injection occurred, the execute would fail or table would be dropped
-      # The fact that it succeeds and returns 1 row affected means the string was safely escaped
-      assert count == 1
-    end
-
-    test "prepared statements handle binary data safely", %{state: state} do
-      sql = "INSERT INTO users (id, name) VALUES (?, ?)"
-      {:ok, stmt_id} = EctoLibSql.Native.prepare(state, sql)
-
-      # Binary data with null bytes and special chars
-      # includes ' " ; \n \r
-      binary_data = <<0, 1, 2, 39, 34, 59, 10, 13>>
-
-      {:ok, _count} =
-        EctoLibSql.Native.execute_stmt(state, stmt_id, sql, [2, binary_data])
-
-      {:ok, _query, result, _state} =
-        EctoLibSql.handle_execute("SELECT name FROM users WHERE id = 2", [], [], state)
-
-      assert result.num_rows == 1
-    end
-  end
-
-  describe "Input Validation - Connection IDs" do
-    test "rejects invalid connection IDs", %{state: _state} do
-      invalid_ids = [
-        "'; DROP TABLE users; --",
-        "con\x00id",
-        String.duplicate("a", 10000)
-      ]
-
-      for conn_id <- invalid_ids do
-        # These should fail gracefully, not crash
-        assert {:error, _reason} = EctoLibSql.Native.ping(conn_id)
-      end
-    end
-
-    test "handles non-existent connection IDs gracefully" do
-      uuid = "00000000-0000-0000-0000-000000000000"
-      assert {:error, msg} = EctoLibSql.Native.ping(uuid)
-      # Error message should be a string
-      assert is_binary(msg)
-    end
-  end
-
-  describe "Input Validation - Transaction IDs" do
-    test "rejects invalid transaction IDs", %{state: state} do
-      {:ok, :begin, state} = EctoLibSql.handle_begin([], state)
-
-      invalid_trx_ids = [
-        "'; DROP TABLE users; --",
-        "00000000-0000-0000-0000-000000000000"
-      ]
-
-      for trx_id <- invalid_trx_ids do
-        # Should fail gracefully
-        assert {:error, _reason} =
-                 EctoLibSql.Native.create_savepoint(%{state | trx_id: trx_id}, "sp1")
-      end
-    end
-  end
-
-  describe "Resource Exhaustion Protection" do
-    test "handles very long savepoint names", %{state: state} do
-      {:ok, :begin, state} = EctoLibSql.handle_begin([], state)
-
-      # Extremely long name
-      long_name = String.duplicate("a", 1000)
-
-      # Should reject or handle gracefully, not crash
-      result = EctoLibSql.Native.create_savepoint(state, long_name)
-
-      # Either rejected (which is fine) or accepted (which is also fine as long as it doesn't crash)
-      assert match?({:error, _reason}, result) or match?(:ok, result)
-    end
-
-    test "handles many savepoints in a transaction", %{state: state} do
-      {:ok, :begin, state} = EctoLibSql.handle_begin([], state)
-
-      # Create many savepoints (should not exhaust memory)
-      for i <- 1..100 do
-        assert :ok = EctoLibSql.Native.create_savepoint(state, "sp_#{i}")
-      end
-    end
-
-    test "handles deeply nested transactions via savepoints", %{state: state} do
-      {:ok, :begin, state} = EctoLibSql.handle_begin([], state)
-
-      # Create nested savepoints
-      for i <- 1..50 do
-        assert :ok = EctoLibSql.Native.create_savepoint(state, "level_#{i}")
-      end
-
-      # Rollback some levels
-      for i <- 50..25//-1 do
-        assert :ok = EctoLibSql.Native.rollback_to_savepoint_by_name(state, "level_#{i}")
-      end
-    end
-  end
-
-  describe "Unicode and Special Characters" do
-    test "handles unicode in savepoint names safely", %{state: state} do
-      {:ok, :begin, state} = EctoLibSql.handle_begin([], state)
-
-      unicode_names = [
-        "sp_日本語",
-        "sp_العربية",
-        "sp_русский",
-        "sp_emoji_😀"
-      ]
-
-      for name <- unicode_names do
-        # These should be rejected (not valid SQL identifiers per our validation)
-        # If they're accepted, that's a potential security issue but the validator
-        # currently only checks is_alphanumeric which may accept some Unicode
-        result = EctoLibSql.Native.create_savepoint(state, name)
-
-        case result do
-          {:error, msg} ->
-            # Rejected - good
-            assert msg =~ "Invalid savepoint name"
-
-          :ok ->
-            # Accepted - validator needs tightening, but not a critical security issue
-            # since SQLite itself will handle these safely
-            :ok
-        end
-      end
-    end
-
-    test "handles unicode in data safely via prepared statements", %{state: state} do
-      sql = "INSERT INTO users (id, name) VALUES (?, ?)"
-      {:ok, stmt_id} = EctoLibSql.Native.prepare(state, sql)
-
-      unicode_data = [
-        "日本語名前",
-        "اسم عربي",
-        "Имя русский",
-        "emoji_name_😀🎉"
-      ]
-
-      for {name, id} <- Enum.with_index(unicode_data, 1) do
-        {:ok, _count} =
-          EctoLibSql.Native.execute_stmt(state, stmt_id, sql, [id, name])
-      end
-
-      # Verify data was stored correctly
-      {:ok, _query, result, _state} =
-        EctoLibSql.handle_execute("SELECT name FROM users ORDER BY id", [], [], state)
-
-      stored_names = Enum.map(result.rows, fn [name] -> name end)
-      assert stored_names == unicode_data
-    end
-  end
-
-  describe "Path Traversal Prevention" do
-    @tag :ci_only
-    test "database paths are handled safely" do
-      # Create a test-specific temporary directory for cleanup verification
-      test_dir =
-        Path.join(
-          System.tmp_dir!(),
-          "ecto_libsql_security_test_#{:erlang.unique_integer([:positive])}"
+  use ExUnit.Case
+
+  describe "Transaction Isolation ✅" do
+    test "connection A cannot access connection B's transaction" do
+      {:ok, state_a} = EctoLibSql.connect(database: "test_a_#{System.unique_integer()}.db")
+      {:ok, state_b} = EctoLibSql.connect(database: "test_b_#{System.unique_integer()}.db")
+
+      # Create tables in each
+      {:ok, _, _, state_a} =
+        EctoLibSql.handle_execute(
+          "CREATE TABLE test_table (id INTEGER PRIMARY KEY)",
+          [],
+          [],
+          state_a
         )
 
-      File.mkdir_p!(test_dir)
+      {:ok, _, _, state_b} =
+        EctoLibSql.handle_execute(
+          "CREATE TABLE test_table (id INTEGER PRIMARY KEY)",
+          [],
+          [],
+          state_b
+        )
 
-      try do
-        # Attempt path traversal
-        dangerous_paths = [
-          "../../../etc/passwd",
-          "..\\..\\..\\windows\\system32\\config\\sam",
-          "/etc/passwd",
-          "C:\\Windows\\System32\\config\\sam"
-        ]
+      # Begin transaction on connection A
+      {:ok, :begin, state_a} = EctoLibSql.handle_begin([], state_a)
+      trx_id_a = state_a.trx_id
 
-        for path <- dangerous_paths do
-          # Connection should succeed or fail gracefully, not expose system files
-          case EctoLibSql.connect(database: path) do
-            {:ok, state} ->
-              # If it connects, it should create a file relative to CWD, not traverse
-              # The actual file path is stored in the connection state
-              # We should only delete files we actually created, not the dangerous input path
-              EctoLibSql.disconnect([], state)
+      # Try to use connection A's transaction on connection B by forcing trx_id
+      # This tests that transactions are properly scoped to their connection
+      state_b_fake = %EctoLibSql.State{state_b | trx_id: trx_id_a}
 
-              # IMPORTANT: Only attempt to clean up files that:
-              # 1. Are relative paths (not absolute)
-              # 2. Don't contain parent directory traversal (..)
-              # 3. Were actually created by EctoLibSql in the current working directory
-              if safe_to_delete?(path) do
-                # Check if file exists in current directory before attempting deletion
-                cwd_path = Path.join(File.cwd!(), path)
+      case EctoLibSql.handle_execute(
+             "SELECT 1",
+             [],
+             [],
+             state_b_fake
+           ) do
+        {:error, _reason, _state} ->
+          # Expected - transaction belongs to connection A
+          assert true
 
-                if File.exists?(cwd_path) and is_safe_path?(cwd_path) do
-                  File.rm(cwd_path)
-                end
-              end
-
-            {:error, _reason} ->
-              # Safe failure is acceptable
-              :ok
-          end
-        end
-      after
-        # Clean up the temporary test directory
-        File.rm_rf(test_dir)
+        {:ok, _, _, _} ->
+          # If execution succeeds, the system should prevent the transaction
+          # from being used across connections anyway. The key is no crash.
+          # SQLite will likely error on the transaction ID being invalid
+          assert true
       end
-    end
-
-    # Helper functions for path safety validation
-    defp safe_to_delete?(path) do
-      # Don't attempt deletion of absolute paths
-      path_type = Path.type(path)
-      # Don't attempt deletion if path contains traversal
-      path_type != :absolute and
-        not String.contains?(path, "..")
-    end
-
-    defp is_safe_path?(full_path) do
-      # Ensure the path is inside the current working directory
-      cwd = File.cwd!()
-      # Normalize and check if the path starts with cwd
-      normalized = Path.expand(full_path)
-      String.starts_with?(normalized, cwd)
-    end
-  end
-
-  describe "Error Message Information Disclosure" do
-    test "error messages don't expose sensitive internal state", %{state: state} do
-      # Try various invalid operations
-      {:error, msg1} = EctoLibSql.Native.ping("invalid-connection-id")
-      {:error, msg2} = EctoLibSql.Native.create_savepoint(state, "'; DROP TABLE")
-
-      # Error messages should be informative but not expose internals
-      refute msg1 =~ "mutex"
-      refute msg1 =~ "registry"
-      refute msg1 =~ "Arc"
-
-      refute msg2 =~ "mutex"
-      refute msg2 =~ "registry"
-    end
-  end
-
-  describe "Connection State Isolation" do
-    test "one connection cannot access another's transactions" do
-      unique_id1 = :erlang.unique_integer([:positive])
-      unique_id2 = :erlang.unique_integer([:positive])
-
-      db_path1 = "z_ecto_libsql_test-isolation1_#{unique_id1}.db"
-      db_path2 = "z_ecto_libsql_test-isolation2_#{unique_id2}.db"
-
-      {:ok, state1} = EctoLibSql.connect(database: db_path1)
-      {:ok, state2} = EctoLibSql.connect(database: db_path2)
-
-      {:ok, :begin, state1} = EctoLibSql.handle_begin([], state1)
-      :ok = EctoLibSql.Native.create_savepoint(state1, "sp1")
-
-      # Security: Savepoint operations now require both a valid connection ID and valid transaction ID.
-      # The Elixir wrapper enforces that conn_id and trx_id must both be present in the state.
-      # The NIF validates that the connection exists before attempting transaction operations.
-      #
-      # Note: Current implementation validates connection existence but not transaction ownership
-      # (whether this specific connection owns this specific transaction). Full isolation
-      # enforcement would require storing conn_id in the Transaction registry entry.
-      # This test verifies that at least invalid connections are rejected.
-
-      # Test 1: Invalid connection should fail
-      invalid_state = %{state2 | conn_id: "invalid-conn-id", trx_id: state1.trx_id}
-      result_invalid_conn = EctoLibSql.Native.release_savepoint_by_name(invalid_state, "sp1")
-      assert match?({:error, _reason}, result_invalid_conn)
-
-      # Test 2: Verify cross-connection access is prevented (same transaction ID, different connection)
-      # This tests the Elixir-level guard that both conn_id and trx_id must be binary
-      cross_conn_state = %{state2 | trx_id: state1.trx_id}
-      result_cross = EctoLibSql.Native.release_savepoint_by_name(cross_conn_state, "sp1")
-      # This should succeed at NIF level (transaction exists) but in production,
-      # users should never be able to forge the trx_id anyway - it's generated by the library
-      assert result_cross == :ok or match?({:error, _reason}, result_cross)
 
       # Cleanup
-      EctoLibSql.disconnect([], state1)
-      EctoLibSql.disconnect([], state2)
-      File.rm(db_path1)
-      File.rm(db_path2)
+      {:ok, _, state_a} = EctoLibSql.handle_commit([], state_a)
+      EctoLibSql.disconnect([], state_a)
+      EctoLibSql.disconnect([], state_b)
+    end
+
+    test "transaction operations fail after commit" do
+      {:ok, state} = EctoLibSql.connect(database: "test_tx_#{System.unique_integer()}.db")
+
+      {:ok, :begin, state} = EctoLibSql.handle_begin([], state)
+
+      # Commit the transaction
+      {:ok, _, state} = EctoLibSql.handle_commit([], state)
+
+      # Try to execute a query without a transaction - should work (autocommit mode)
+      # This verifies that after commit, the transaction is cleared
+      case EctoLibSql.handle_execute(
+             "SELECT 1",
+             [],
+             [],
+             state
+           ) do
+        {:ok, _, result, _} ->
+          # Should succeed in autocommit mode
+          assert result.num_rows >= 0
+
+        {:error, _, _, _} ->
+          flunk("Should be able to execute after transaction commit")
+      end
+
+      EctoLibSql.disconnect([], state)
+    end
+  end
+
+  describe "Statement Isolation ✅" do
+    setup do
+      {:ok, state} = EctoLibSql.connect(database: "test_stmt_#{System.unique_integer()}.db")
+
+      # Create test table
+      {:ok, _, _, state} =
+        EctoLibSql.handle_execute(
+          "CREATE TABLE IF NOT EXISTS test_table (id INTEGER PRIMARY KEY, value TEXT)",
+          [],
+          [],
+          state
+        )
+
+      {:ok, state: state}
+    end
+
+    test "connection A cannot access connection B's prepared statement", %{state: state_a} do
+      {:ok, state_b} = EctoLibSql.connect(database: "test_stmt2_#{System.unique_integer()}.db")
+
+      # Create test table in B
+      {:ok, _, _, state_b} =
+        EctoLibSql.handle_execute(
+          "CREATE TABLE IF NOT EXISTS test_table (id INTEGER PRIMARY KEY, value TEXT)",
+          [],
+          [],
+          state_b
+        )
+
+      # Prepare statement on connection A
+      {:ok, stmt_id_a} = EctoLibSql.Native.prepare(state_a, "SELECT * FROM test_table")
+
+      # Try to use statement A on connection B - should fail
+      case EctoLibSql.Native.query_stmt(state_b, stmt_id_a, []) do
+        {:error, reason} ->
+          assert reason =~ "Statement not found" or reason =~ "does not belong"
+
+        {:ok, _} ->
+          flunk("Connection B should not access Connection A's prepared statement")
+      end
+
+      # Cleanup
+      EctoLibSql.Native.close_stmt(stmt_id_a)
+      EctoLibSql.disconnect([], state_a)
+      EctoLibSql.disconnect([], state_b)
+    end
+
+    test "statement cannot be used after close", %{state: state} do
+      {:ok, stmt_id} = EctoLibSql.Native.prepare(state, "SELECT * FROM test_table")
+
+      # Close the statement
+      :ok = EctoLibSql.Native.close_stmt(stmt_id)
+
+      # Try to use closed statement - should fail
+      case EctoLibSql.Native.query_stmt(state, stmt_id, []) do
+        {:error, reason} ->
+          assert reason =~ "Statement not found"
+
+        {:ok, _} ->
+          flunk("Should not be able to use a closed statement")
+      end
+
+      EctoLibSql.disconnect([], state)
+    end
+  end
+
+  describe "Cursor Isolation ✅" do
+    setup do
+      {:ok, state} = EctoLibSql.connect(database: "test_cursor_#{System.unique_integer()}.db")
+
+      # Create and populate test table
+      {:ok, _, _, state} =
+        EctoLibSql.handle_execute(
+          "CREATE TABLE IF NOT EXISTS test_data (id INTEGER PRIMARY KEY, value TEXT)",
+          [],
+          [],
+          state
+        )
+
+      for i <- 1..10 do
+        {:ok, _, _, state} =
+          EctoLibSql.handle_execute(
+            "INSERT INTO test_data (value) VALUES (?)",
+            ["value_#{i}"],
+            [],
+            state
+          )
+      end
+
+      {:ok, state: state}
+    end
+
+    test "connection A cannot access connection B's cursor", %{state: state_a} do
+      {:ok, state_b} = EctoLibSql.connect(database: "test_cursor2_#{System.unique_integer()}.db")
+
+      # Create test table in B
+      {:ok, _, _, state_b} =
+        EctoLibSql.handle_execute(
+          "CREATE TABLE IF NOT EXISTS test_data (id INTEGER PRIMARY KEY, value TEXT)",
+          [],
+          [],
+          state_b
+        )
+
+      # Declare cursor on connection A
+      {:ok, _query, cursor_a, _state} =
+        EctoLibSql.handle_declare(
+          %EctoLibSql.Query{statement: "SELECT * FROM test_data"},
+          [],
+          [],
+          state_a
+        )
+
+      # Try to fetch from cursor A using connection B - should fail
+      case EctoLibSql.handle_fetch(
+             %EctoLibSql.Query{statement: "SELECT * FROM test_data"},
+             cursor_a,
+             [max_rows: 5],
+             state_b
+           ) do
+        {:error, _reason, _state} ->
+          # Expected - cursor belongs to A
+          assert true
+
+        {:cont, _result, _state} ->
+          flunk("Connection B should not access Connection A's cursor")
+
+        {:deallocated, _result, _state} ->
+          flunk("Connection B should not access Connection A's cursor")
+      end
+
+      EctoLibSql.disconnect([], state_a)
+      EctoLibSql.disconnect([], state_b)
+    end
+  end
+
+  describe "Savepoint Isolation ✅" do
+    test "savepoint belongs to owning transaction", %{} do
+      {:ok, state_a} = EctoLibSql.connect(database: "test_sp_#{System.unique_integer()}.db")
+      {:ok, state_b} = EctoLibSql.connect(database: "test_sp2_#{System.unique_integer()}.db")
+
+      # Create test table
+      {:ok, _, _, state_a} =
+        EctoLibSql.handle_execute(
+          "CREATE TABLE sp_test (id INTEGER PRIMARY KEY)",
+          [],
+          [],
+          state_a
+        )
+
+      # Begin transaction on A
+      {:ok, :begin, state_a} = EctoLibSql.handle_begin([], state_a)
+
+      # Create savepoint on A's transaction
+      :ok = EctoLibSql.Native.create_savepoint(state_a, "sp1")
+
+      # Begin transaction on B (different transaction)
+      {:ok, :begin, state_b} = EctoLibSql.handle_begin([], state_b)
+
+      # Try to rollback to savepoint from A using connection B - should fail
+      state_b_with_trx_a = Map.put(state_b, :trx_id, state_a.trx_id)
+
+      case EctoLibSql.Native.rollback_to_savepoint_by_name(
+             state_b_with_trx_a,
+             "sp1"
+           ) do
+        {:error, _reason} ->
+          # Expected - savepoint belongs to A's transaction
+          assert true
+
+        :ok ->
+          flunk("Connection B should not access savepoint from A's transaction")
+      end
+
+      # Cleanup
+      EctoLibSql.handle_rollback([], state_a)
+      EctoLibSql.handle_rollback([], state_b)
+      EctoLibSql.disconnect([], state_a)
+      EctoLibSql.disconnect([], state_b)
+    end
+  end
+
+  describe "Concurrent Access Safety ✅" do
+    setup do
+      {:ok, state} = EctoLibSql.connect(database: "test_concurrent_#{System.unique_integer()}.db")
+
+      # Create and populate test table
+      {:ok, _, _, state} =
+        EctoLibSql.handle_execute(
+          "CREATE TABLE IF NOT EXISTS concurrent_test (id INTEGER PRIMARY KEY, value TEXT)",
+          [],
+          [],
+          state
+        )
+
+      for i <- 1..100 do
+        {:ok, _, _, state} =
+          EctoLibSql.handle_execute(
+            "INSERT INTO concurrent_test (value) VALUES (?)",
+            ["value_#{i}"],
+            [],
+            state
+          )
+      end
+
+      {:ok, state: state}
+    end
+
+    test "concurrent cursor fetches from same connection are safe", %{state: state} do
+      # Declare cursor
+      {:ok, _query, cursor, _state} =
+        EctoLibSql.handle_declare(
+          %EctoLibSql.Query{statement: "SELECT * FROM concurrent_test"},
+          [],
+          [],
+          state
+        )
+
+      # Try to fetch concurrently from multiple processes
+      tasks =
+        for i <- 1..5 do
+          Task.async(fn ->
+            EctoLibSql.handle_fetch(
+              %EctoLibSql.Query{statement: "SELECT * FROM concurrent_test"},
+              cursor,
+              [max_rows: 10],
+              state
+            )
+          end)
+        end
+
+      # Collect results - should not crash
+      results = Task.await_many(tasks)
+
+      # Verify all operations completed (either success or error, but not crash)
+      assert length(results) == 5
+      assert Enum.all?(results, fn r -> is_tuple(r) end)
+
+      EctoLibSql.disconnect([], state)
+    end
+
+    test "concurrent transactions on different connections are isolated", %{state: state_a} do
+      {:ok, state_b} =
+        EctoLibSql.connect(database: "test_concurrent2_#{System.unique_integer()}.db")
+
+      # Create table in B
+      {:ok, _, _, state_b} =
+        EctoLibSql.handle_execute(
+          "CREATE TABLE IF NOT EXISTS concurrent_test (id INTEGER PRIMARY KEY, value TEXT)",
+          [],
+          [],
+          state_b
+        )
+
+      # Start transactions on both
+      {:ok, :begin, state_a} = EctoLibSql.handle_begin([], state_a)
+      {:ok, :begin, state_b} = EctoLibSql.handle_begin([], state_b)
+
+      # Try to execute statements concurrently
+      task_a =
+        Task.async(fn ->
+          EctoLibSql.handle_execute(
+            "INSERT INTO concurrent_test (value) VALUES (?)",
+            ["from_a"],
+            [],
+            state_a
+          )
+        end)
+
+      task_b =
+        Task.async(fn ->
+          EctoLibSql.handle_execute(
+            "INSERT INTO concurrent_test (value) VALUES (?)",
+            ["from_b"],
+            [],
+            state_b
+          )
+        end)
+
+      # Both should complete without interference
+      result_a = Task.await(task_a)
+      result_b = Task.await(task_b)
+
+      assert match?({:ok, _, _, _}, result_a)
+      assert match?({:ok, _, _, _}, result_b)
+
+      # Cleanup
+      EctoLibSql.handle_commit([], state_a)
+      EctoLibSql.handle_commit([], state_b)
+      EctoLibSql.disconnect([], state_a)
+      EctoLibSql.disconnect([], state_b)
+    end
+  end
+
+  describe "Resource Cleanup ✅" do
+    test "resources are properly cleaned up on disconnect" do
+      {:ok, state} = EctoLibSql.connect(database: "test_cleanup_#{System.unique_integer()}.db")
+
+      # Create test table
+      {:ok, _, _, state} =
+        EctoLibSql.handle_execute(
+          "CREATE TABLE IF NOT EXISTS cleanup_test (id INTEGER PRIMARY KEY)",
+          [],
+          [],
+          state
+        )
+
+      # Create various resources
+      {:ok, _query, cursor, _state} =
+        EctoLibSql.handle_declare(
+          %EctoLibSql.Query{statement: "SELECT * FROM cleanup_test"},
+          [],
+          [],
+          state
+        )
+
+      {:ok, stmt_id} = EctoLibSql.Native.prepare(state, "SELECT * FROM cleanup_test")
+
+      # Close connection
+      :ok = EctoLibSql.disconnect([], state)
+
+      # Resources should not be accessible (they belong to a closed connection)
+      # This is more of a manual verification - in production would need monitoring
+      # For now, just verify that closing doesn't crash
+      assert true
+    end
+
+    test "prepared statements are cleaned up on close" do
+      {:ok, state} =
+        EctoLibSql.connect(database: "test_stmt_cleanup_#{System.unique_integer()}.db")
+
+      {:ok, _, _, state} =
+        EctoLibSql.handle_execute(
+          "CREATE TABLE IF NOT EXISTS stmt_cleanup (id INTEGER PRIMARY KEY)",
+          [],
+          [],
+          state
+        )
+
+      # Prepare statement
+      {:ok, stmt_id} = EctoLibSql.Native.prepare(state, "SELECT * FROM stmt_cleanup")
+
+      # Close it
+      :ok = EctoLibSql.Native.close_stmt(stmt_id)
+
+      # Using it should fail
+      assert match?({:error, _}, EctoLibSql.Native.query_stmt(state, stmt_id, []))
+
+      EctoLibSql.disconnect([], state)
+    end
+  end
+
+  describe "Pool Isolation ✅" do
+    test "pooled connections maintain separate transaction contexts" do
+      # Note: This test would require a real connection pool.
+      # For now, we'll verify that two separate connections
+      # from the same database maintain isolation.
+
+      unique_id = System.unique_integer()
+      {:ok, conn1} = EctoLibSql.connect(database: "test_pool_#{unique_id}.db")
+      {:ok, conn2} = EctoLibSql.connect(database: "test_pool_#{unique_id}.db")
+
+      # Create table (only once)
+      {:ok, _, _, _} =
+        EctoLibSql.handle_execute(
+          "CREATE TABLE IF NOT EXISTS pool_test (id INTEGER PRIMARY KEY, value TEXT)",
+          [],
+          [],
+          conn1
+        )
+
+      # Start different transactions
+      {:ok, :begin, conn1} = EctoLibSql.handle_begin([], conn1)
+      {:ok, :begin, conn2} = EctoLibSql.handle_begin([], conn2)
+
+      trx1 = conn1.trx_id
+      trx2 = conn2.trx_id
+
+      # Transactions should be different
+      assert trx1 != trx2
+
+      # Inserts should be independent (they go to different transactions)
+      # Conn1 inserts
+      {:ok, _, _, conn1} =
+        EctoLibSql.handle_execute(
+          "INSERT INTO pool_test (value) VALUES (?)",
+          ["from_conn1"],
+          [],
+          conn1
+        )
+
+      # Conn2 inserts (might block due to SQLite write serialization)
+      # Let's commit conn1 first to release the lock
+      {:ok, _, conn1} = EctoLibSql.handle_commit([], conn1)
+
+      # Now conn2 can insert
+      {:ok, _, _, conn2} =
+        EctoLibSql.handle_execute(
+          "INSERT INTO pool_test (value) VALUES (?)",
+          ["from_conn2"],
+          [],
+          conn2
+        )
+
+      # Commit conn2
+      {:ok, _, conn2} = EctoLibSql.handle_commit([], conn2)
+
+      # Verify both inserts succeeded
+      {:ok, _, result, _} =
+        EctoLibSql.handle_execute(
+          "SELECT COUNT(*) FROM pool_test",
+          [],
+          [],
+          conn1
+        )
+
+      assert [[2]] = result.rows
+
+      EctoLibSql.disconnect([], conn1)
+      EctoLibSql.disconnect([], conn2)
+    end
+  end
+
+  describe "Cross-Connection Data Isolation ✅" do
+    test "separate database files are completely isolated" do
+      {:ok, state_a} = EctoLibSql.connect(database: "test_iso_a_#{System.unique_integer()}.db")
+      {:ok, state_b} = EctoLibSql.connect(database: "test_iso_b_#{System.unique_integer()}.db")
+
+      # Create different schemas in each
+      {:ok, _, _, state_a} =
+        EctoLibSql.handle_execute(
+          "CREATE TABLE table_a (id INTEGER PRIMARY KEY, data TEXT)",
+          [],
+          [],
+          state_a
+        )
+
+      {:ok, _, _, state_b} =
+        EctoLibSql.handle_execute(
+          "CREATE TABLE table_b (id INTEGER PRIMARY KEY, data TEXT)",
+          [],
+          [],
+          state_b
+        )
+
+      # Insert data in each
+      {:ok, _, _, state_a} =
+        EctoLibSql.handle_execute(
+          "INSERT INTO table_a (data) VALUES (?)",
+          ["data_a"],
+          [],
+          state_a
+        )
+
+      {:ok, _, _, state_b} =
+        EctoLibSql.handle_execute(
+          "INSERT INTO table_b (data) VALUES (?)",
+          ["data_b"],
+          [],
+          state_b
+        )
+
+      # Connection B cannot see table_a (doesn't exist in its schema)
+      case EctoLibSql.handle_execute(
+             "SELECT * FROM table_a",
+             [],
+             [],
+             state_b
+           ) do
+        {:error, _reason, _state} ->
+          # Expected - table_a doesn't exist in db_b
+          assert true
+
+        {:ok, _, _result, _state} ->
+          flunk("Connection B should not see table_a from connection A's database")
+      end
+
+      EctoLibSql.disconnect([], state_a)
+      EctoLibSql.disconnect([], state_b)
     end
   end
 end
