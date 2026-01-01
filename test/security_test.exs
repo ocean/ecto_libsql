@@ -1,10 +1,19 @@
 defmodule EctoLibSql.SecurityTest do
-  use ExUnit.Case
+  use ExUnit.Case, async: false
+
+  # Helper to clean up database files and associated WAL/SHM files.
+  defp cleanup_db(db_path) do
+    File.rm(db_path)
+    File.rm(db_path <> "-wal")
+    File.rm(db_path <> "-shm")
+  end
 
   describe "Transaction Isolation ✅" do
     test "connection A cannot access connection B's transaction" do
-      {:ok, state_a} = EctoLibSql.connect(database: "test_a_#{System.unique_integer()}.db")
-      {:ok, state_b} = EctoLibSql.connect(database: "test_b_#{System.unique_integer()}.db")
+      db_a = "test_a_#{System.unique_integer()}.db"
+      db_b = "test_b_#{System.unique_integer()}.db"
+      {:ok, state_a} = EctoLibSql.connect(database: db_a)
+      {:ok, state_b} = EctoLibSql.connect(database: db_b)
 
       # Create tables in each
       {:ok, _, _, state_a} =
@@ -52,10 +61,13 @@ defmodule EctoLibSql.SecurityTest do
       {:ok, _, state_a} = EctoLibSql.handle_commit([], state_a)
       EctoLibSql.disconnect([], state_a)
       EctoLibSql.disconnect([], state_b)
+      cleanup_db(db_a)
+      cleanup_db(db_b)
     end
 
     test "transaction operations fail after commit" do
-      {:ok, state} = EctoLibSql.connect(database: "test_tx_#{System.unique_integer()}.db")
+      db_path = "test_tx_#{System.unique_integer()}.db"
+      {:ok, state} = EctoLibSql.connect(database: db_path)
 
       {:ok, :begin, state} = EctoLibSql.handle_begin([], state)
 
@@ -79,12 +91,14 @@ defmodule EctoLibSql.SecurityTest do
       end
 
       EctoLibSql.disconnect([], state)
+      cleanup_db(db_path)
     end
   end
 
   describe "Statement Isolation ✅" do
     setup do
-      {:ok, state} = EctoLibSql.connect(database: "test_stmt_#{System.unique_integer()}.db")
+      db_path = "test_stmt_#{System.unique_integer()}.db"
+      {:ok, state} = EctoLibSql.connect(database: db_path)
 
       # Create test table
       {:ok, _, _, state} =
@@ -95,11 +109,16 @@ defmodule EctoLibSql.SecurityTest do
           state
         )
 
-      {:ok, state: state}
+      on_exit(fn ->
+        cleanup_db(db_path)
+      end)
+
+      {:ok, state: state, db_path: db_path}
     end
 
     test "connection A cannot access connection B's prepared statement", %{state: state_a} do
-      {:ok, state_b} = EctoLibSql.connect(database: "test_stmt2_#{System.unique_integer()}.db")
+      db_path_b = "test_stmt2_#{System.unique_integer()}.db"
+      {:ok, state_b} = EctoLibSql.connect(database: db_path_b)
 
       # Create test table in B
       {:ok, _, _, state_b} =
@@ -126,6 +145,7 @@ defmodule EctoLibSql.SecurityTest do
       EctoLibSql.Native.close_stmt(stmt_id_a)
       EctoLibSql.disconnect([], state_a)
       EctoLibSql.disconnect([], state_b)
+      cleanup_db(db_path_b)
     end
 
     test "statement cannot be used after close", %{state: state} do
@@ -149,7 +169,8 @@ defmodule EctoLibSql.SecurityTest do
 
   describe "Cursor Isolation ✅" do
     setup do
-      {:ok, state} = EctoLibSql.connect(database: "test_cursor_#{System.unique_integer()}.db")
+      db_path = "test_cursor_#{System.unique_integer()}.db"
+      {:ok, state} = EctoLibSql.connect(database: db_path)
 
       # Create and populate test table
       {:ok, _, _, state} =
@@ -161,7 +182,7 @@ defmodule EctoLibSql.SecurityTest do
         )
 
       for i <- 1..10 do
-        {:ok, _, _, state} =
+        {:ok, _, _, _state} =
           EctoLibSql.handle_execute(
             "INSERT INTO test_data (value) VALUES (?)",
             ["value_#{i}"],
@@ -170,11 +191,16 @@ defmodule EctoLibSql.SecurityTest do
           )
       end
 
+      on_exit(fn ->
+        cleanup_db(db_path)
+      end)
+
       {:ok, state: state}
     end
 
     test "connection A cannot access connection B's cursor", %{state: state_a} do
-      {:ok, state_b} = EctoLibSql.connect(database: "test_cursor2_#{System.unique_integer()}.db")
+      db_path_b = "test_cursor2_#{System.unique_integer()}.db"
+      {:ok, state_b} = EctoLibSql.connect(database: db_path_b)
 
       # Create test table in B
       {:ok, _, _, state_b} =
@@ -214,13 +240,16 @@ defmodule EctoLibSql.SecurityTest do
 
       EctoLibSql.disconnect([], state_a)
       EctoLibSql.disconnect([], state_b)
+      cleanup_db(db_path_b)
     end
   end
 
   describe "Savepoint Isolation ✅" do
     test "savepoint belongs to owning transaction", %{} do
-      {:ok, state_a} = EctoLibSql.connect(database: "test_sp_#{System.unique_integer()}.db")
-      {:ok, state_b} = EctoLibSql.connect(database: "test_sp2_#{System.unique_integer()}.db")
+      db_a = "test_sp_#{System.unique_integer()}.db"
+      db_b = "test_sp2_#{System.unique_integer()}.db"
+      {:ok, state_a} = EctoLibSql.connect(database: db_a)
+      {:ok, state_b} = EctoLibSql.connect(database: db_b)
 
       # Create test table
       {:ok, _, _, state_a} =
@@ -255,17 +284,20 @@ defmodule EctoLibSql.SecurityTest do
           flunk("Connection B should not access savepoint from A's transaction")
       end
 
-      # Cleanup
-      EctoLibSql.handle_rollback([], state_a)
-      EctoLibSql.handle_rollback([], state_b)
-      EctoLibSql.disconnect([], state_a)
-      EctoLibSql.disconnect([], state_b)
+      # Cleanup - pattern match to ensure cleanup succeeds.
+      {:ok, _, _} = EctoLibSql.handle_rollback([], state_a)
+      {:ok, _, _} = EctoLibSql.handle_rollback([], state_b)
+      :ok = EctoLibSql.disconnect([], state_a)
+      :ok = EctoLibSql.disconnect([], state_b)
+      cleanup_db(db_a)
+      cleanup_db(db_b)
     end
   end
 
   describe "Concurrent Access Safety ✅" do
     setup do
-      {:ok, state} = EctoLibSql.connect(database: "test_concurrent_#{System.unique_integer()}.db")
+      db_path = "test_concurrent_#{System.unique_integer()}.db"
+      {:ok, state} = EctoLibSql.connect(database: db_path)
 
       # Create and populate test table
       {:ok, _, _, state} =
@@ -285,6 +317,10 @@ defmodule EctoLibSql.SecurityTest do
             state
           )
       end
+
+      on_exit(fn ->
+        cleanup_db(db_path)
+      end)
 
       {:ok, state: state}
     end
@@ -323,8 +359,10 @@ defmodule EctoLibSql.SecurityTest do
     end
 
     test "concurrent transactions on different connections are isolated", %{state: state_a} do
+      db_path_b = "test_concurrent2_#{System.unique_integer()}.db"
+
       {:ok, state_b} =
-        EctoLibSql.connect(database: "test_concurrent2_#{System.unique_integer()}.db")
+        EctoLibSql.connect(database: db_path_b)
 
       # Create table in B
       {:ok, _, _, state_b} =
@@ -372,12 +410,14 @@ defmodule EctoLibSql.SecurityTest do
       EctoLibSql.handle_commit([], state_b)
       EctoLibSql.disconnect([], state_a)
       EctoLibSql.disconnect([], state_b)
+      cleanup_db(db_path_b)
     end
   end
 
   describe "Resource Cleanup ✅" do
     test "resources are properly cleaned up on disconnect" do
-      {:ok, state} = EctoLibSql.connect(database: "test_cleanup_#{System.unique_integer()}.db")
+      db_path = "test_cleanup_#{System.unique_integer()}.db"
+      {:ok, state} = EctoLibSql.connect(database: db_path)
 
       # Create test table
       {:ok, _, _, state} =
@@ -399,18 +439,34 @@ defmodule EctoLibSql.SecurityTest do
 
       {:ok, stmt_id} = EctoLibSql.Native.prepare(state, "SELECT * FROM cleanup_test")
 
-      # Close connection
+      # Verify resources work before disconnect.
+      assert match?({:ok, _}, EctoLibSql.Native.query_stmt(state, stmt_id, []))
+
+      assert match?(
+               {_columns, _rows, _count},
+               EctoLibSql.Native.fetch_cursor(state.conn_id, cursor.ref, 10)
+             )
+
+      # Close connection.
       :ok = EctoLibSql.disconnect([], state)
 
-      # Resources should not be accessible (they belong to a closed connection)
-      # This is more of a manual verification - in production would need monitoring
-      # For now, just verify that closing doesn't crash
-      assert true
+      # Resources should not be accessible after disconnect.
+      assert match?({:error, _}, EctoLibSql.Native.query_stmt(state, stmt_id, []))
+
+      # Cursor returns empty results when connection is gone (cursor was cleaned up).
+      assert match?(
+               {[], [], 0},
+               EctoLibSql.Native.fetch_cursor(state.conn_id, cursor.ref, 10)
+             )
+
+      cleanup_db(db_path)
     end
 
     test "prepared statements are cleaned up on close" do
+      db_path = "test_stmt_cleanup_#{System.unique_integer()}.db"
+
       {:ok, state} =
-        EctoLibSql.connect(database: "test_stmt_cleanup_#{System.unique_integer()}.db")
+        EctoLibSql.connect(database: db_path)
 
       {:ok, _, _, state} =
         EctoLibSql.handle_execute(
@@ -430,6 +486,7 @@ defmodule EctoLibSql.SecurityTest do
       assert match?({:error, _}, EctoLibSql.Native.query_stmt(state, stmt_id, []))
 
       EctoLibSql.disconnect([], state)
+      cleanup_db(db_path)
     end
   end
 
@@ -440,8 +497,9 @@ defmodule EctoLibSql.SecurityTest do
       # from the same database maintain isolation.
 
       unique_id = System.unique_integer()
-      {:ok, conn1} = EctoLibSql.connect(database: "test_pool_#{unique_id}.db")
-      {:ok, conn2} = EctoLibSql.connect(database: "test_pool_#{unique_id}.db")
+      db_path = "test_pool_#{unique_id}.db"
+      {:ok, conn1} = EctoLibSql.connect(database: db_path)
+      {:ok, conn2} = EctoLibSql.connect(database: db_path)
 
       # Create table (only once)
       {:ok, _, _, _} =
@@ -501,13 +559,16 @@ defmodule EctoLibSql.SecurityTest do
 
       EctoLibSql.disconnect([], conn1)
       EctoLibSql.disconnect([], conn2)
+      cleanup_db(db_path)
     end
   end
 
   describe "Cross-Connection Data Isolation ✅" do
     test "separate database files are completely isolated" do
-      {:ok, state_a} = EctoLibSql.connect(database: "test_iso_a_#{System.unique_integer()}.db")
-      {:ok, state_b} = EctoLibSql.connect(database: "test_iso_b_#{System.unique_integer()}.db")
+      db_a = "test_iso_a_#{System.unique_integer()}.db"
+      db_b = "test_iso_b_#{System.unique_integer()}.db"
+      {:ok, state_a} = EctoLibSql.connect(database: db_a)
+      {:ok, state_b} = EctoLibSql.connect(database: db_b)
 
       # Create different schemas in each
       {:ok, _, _, state_a} =
@@ -560,6 +621,8 @@ defmodule EctoLibSql.SecurityTest do
 
       EctoLibSql.disconnect([], state_a)
       EctoLibSql.disconnect([], state_b)
+      cleanup_db(db_a)
+      cleanup_db(db_b)
     end
   end
 end

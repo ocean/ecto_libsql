@@ -841,5 +841,34 @@ defmodule Ecto.Adapters.LibSql.MigrationTest do
       assert sql =~ "STORED"
       assert sql =~ "price * quantity"
     end
+
+    test "rejects generated column with default value" do
+      table = %Table{name: :users, prefix: nil}
+
+      columns = [
+        {:add, :id, :id, [primary_key: true]},
+        {:add, :computed, :string, [generated: "some_expr", default: "fallback"]}
+      ]
+
+      assert_raise ArgumentError,
+                   "generated columns cannot have a DEFAULT value (SQLite constraint)",
+                   fn ->
+                     Connection.execute_ddl({:create, table, columns})
+                   end
+    end
+
+    test "rejects generated column as primary key" do
+      table = %Table{name: :users, prefix: nil}
+
+      columns = [
+        {:add, :computed_id, :integer, [primary_key: true, generated: "rowid * 1000"]}
+      ]
+
+      assert_raise ArgumentError,
+                   "generated columns cannot be part of a PRIMARY KEY (SQLite constraint)",
+                   fn ->
+                     Connection.execute_ddl({:create, table, columns})
+                   end
+    end
   end
 end

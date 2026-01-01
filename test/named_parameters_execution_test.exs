@@ -34,7 +34,9 @@ defmodule EctoLibSql.NamedParametersExecutionTest do
       )
 
     on_exit(fn ->
-      File.rm("#{db_name}")
+      File.rm(db_name)
+      File.rm(db_name <> "-wal")
+      File.rm(db_name <> "-shm")
     end)
 
     {:ok, state: state, db_name: db_name}
@@ -418,7 +420,14 @@ defmodule EctoLibSql.NamedParametersExecutionTest do
       {:ok, _, _, state} =
         EctoLibSql.handle_execute(
           "INSERT INTO users (id, name, email, age) VALUES (:id, :name, :email, :age)",
-          %{id: 1, name: "Karen", email: "karen@example.com", age: 29, extra: "ignored", another: "also ignored"},
+          %{
+            id: 1,
+            name: "Karen",
+            email: "karen@example.com",
+            age: 29,
+            extra: "ignored",
+            another: "also ignored"
+          },
           [],
           state
         )
@@ -457,8 +466,8 @@ defmodule EctoLibSql.NamedParametersExecutionTest do
       [[1, "Leo", "leo@example.com", nil]] = result.rows
     end
 
-    test "Named parameters case-sensitive", %{state: state} do
-      # Parameter names should be case-sensitive (converted to atoms)
+    test "Named parameters are case-sensitive", %{state: state} do
+      # Insert with lowercase parameter names.
       {:ok, _, _, state} =
         EctoLibSql.handle_execute(
           "INSERT INTO users (id, name, email, age) VALUES (:id, :name, :email, :age)",
@@ -467,11 +476,24 @@ defmodule EctoLibSql.NamedParametersExecutionTest do
           state
         )
 
-      # Verify with lowercase atom lookup
+      # Query using :Name (uppercase N) in SQL but provide :name (lowercase) in params.
+      # The parameter should NOT match due to case sensitivity.
       {:ok, _, result, _state} =
         EctoLibSql.handle_execute(
-          "SELECT * FROM users WHERE id = :id",
-          %{id: 1},
+          "SELECT * FROM users WHERE name = :Name",
+          %{name: "Mike"},
+          [],
+          state
+        )
+
+      # Should find no rows because :Name != :name.
+      assert result.num_rows == 0
+
+      # Now use matching case - should work.
+      {:ok, _, result, _state} =
+        EctoLibSql.handle_execute(
+          "SELECT * FROM users WHERE name = :name",
+          %{name: "Mike"},
           [],
           state
         )

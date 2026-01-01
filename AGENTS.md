@@ -578,7 +578,7 @@ Named parameters in transactions:
 - **Prevention**: Prevents SQL injection attacks through proper parameter binding
 
 **Backward Compatibility:**
-Positional parameters (`?`) still work unchanged. Mix positional and named parameters carefully - SQLite applies them in parameter-order:
+Positional parameters (`?`) still work unchanged:
 
 ```elixir
 # Positional parameters still work
@@ -589,9 +589,11 @@ Positional parameters (`?`) still work unchanged. Mix positional and named param
   state
 )
 
-# Named parameters can coexist with positional in same Elixir codebase
-# (but not in the same query - SQLite doesn't allow mixing syntaxes)
+# Named and positional can coexist in separate queries within the same codebase
 ```
+
+**Avoiding Mixed Syntax:**
+While SQLite technically permits mixing positional (`?`) and named (`:name`) parameters in a single statement, this is discouraged. Named parameters receive implicit numeric indices which can conflict with positional parameters, leading to unexpected binding order. This adapter's map-based approach naturally avoids this issue—pass a list for positional queries, or a map for named queries, but don't mix within a single statement.
 
 #### How Statement Caching Works
 
@@ -1601,100 +1603,6 @@ end
 **SQL Output:**
 ```sql
 CREATE TABLE sessions (...) RANDOM ROWID
-```
-
-#### STRICT Tables (Type Enforcement)
-
-STRICT tables enforce strict type checking - columns must be one of the allowed SQLite types. This prevents accidental type mismatches and data corruption:
-
-```elixir
-# Create a STRICT table for type safety
-defmodule MyApp.Repo.Migrations.CreateUsers do
-  use Ecto.Migration
-
-  def change do
-    create table(:users, strict: true) do
-      add :id, :integer, primary_key: true
-      add :name, :string, null: false
-      add :email, :string, null: false
-      add :age, :integer
-      add :balance, :float, default: 0.0
-      add :avatar, :binary
-      add :is_active, :boolean, default: true
-
-      timestamps()
-    end
-
-    create unique_index(:users, [:email])
-  end
-end
-```
-
-**Benefits:**
-- **Type Safety**: Enforces that columns only accept their declared types (TEXT, INTEGER, REAL, BLOB, NULL)
-- **Data Integrity**: Prevents accidental type coercion that could lead to bugs
-- **Better Errors**: Clear error messages when incorrect types are inserted
-- **Performance**: Can enable better query optimisation by knowing exact column types
-
-**Allowed Types in STRICT Tables:**
-- `INT`, `INTEGER` - Integer values only
-- `TEXT` - Text values only
-- `BLOB` - Binary data only
-- `REAL` - Floating-point values only
-- `NULL` - NULL values only (rarely used)
-
-**Usage Examples:**
-
-```elixir
-# STRICT table with various types
-create table(:products, strict: true) do
-  add :sku, :string, null: false              # Must be TEXT
-  add :name, :string, null: false             # Must be TEXT
-  add :quantity, :integer, default: 0         # Must be INTEGER
-  add :price, :float, null: false             # Must be REAL
-  add :description, :text                     # Must be TEXT
-  add :image_data, :binary                    # Must be BLOB
-  add :published_at, :utc_datetime            # Stored as TEXT (ISO8601 format)
-  timestamps()
-end
-
-# Combining STRICT with RANDOM ROWID
-create table(:api_keys, options: [strict: true, random_rowid: true]) do
-  add :user_id, references(:users, on_delete: :delete_all)  # INTEGER
-  add :key, :string, null: false                            # TEXT
-  add :secret, :string, null: false                         # TEXT
-  add :last_used_at, :utc_datetime                          # TEXT
-  timestamps()
-end
-```
-
-**Restrictions:**
-- STRICT is a libSQL/SQLite 3.37+ extension (not available in older versions)
-- Type affinity is enforced: generic types like `TEXT(50)` or `DATE` are not allowed
-- Dynamic type changes (e.g., storing integers in TEXT columns) will fail with type errors
-- Standard SQLite does not support STRICT tables
-
-**SQL Output:**
-```sql
-CREATE TABLE users (
-  id INTEGER PRIMARY KEY,
-  name TEXT NOT NULL,
-  email TEXT NOT NULL,
-  age INTEGER,
-  balance REAL DEFAULT 0.0,
-  avatar BLOB,
-  is_active INTEGER DEFAULT 1,
-  inserted_at TEXT,
-  updated_at TEXT
-) STRICT
-```
-
-**Error Example:**
-```elixir
-# This will fail on a STRICT table:
-Repo.query!("INSERT INTO users (name, email, age) VALUES (?, ?, ?)",
-  [123, "alice@example.com", "thirty"])  # ← age is string, not INTEGER
-# Error: "Type mismatch" (SQLite enforces STRICT)
 ```
 
 #### ALTER COLUMN Support (libSQL Extension)

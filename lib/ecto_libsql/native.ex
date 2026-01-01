@@ -284,15 +284,16 @@ defmodule EctoLibSql.Native do
   end
 
   @doc false
+  # Returns list on success, {:error, reason} on failure.
   def normalize_arguments(conn_id, statement, args) do
-    # If args is already a list, return as-is (positional parameters)
+    # If args is already a list, return as-is (positional parameters).
     case args do
       list when is_list(list) ->
         list
 
       map when is_map(map) ->
-        # Convert named parameters map to positional list
-        # We need to introspect the statement to get parameter names and order them
+        # Convert named parameters map to positional list.
+        # Returns list on success, {:error, reason} on preparation failure.
         map_to_positional_args(conn_id, statement, map)
 
       _ ->
@@ -310,33 +311,66 @@ defmodule EctoLibSql.Native do
     end
   end
 
+  # Cache key for parameter metadata.
+  @param_cache_key {__MODULE__, :param_cache}
+
+  @doc false
+  defp get_cached_param_names(statement) do
+    case :persistent_term.get(@param_cache_key, nil) do
+      nil -> nil
+      cache -> Map.get(cache, statement)
+    end
+  end
+
+  @doc false
+  defp cache_param_names(statement, param_names) do
+    current = :persistent_term.get(@param_cache_key, %{})
+    :persistent_term.put(@param_cache_key, Map.put(current, statement, param_names))
+    param_names
+  end
+
   @doc false
   defp map_to_positional_args(conn_id, statement, param_map) do
-    # Prepare the statement to introspect parameters
+    # Check cache first to avoid repeated preparation overhead.
+    case get_cached_param_names(statement) do
+      nil ->
+        # Cache miss - introspect and cache parameter names.
+        # Returns list on success, {:error, reason} on failure.
+        introspect_and_cache_params(conn_id, statement, param_map)
+
+      param_names ->
+        # Cache hit - convert map to positional list using cached order.
+        Enum.map(param_names, fn name ->
+          Map.get(param_map, name, nil)
+        end)
+    end
+  end
+
+  @doc false
+  defp introspect_and_cache_params(conn_id, statement, param_map) do
+    # Prepare the statement to introspect parameters.
     stmt_id = prepare_statement(conn_id, statement)
 
-    # stmt_id is a string UUID on success, or error tuple on failure
+    # stmt_id is a string UUID on success, or error tuple on failure.
     case stmt_id do
       stmt_id when is_binary(stmt_id) ->
-        # Get parameter count
+        # Get parameter count.
         param_count =
           case statement_parameter_count(conn_id, stmt_id) do
             count when is_integer(count) -> count
             _ -> 0
           end
 
-        # Extract parameters in order
-        args =
+        # Extract parameter names in order.
+        param_names =
           Enum.map(1..param_count, fn idx ->
             case statement_parameter_name(conn_id, stmt_id, idx) do
               name when is_binary(name) ->
-                # Remove prefix (:, @, $) if present
-                clean_name = remove_param_prefix(name) |> String.to_atom()
-
-                Map.get(param_map, clean_name, nil)
+                # Remove prefix (:, @, $) if present.
+                remove_param_prefix(name) |> String.to_atom()
 
               nil ->
-                # Positional parameter (?)
+                # Positional parameter (?) - use nil as marker.
                 nil
 
               _ ->
@@ -344,23 +378,20 @@ defmodule EctoLibSql.Native do
             end
           end)
 
-        # Clean up prepared statement
+        # Clean up prepared statement.
         close_stmt(stmt_id)
 
-        # Filter out any nils that might have come from positional params
-        # If any parameter was not found in the map, we have an error
-        # but we'll let the database handle it
-        args
+        # Cache the parameter names for future calls.
+        cache_param_names(statement, param_names)
 
-      {:error, _reason} ->
-        # If we can't prepare the statement, fall back to assuming it's positional
-        # The actual execution will fail with a proper error
-        if is_map(param_map) do
-          # Convert map values to list in some order
-          Map.values(param_map)
-        else
-          param_map
-        end
+        # Convert map to positional list using the names.
+        Enum.map(param_names, fn name ->
+          Map.get(param_map, name, nil)
+        end)
+
+      {:error, reason} ->
+        # Propagate the preparation error to callers.
+        {:error, reason}
     end
   end
 
@@ -375,9 +406,22 @@ defmodule EctoLibSql.Native do
         %EctoLibSql.Query{statement: statement} = query,
         args
       ) do
-    # Convert named parameters (map) to positional parameters (list)
-    args_for_execution = normalize_arguments(conn_id, statement, args)
+    # Convert named parameters (map) to positional parameters (list).
+    # Returns {:error, reason} if parameter introspection fails.
+    case normalize_arguments(conn_id, statement, args) do
+      {:error, reason} ->
+        {:error,
+         %EctoLibSql.Error{
+           message: "Failed to prepare statement for parameter introspection: #{reason}"
+         }, state}
 
+      args_for_execution ->
+        do_query(conn_id, mode, syncx, statement, args_for_execution, query, state)
+    end
+  end
+
+  @doc false
+  defp do_query(conn_id, mode, syncx, statement, args_for_execution, query, state) do
     case query_args(conn_id, mode, syncx, statement, args_for_execution) do
       %{
         "columns" => columns,
@@ -427,21 +471,34 @@ defmodule EctoLibSql.Native do
         %EctoLibSql.Query{statement: statement} = query,
         args
       ) do
-    # Convert named parameters (map) to positional parameters (list)
-    args_for_execution = normalize_arguments(conn_id, statement, args)
+    # Convert named parameters (map) to positional parameters (list).
+    # Returns {:error, reason} if parameter introspection fails.
+    case normalize_arguments(conn_id, statement, args) do
+      {:error, reason} ->
+        {:error,
+         %EctoLibSql.Error{
+           message: "Failed to prepare statement for parameter introspection: #{reason}"
+         }, state}
 
-    # Detect the command type to route correctly
+      args_for_execution ->
+        do_execute_with_trx(conn_id, trx_id, statement, args_for_execution, query, state)
+    end
+  end
+
+  @doc false
+  defp do_execute_with_trx(conn_id, trx_id, statement, args_for_execution, query, state) do
+    # Detect the command type to route correctly.
     command = detect_command(statement)
 
-    # For SELECT statements (even without RETURNING), use query_with_trx_args
-    # For INSERT/UPDATE/DELETE with RETURNING, use query_with_trx_args
-    # For INSERT/UPDATE/DELETE without RETURNING, use execute_with_transaction
-    # Use word-boundary regex to detect RETURNING precisely (matching Rust NIF behavior)
+    # For SELECT statements (even without RETURNING), use query_with_trx_args.
+    # For INSERT/UPDATE/DELETE with RETURNING, use query_with_trx_args.
+    # For INSERT/UPDATE/DELETE without RETURNING, use execute_with_transaction.
+    # Use word-boundary regex to detect RETURNING precisely (matching Rust NIF behaviour).
     has_returning = Regex.match?(~r/\bRETURNING\b/i, statement)
     should_query = command == :select or has_returning
 
     if should_query do
-      # Use query_with_trx_args for SELECT or statements with RETURNING
+      # Use query_with_trx_args for SELECT or statements with RETURNING.
       case query_with_trx_args(trx_id, conn_id, statement, args_for_execution) do
         %{
           "columns" => columns,

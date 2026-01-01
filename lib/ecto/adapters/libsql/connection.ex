@@ -372,6 +372,19 @@ defmodule Ecto.Adapters.LibSql.Connection do
   end
 
   defp column_options(opts, composite_pk) do
+    # Validate generated column constraints (SQLite disallows these combinations).
+    if Keyword.has_key?(opts, :generated) do
+      if Keyword.has_key?(opts, :default) do
+        raise ArgumentError,
+              "generated columns cannot have a DEFAULT value (SQLite constraint)"
+      end
+
+      if Keyword.get(opts, :primary_key) do
+        raise ArgumentError,
+              "generated columns cannot be part of a PRIMARY KEY (SQLite constraint)"
+      end
+    end
+
     default = column_default(Keyword.get(opts, :default))
     null = if Keyword.get(opts, :null) == false, do: " NOT NULL", else: ""
 
