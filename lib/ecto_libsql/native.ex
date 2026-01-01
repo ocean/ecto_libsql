@@ -461,41 +461,51 @@ defmodule EctoLibSql.Native do
     # stmt_id is a string UUID on success, or error tuple on failure.
     case stmt_id do
       stmt_id when is_binary(stmt_id) ->
-        # Get parameter count.
-        param_count =
-          case statement_parameter_count(conn_id, stmt_id) do
-            count when is_integer(count) -> count
-            _ -> 0
-          end
+        # Get parameter count, propagating errors instead of silently falling back to 0.
+        case statement_parameter_count(conn_id, stmt_id) do
+          count when is_integer(count) and count >= 0 ->
+            # Extract parameter names in order (kept as strings to avoid atom creation).
+            param_names =
+              if count == 0 do
+                []
+              else
+                Enum.map(1..count, fn idx ->
+                  case statement_parameter_name(conn_id, stmt_id, idx) do
+                    name when is_binary(name) ->
+                      # Remove prefix (:, @, $) if present. Keep as string.
+                      remove_param_prefix(name)
 
-        # Extract parameter names in order (kept as strings to avoid atom creation).
-        param_names =
-          Enum.map(1..param_count, fn idx ->
-            case statement_parameter_name(conn_id, stmt_id, idx) do
-              name when is_binary(name) ->
-                # Remove prefix (:, @, $) if present. Keep as string.
-                remove_param_prefix(name)
+                    nil ->
+                      # Positional parameter (?) - use nil as marker.
+                      nil
 
-              nil ->
-                # Positional parameter (?) - use nil as marker.
-                nil
+                    {:error, _reason} ->
+                      # Parameter name lookup failed, use nil as fallback.
+                      nil
 
-              _ ->
-                nil
-            end
-          end)
+                    _ ->
+                      nil
+                  end
+                end)
+              end
 
-        # Clean up prepared statement.
-        close_stmt(stmt_id)
+            # Clean up prepared statement.
+            close_stmt(stmt_id)
 
-        # Cache the parameter names for future calls.
-        cache_param_names(statement, param_names)
+            # Cache the parameter names for future calls.
+            cache_param_names(statement, param_names)
 
-        # Convert map to positional list using the names.
-        # Support both atom and string keys in the input map.
-        Enum.map(param_names, fn name ->
-          get_map_value_flexible(param_map, name)
-        end)
+            # Convert map to positional list using the names.
+            # Support both atom and string keys in the input map.
+            Enum.map(param_names, fn name ->
+              get_map_value_flexible(param_map, name)
+            end)
+
+          {:error, reason} ->
+            # Clean up prepared statement before returning error.
+            close_stmt(stmt_id)
+            {:error, reason}
+        end
 
       {:error, reason} ->
         # Propagate the preparation error to callers.
@@ -515,29 +525,35 @@ defmodule EctoLibSql.Native do
 
       map when is_map(map) ->
         # Convert named parameters map to positional list using stmt introspection.
+        # Propagate errors instead of silently treating them as zero-parameter statements.
         case statement_parameter_count(conn_id, stmt_id) do
-          count when is_integer(count) and count > 0 ->
-            param_names =
-              Enum.map(1..count, fn idx ->
-                case statement_parameter_name(conn_id, stmt_id, idx) do
-                  name when is_binary(name) ->
-                    # Keep as string to avoid creating atoms at runtime.
-                    remove_param_prefix(name)
+          count when is_integer(count) and count >= 0 ->
+            if count == 0 do
+              # No parameters, return empty list.
+              []
+            else
+              param_names =
+                Enum.map(1..count, fn idx ->
+                  case statement_parameter_name(conn_id, stmt_id, idx) do
+                    name when is_binary(name) ->
+                      # Keep as string to avoid creating atoms at runtime.
+                      remove_param_prefix(name)
 
-                  _ ->
-                    nil
-                end
+                    {:error, _reason} ->
+                      # Parameter name lookup failed, use nil as fallback.
+                      nil
+
+                    _ ->
+                      nil
+                  end
+                end)
+
+              # Convert map to positional list using the names.
+              # Support both atom and string keys in the input map.
+              Enum.map(param_names, fn name ->
+                get_map_value_flexible(map, name)
               end)
-
-            # Convert map to positional list using the names.
-            # Support both atom and string keys in the input map.
-            Enum.map(param_names, fn name ->
-              get_map_value_flexible(map, name)
-            end)
-
-          0 ->
-            # No parameters, return empty list.
-            []
+            end
 
           {:error, reason} ->
             {:error, reason}
