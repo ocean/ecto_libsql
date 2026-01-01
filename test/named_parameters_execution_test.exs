@@ -378,15 +378,15 @@ defmodule EctoLibSql.NamedParametersExecutionTest do
   end
 
   describe "Prepared statements with named parameters" do
-    test "Prepared statement with named parameters", %{state: state} do
-      # Prepare statement
+    test "Prepared statement with named parameters introspection", %{state: state} do
+      # Prepare statement.
       {:ok, stmt_id} =
         EctoLibSql.Native.prepare(
           state,
           "INSERT INTO users (id, name, email, age) VALUES (:id, :name, :email, :age)"
         )
 
-      # Introspect parameter names
+      # Introspect parameter names.
       {:ok, param1} = EctoLibSql.Native.stmt_parameter_name(state, stmt_id, 1)
       {:ok, param2} = EctoLibSql.Native.stmt_parameter_name(state, stmt_id, 2)
       {:ok, param3} = EctoLibSql.Native.stmt_parameter_name(state, stmt_id, 3)
@@ -398,6 +398,80 @@ defmodule EctoLibSql.NamedParametersExecutionTest do
       assert param4 == ":age"
 
       EctoLibSql.Native.close_stmt(stmt_id)
+    end
+
+    test "execute_stmt with atom-keyed map parameters", %{state: state} do
+      sql = "INSERT INTO users (id, name, email, age) VALUES (:id, :name, :email, :age)"
+      {:ok, stmt_id} = EctoLibSql.Native.prepare(state, sql)
+
+      # Execute with a map of atom keys (named parameters).
+      {:ok, 1} =
+        EctoLibSql.Native.execute_stmt(state, stmt_id, sql, %{
+          id: 1,
+          name: "NamedTest",
+          email: "named@test.com",
+          age: 42
+        })
+
+      EctoLibSql.Native.close_stmt(stmt_id)
+
+      # Verify the insert worked.
+      {:ok, _, result, _state} =
+        EctoLibSql.handle_execute(
+          "SELECT * FROM users WHERE id = 1",
+          [],
+          [],
+          state
+        )
+
+      assert result.num_rows == 1
+      [[1, "NamedTest", "named@test.com", 42]] = result.rows
+    end
+
+    test "query_stmt with atom-keyed map parameters", %{state: state} do
+      # Insert test data first.
+      {:ok, _, _, state} =
+        EctoLibSql.handle_execute(
+          "INSERT INTO users (id, name, email, age) VALUES (1, 'QueryTest', 'query@test.com', 33)",
+          [],
+          [],
+          state
+        )
+
+      # Prepare a SELECT with named parameter.
+      sql = "SELECT * FROM users WHERE id = :id"
+      {:ok, stmt_id} = EctoLibSql.Native.prepare(state, sql)
+
+      # Query with a map of atom keys.
+      {:ok, result} = EctoLibSql.Native.query_stmt(state, stmt_id, %{id: 1})
+
+      assert result.num_rows == 1
+      [[1, "QueryTest", "query@test.com", 33]] = result.rows
+
+      EctoLibSql.Native.close_stmt(stmt_id)
+    end
+
+    test "prepared statement functions still work with positional lists", %{state: state} do
+      # Ensure backward compatibility - positional lists should still work.
+      sql = "INSERT INTO users (id, name, email, age) VALUES (?, ?, ?, ?)"
+      {:ok, stmt_id} = EctoLibSql.Native.prepare(state, sql)
+
+      {:ok, 1} =
+        EctoLibSql.Native.execute_stmt(state, stmt_id, sql, [2, "PosList", "pos@list.com", 25])
+
+      EctoLibSql.Native.close_stmt(stmt_id)
+
+      # Verify.
+      {:ok, _, result, _state} =
+        EctoLibSql.handle_execute(
+          "SELECT * FROM users WHERE id = 2",
+          [],
+          [],
+          state
+        )
+
+      assert result.num_rows == 1
+      [[2, "PosList", "pos@list.com", 25]] = result.rows
     end
   end
 

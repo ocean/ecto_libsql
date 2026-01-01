@@ -285,7 +285,7 @@ defmodule EctoLibSql.Native do
 
   @doc false
   # Returns list on success, {:error, reason} on failure.
-  def normalize_arguments(conn_id, statement, args) do
+  def normalise_arguments(conn_id, statement, args) do
     # If args is already a list, return as-is (positional parameters).
     case args do
       list when is_list(list) ->
@@ -396,6 +396,49 @@ defmodule EctoLibSql.Native do
   end
 
   @doc false
+  # Normalise arguments for prepared statements using stmt_id introspection.
+  # This avoids re-preparing the statement since we already have the stmt_id.
+  # Returns list on success, {:error, reason} on failure.
+  def normalise_arguments_for_stmt(conn_id, stmt_id, args) do
+    case args do
+      list when is_list(list) ->
+        # Already positional, return as-is.
+        list
+
+      map when is_map(map) ->
+        # Convert named parameters map to positional list using stmt introspection.
+        case statement_parameter_count(conn_id, stmt_id) do
+          count when is_integer(count) and count > 0 ->
+            param_names =
+              Enum.map(1..count, fn idx ->
+                case statement_parameter_name(conn_id, stmt_id, idx) do
+                  name when is_binary(name) ->
+                    remove_param_prefix(name) |> String.to_atom()
+
+                  _ ->
+                    nil
+                end
+              end)
+
+            # Convert map to positional list using the names.
+            Enum.map(param_names, fn name ->
+              Map.get(map, name, nil)
+            end)
+
+          0 ->
+            # No parameters, return empty list.
+            []
+
+          {:error, reason} ->
+            {:error, reason}
+        end
+
+      _ ->
+        args
+    end
+  end
+
+  @doc false
   def execute_non_trx(query, state, args) do
     query(state, query, args)
   end
@@ -408,7 +451,7 @@ defmodule EctoLibSql.Native do
       ) do
     # Convert named parameters (map) to positional parameters (list).
     # Returns {:error, reason} if parameter introspection fails.
-    case normalize_arguments(conn_id, statement, args) do
+    case normalise_arguments(conn_id, statement, args) do
       {:error, reason} ->
         {:error,
          %EctoLibSql.Error{
@@ -473,7 +516,7 @@ defmodule EctoLibSql.Native do
       ) do
     # Convert named parameters (map) to positional parameters (list).
     # Returns {:error, reason} if parameter introspection fails.
-    case normalize_arguments(conn_id, statement, args) do
+    case normalise_arguments(conn_id, statement, args) do
       {:error, reason} ->
         {:error,
          %EctoLibSql.Error{
@@ -505,7 +548,7 @@ defmodule EctoLibSql.Native do
           "rows" => rows,
           "num_rows" => num_rows
         } ->
-          # For INSERT/UPDATE/DELETE without actual returned rows, normalize empty lists to nil
+          # For INSERT/UPDATE/DELETE without actual returned rows, normalise empty lists to nil
           # This ensures consistency with non-transactional path
           {columns, rows} =
             if command in [:insert, :update, :delete] and columns == [] and rows == [] do
@@ -704,11 +747,17 @@ defmodule EctoLibSql.Native do
     - state: The connection state
     - stmt_id: The statement ID from prepare/2
     - sql: The original SQL (for sync detection)
-    - args: List of parameters
+    - args: List of positional parameters OR map with atom keys for named parameters
 
-  ## Example
+  ## Examples
+
+      # Positional parameters
       {:ok, stmt_id} = EctoLibSql.Native.prepare(state, "INSERT INTO users (name) VALUES (?)")
-      {:ok, rows_affected} = EctoLibSql.Native.execute_stmt(state, stmt_id, "INSERT INTO users (name) VALUES (?)", ["Alice"])
+      {:ok, rows_affected} = EctoLibSql.Native.execute_stmt(state, stmt_id, sql, ["Alice"])
+
+      # Named parameters with atom keys
+      {:ok, stmt_id} = EctoLibSql.Native.prepare(state, "INSERT INTO users (name) VALUES (:name)")
+      {:ok, rows_affected} = EctoLibSql.Native.execute_stmt(state, stmt_id, sql, %{name: "Alice"})
   """
   def execute_stmt(
         %EctoLibSql.State{conn_id: conn_id, mode: mode, sync: syncx} = _state,
@@ -716,12 +765,19 @@ defmodule EctoLibSql.Native do
         sql,
         args
       ) do
-    case execute_prepared(conn_id, stmt_id, mode, syncx, sql, args) do
-      num_rows when is_integer(num_rows) ->
-        {:ok, num_rows}
-
+    # Normalise arguments (convert map to positional list if needed).
+    case normalise_arguments_for_stmt(conn_id, stmt_id, args) do
       {:error, reason} ->
-        {:error, reason}
+        {:error, "Failed to normalise parameters: #{reason}"}
+
+      normalised_args ->
+        case execute_prepared(conn_id, stmt_id, mode, syncx, sql, normalised_args) do
+          num_rows when is_integer(num_rows) ->
+            {:ok, num_rows}
+
+          {:error, reason} ->
+            {:error, reason}
+        end
     end
   end
 
@@ -732,30 +788,43 @@ defmodule EctoLibSql.Native do
   ## Parameters
     - state: The connection state
     - stmt_id: The statement ID from prepare/2
-    - args: List of parameters
+    - args: List of positional parameters OR map with atom keys for named parameters
 
-  ## Example
+  ## Examples
+
+      # Positional parameters
       {:ok, stmt_id} = EctoLibSql.Native.prepare(state, "SELECT * FROM users WHERE id = ?")
       {:ok, result} = EctoLibSql.Native.query_stmt(state, stmt_id, [42])
+
+      # Named parameters with atom keys
+      {:ok, stmt_id} = EctoLibSql.Native.prepare(state, "SELECT * FROM users WHERE id = :id")
+      {:ok, result} = EctoLibSql.Native.query_stmt(state, stmt_id, %{id: 42})
   """
   def query_stmt(
         %EctoLibSql.State{conn_id: conn_id, mode: mode, sync: syncx} = _state,
         stmt_id,
         args
       ) do
-    case query_prepared(conn_id, stmt_id, mode, syncx, args) do
-      %{"columns" => columns, "rows" => rows, "num_rows" => num_rows} ->
-        result = %EctoLibSql.Result{
-          command: :select,
-          columns: columns,
-          rows: rows,
-          num_rows: num_rows
-        }
-
-        {:ok, result}
-
+    # Normalise arguments (convert map to positional list if needed).
+    case normalise_arguments_for_stmt(conn_id, stmt_id, args) do
       {:error, reason} ->
-        {:error, reason}
+        {:error, "Failed to normalise parameters: #{reason}"}
+
+      normalised_args ->
+        case query_prepared(conn_id, stmt_id, mode, syncx, normalised_args) do
+          %{"columns" => columns, "rows" => rows, "num_rows" => num_rows} ->
+            result = %EctoLibSql.Result{
+              command: :select,
+              columns: columns,
+              rows: rows,
+              num_rows: num_rows
+            }
+
+            {:ok, result}
+
+          {:error, reason} ->
+            {:error, reason}
+        end
     end
   end
 
