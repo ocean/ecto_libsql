@@ -315,7 +315,7 @@ defmodule EctoLibSql.Native do
   # Get a value from a map, supporting both atom and string keys.
   # This avoids creating atoms at runtime while allowing users to pass
   # either %{name: value} or %{"name" => value}.
-  defp get_map_value_flexible(map, nil), do: nil
+  defp get_map_value_flexible(_map, nil), do: nil
 
   defp get_map_value_flexible(map, name) when is_binary(name) do
     # Try atom key first (more common), then string key.
