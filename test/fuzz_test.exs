@@ -682,12 +682,13 @@ defmodule EctoLibSql.FuzzTest do
           try do
             EctoLibSql.handle_execute(sql, [value], [], state)
           rescue
-            _ -> {:error, :exception}
+            _ -> {:error, :exception, state}
           end
 
         case result do
           {:ok, _, _, _} -> assert true
-          {:error, _} -> assert true
+          {:error, _, _} -> assert true
+          {:disconnect, _, _} -> assert true
         end
       end
     end
@@ -702,12 +703,13 @@ defmodule EctoLibSql.FuzzTest do
           try do
             EctoLibSql.handle_execute(sql, [str_value], [], state)
           rescue
-            _ -> {:error, :exception}
+            _ -> {:error, :exception, state}
           end
 
         case result do
           {:ok, _, _, _} -> assert true
-          {:error, _} -> assert true
+          {:error, _, _} -> assert true
+          {:disconnect, _, _} -> assert true
         end
       end
     end
@@ -721,27 +723,31 @@ defmodule EctoLibSql.FuzzTest do
     property "handles arbitrary binary data in BLOB columns", %{state: state} do
       check all(blob_data <- binary(max_length: 1000)) do
         sql = "INSERT INTO fuzz_test (blob) VALUES (?)"
+        # Wrap in {:blob, data} tuple so NIF treats it as binary, not text.
+        blob_param = {:blob, blob_data}
 
         result =
           try do
-            EctoLibSql.handle_execute(sql, [blob_data], [], state)
+            EctoLibSql.handle_execute(sql, [blob_param], [], state)
           rescue
-            _ -> {:error, :exception}
+            _ -> {:error, :exception, state}
           end
 
         case result do
           {:ok, _, _, _} -> assert true
-          {:error, _} -> assert true
+          {:error, _, _} -> assert true
+          {:disconnect, _, _} -> assert true
         end
       end
     end
 
     property "round-trips binary data correctly", %{state: state} do
       check all(blob_data <- binary(min_length: 1, max_length: 500), max_runs: 20) do
-        # Insert the binary data.
+        # Insert the binary data wrapped as {:blob, data} so NIF treats it as binary.
         insert_sql = "INSERT INTO fuzz_test (blob) VALUES (?)"
+        blob_param = {:blob, blob_data}
 
-        case EctoLibSql.handle_execute(insert_sql, [blob_data], [], state) do
+        case EctoLibSql.handle_execute(insert_sql, [blob_param], [], state) do
           {:ok, _, _, new_state} ->
             # Get the last inserted rowid.
             rowid = EctoLibSql.Native.get_last_insert_rowid(new_state)
@@ -756,13 +762,21 @@ defmodule EctoLibSql.FuzzTest do
                   assert retrieved_blob == blob_data
                 end
 
-              {:error, _} ->
+              {:error, _, _} ->
                 # Selection failed, that's acceptable for fuzz testing.
+                assert true
+
+              {:disconnect, _, _} ->
+                # Disconnection, that's acceptable for fuzz testing.
                 assert true
             end
 
-          {:error, _} ->
+          {:error, _, _} ->
             # Insert failed, that's acceptable for fuzz testing.
+            assert true
+
+          {:disconnect, _, _} ->
+            # Disconnection, that's acceptable for fuzz testing.
             assert true
         end
       end
