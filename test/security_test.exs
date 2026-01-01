@@ -6,6 +6,7 @@ defmodule EctoLibSql.SecurityTest do
     File.rm(db_path)
     File.rm(db_path <> "-wal")
     File.rm(db_path <> "-shm")
+    File.rm(db_path <> "-journal")
   end
 
   describe "Transaction Isolation ✅" do

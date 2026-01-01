@@ -37,6 +37,7 @@ defmodule EctoLibSql.NamedParametersExecutionTest do
       File.rm(db_name)
       File.rm(db_name <> "-wal")
       File.rm(db_name <> "-shm")
+      File.rm(db_name <> "-journal")
     end)
 
     {:ok, state: state, db_name: db_name}
