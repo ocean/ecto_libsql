@@ -34,7 +34,7 @@ jobs:
           components: rustfmt, clippy
 
       - name: Cache Rust dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/bin/
@@ -83,7 +83,7 @@ jobs:
           components: llvm-tools-preview
 
       - name: Cache Rust dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/bin/
@@ -132,7 +132,7 @@ jobs:
           otp-version: ${{ matrix.otp }}
 
       - name: Cache Mix dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             deps
@@ -189,7 +189,7 @@ jobs:
           otp-version: ${{ matrix.otp }}
 
       - name: Cache Mix dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             deps
@@ -226,7 +226,7 @@ jobs:
           otp-version: "27.0"
 
       - name: Cache Mix dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             deps
@@ -236,7 +236,7 @@ jobs:
             ${{ runner.os }}-integration-mix-
 
       - name: Cache Rust dependencies
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/bin/
@@ -321,7 +321,7 @@ jobs:
 
       - name: Cache Mix dependencies
         if: steps.check-secrets.outputs.skip != 'true'
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             deps
@@ -332,7 +332,7 @@ jobs:
 
       - name: Cache Rust dependencies
         if: steps.check-secrets.outputs.skip != 'true'
-        uses: actions/cache@v4
+        uses: actions/cache@v5
         with:
           path: |
             ~/.cargo/bin/
