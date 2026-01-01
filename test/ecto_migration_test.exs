@@ -830,7 +830,7 @@ defmodule Ecto.Adapters.LibSql.MigrationTest do
       # Verify GENERATED clause appears in SQL (but not STORED)
       assert sql =~ "GENERATED ALWAYS AS"
       assert sql =~ "first_name || ' ' || last_name"
-      assert !String.contains?(sql, "STORED")
+      refute sql =~ "STORED"
     end
 
     test "creates table with stored generated column" do
