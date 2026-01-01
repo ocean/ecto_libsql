@@ -327,22 +327,112 @@ defmodule EctoLibSql.Native do
       Map.get(map, name, nil)
   end
 
-  # Cache key for parameter metadata.
-  @param_cache_key {__MODULE__, :param_cache}
+  # ETS-based LRU cache for parameter metadata.
+  # Unlike persistent_term, this cache has a maximum size and evicts old entries.
+  # This prevents unbounded memory growth from dynamic SQL workloads.
+  @param_cache_table :ecto_libsql_param_cache
+  @param_cache_max_size 1000
+  @param_cache_evict_count 500
+
+  @doc """
+  Clear the parameter name cache.
+
+  This is primarily useful for testing or when you need to reclaim memory.
+  The cache will be automatically rebuilt as queries are executed.
+  """
+  @spec clear_param_cache() :: :ok
+  def clear_param_cache do
+    case :ets.whereis(@param_cache_table) do
+      :undefined -> :ok
+      _ref -> :ets.delete_all_objects(@param_cache_table)
+    end
+
+    :ok
+  end
+
+  @doc """
+  Get the current size of the parameter name cache.
+
+  Returns the number of cached SQL statement parameter mappings.
+  """
+  @spec param_cache_size() :: non_neg_integer()
+  def param_cache_size do
+    case :ets.whereis(@param_cache_table) do
+      :undefined -> 0
+      _ref -> :ets.info(@param_cache_table, :size)
+    end
+  end
+
+  @doc false
+  defp ensure_param_cache_table do
+    case :ets.whereis(@param_cache_table) do
+      :undefined ->
+        # Create the table with read_concurrency for fast lookups.
+        # Use try/rescue to handle race condition where another process
+        # creates the table between whereis and new.
+        try do
+          :ets.new(@param_cache_table, [
+            :set,
+            :public,
+            :named_table,
+            read_concurrency: true,
+            write_concurrency: true
+          ])
+        rescue
+          ArgumentError ->
+            # Table was created by another process, that's fine.
+            :ok
+        end
+
+      _ref ->
+        :ok
+    end
+  end
 
   @doc false
   defp get_cached_param_names(statement) do
-    case :persistent_term.get(@param_cache_key, nil) do
-      nil -> nil
-      cache -> Map.get(cache, statement)
+    ensure_param_cache_table()
+
+    case :ets.lookup(@param_cache_table, statement) do
+      [{^statement, param_names, _access_time}] ->
+        # Update access time for LRU tracking (fire and forget).
+        spawn(fn ->
+          :ets.update_element(@param_cache_table, statement, {3, System.monotonic_time()})
+        end)
+
+        param_names
+
+      [] ->
+        nil
     end
   end
 
   @doc false
   defp cache_param_names(statement, param_names) do
-    current = :persistent_term.get(@param_cache_key, %{})
-    :persistent_term.put(@param_cache_key, Map.put(current, statement, param_names))
+    ensure_param_cache_table()
+
+    # Check cache size and evict if needed.
+    cache_size = :ets.info(@param_cache_table, :size)
+
+    if cache_size >= @param_cache_max_size do
+      evict_oldest_entries()
+    end
+
+    # Insert with current access time.
+    :ets.insert(@param_cache_table, {statement, param_names, System.monotonic_time()})
     param_names
+  end
+
+  @doc false
+  defp evict_oldest_entries do
+    # Get all entries with their access times.
+    entries = :ets.tab2list(@param_cache_table)
+
+    # Sort by access time (oldest first) and take the ones to evict.
+    entries
+    |> Enum.sort_by(fn {_stmt, _names, access_time} -> access_time end)
+    |> Enum.take(@param_cache_evict_count)
+    |> Enum.each(fn {stmt, _names, _time} -> :ets.delete(@param_cache_table, stmt) end)
   end
 
   @doc false
