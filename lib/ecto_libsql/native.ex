@@ -594,7 +594,7 @@ defmodule EctoLibSql.Native do
         convert_map_to_positional(conn_id, stmt_id, map)
 
       _ ->
-        args
+        {:error, "arguments must be a list or map"}
     end
   end
 
