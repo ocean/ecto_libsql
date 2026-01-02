@@ -43,7 +43,12 @@
       "Bash(mix sobelow:*)",
       "Bash(git stash:*)",
       "Bash(git --no-pager log:*)",
-      "Bash(bd:*)"
+      "Bash(bd:*)",
+      "Bash(git checkout:*)",
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git push)",
+      "Bash(git --no-pager status)"
     ],
     "deny": [],
     "ask": []

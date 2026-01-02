@@ -14,12 +14,21 @@ defmodule Ecto.Adapters.LibSql.MigrationTest do
   setup do
     # Start a fresh repo for each test with a unique database file.
     test_db = "z_ecto_libsql_test-migrations_#{:erlang.unique_integer([:positive])}.db"
-    {:ok, _} = start_supervised({TestRepo, database: test_db})
+    {:ok, pid} = start_supervised({TestRepo, database: test_db})
 
     on_exit(fn ->
+      # Stop the repo before cleaning up files.
+      if Process.alive?(pid) do
+        stop_supervised(TestRepo)
+      end
+
+      # Small delay to ensure file handles are released.
+      Process.sleep(10)
+
       File.rm(test_db)
       File.rm(test_db <> "-shm")
       File.rm(test_db <> "-wal")
+      File.rm(test_db <> "-journal")
     end)
 
     # Foreign keys are disabled by default in SQLite - tests that need them will enable them explicitly.
@@ -756,6 +765,119 @@ defmodule Ecto.Adapters.LibSql.MigrationTest do
       assert schema =~ ~s[REFERENCES "users"]
       assert schema =~ ~s[REFERENCES "categories"]
       assert schema =~ ~s[REFERENCES "tags"]
+    end
+  end
+
+  describe "table options - libSQL extensions" do
+    test "creates table with RANDOM ROWID option" do
+      table = %Table{name: :sessions, prefix: nil, options: [random_rowid: true]}
+
+      columns = [
+        {:add, :token, :string, [null: false]},
+        {:add, :user_id, :id, []},
+        {:add, :created_at, :utc_datetime, []}
+      ]
+
+      [sql] = Connection.execute_ddl({:create, table, columns})
+
+      # Verify RANDOM ROWID appears in the SQL
+      assert sql =~ "RANDOM ROWID"
+
+      # Execute the migration
+      Ecto.Adapters.SQL.query!(TestRepo, sql)
+
+      # Verify table was created correctly
+      {:ok, %{rows: [[schema]]}} =
+        Ecto.Adapters.SQL.query(
+          TestRepo,
+          "SELECT sql FROM sqlite_master WHERE type='table' AND name='sessions'"
+        )
+
+      assert schema =~ "RANDOM ROWID"
+    end
+
+    test "SQL generation includes STRICT when option is set" do
+      table = %Table{name: :products, prefix: nil, options: [strict: true]}
+
+      columns = [
+        {:add, :id, :id, [primary_key: true]},
+        {:add, :name, :string, [null: false]},
+        {:add, :price, :float, []},
+        {:add, :stock, :integer, []}
+      ]
+
+      [sql] = Connection.execute_ddl({:create, table, columns})
+
+      # Verify STRICT appears in the generated SQL
+      # Note: Execution may fail on older libSQL versions that don't support STRICT
+      assert sql =~ "STRICT"
+    end
+  end
+
+  describe "generated/computed columns" do
+    test "creates table with virtual generated column" do
+      table = %Table{name: :users, prefix: nil}
+
+      columns = [
+        {:add, :id, :id, [primary_key: true]},
+        {:add, :first_name, :string, [null: false]},
+        {:add, :last_name, :string, [null: false]},
+        {:add, :full_name, :string, [generated: "first_name || ' ' || last_name"]}
+      ]
+
+      [sql] = Connection.execute_ddl({:create, table, columns})
+
+      # Verify GENERATED clause appears in SQL (but not STORED)
+      assert sql =~ "GENERATED ALWAYS AS"
+      assert sql =~ "first_name || ' ' || last_name"
+      refute sql =~ "STORED"
+    end
+
+    test "creates table with stored generated column" do
+      table = %Table{name: :products, prefix: nil}
+
+      columns = [
+        {:add, :id, :id, [primary_key: true]},
+        {:add, :price, :float, [null: false]},
+        {:add, :quantity, :integer, [null: false]},
+        {:add, :total_value, :float, [generated: "price * quantity", stored: true]}
+      ]
+
+      [sql] = Connection.execute_ddl({:create, table, columns})
+
+      # Verify GENERATED clause with STORED
+      assert sql =~ "GENERATED ALWAYS AS"
+      assert sql =~ "STORED"
+      assert sql =~ "price * quantity"
+    end
+
+    test "rejects generated column with default value" do
+      table = %Table{name: :users, prefix: nil}
+
+      columns = [
+        {:add, :id, :id, [primary_key: true]},
+        {:add, :computed, :string, [generated: "some_expr", default: "fallback"]}
+      ]
+
+      assert_raise ArgumentError,
+                   "generated columns cannot have a DEFAULT value (SQLite constraint)",
+                   fn ->
+                     Connection.execute_ddl({:create, table, columns})
+                   end
+    end
+
+    test "rejects generated column as primary key" do
+      table = %Table{name: :users, prefix: nil}
+
+      columns = [
+        {:add, :computed_id, :integer, [primary_key: true, generated: "rowid * 1000"]}
+      ]
+
+      assert_raise ArgumentError,
+                   "generated columns cannot be part of a PRIMARY KEY (SQLite constraint)",
+                   fn ->
+                     Connection.execute_ddl({:create, table, columns})
+                   end
     end
   end
 end

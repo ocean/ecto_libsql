@@ -372,6 +372,19 @@ defmodule Ecto.Adapters.LibSql.Connection do
   end
 
   defp column_options(opts, composite_pk) do
+    # Validate generated column constraints (SQLite disallows these combinations).
+    if Keyword.has_key?(opts, :generated) do
+      if Keyword.has_key?(opts, :default) do
+        raise ArgumentError,
+              "generated columns cannot have a DEFAULT value (SQLite constraint)"
+      end
+
+      if Keyword.get(opts, :primary_key) do
+        raise ArgumentError,
+              "generated columns cannot be part of a PRIMARY KEY (SQLite constraint)"
+      end
+    end
+
     default = column_default(Keyword.get(opts, :default))
     null = if Keyword.get(opts, :null) == false, do: " NOT NULL", else: ""
 
@@ -381,7 +394,18 @@ defmodule Ecto.Adapters.LibSql.Connection do
         do: " PRIMARY KEY",
         else: ""
 
-    "#{pk}#{null}#{default}"
+    # Generated columns (SQLite 3.31+, libSQL 3.45.1+)
+    generated =
+      case Keyword.get(opts, :generated) do
+        nil ->
+          ""
+
+        expr when is_binary(expr) ->
+          stored = if Keyword.get(opts, :stored, false), do: " STORED", else: ""
+          " GENERATED ALWAYS AS (#{expr})#{stored}"
+      end
+
+    "#{pk}#{null}#{default}#{generated}"
   end
 
   defp column_default(nil), do: ""
@@ -429,12 +453,23 @@ defmodule Ecto.Adapters.LibSql.Connection do
       end
 
     # Table suffix options (go after closing parenthesis)
-    table_suffix =
+    suffixes = []
+
+    suffixes =
       if table.options && Keyword.get(table.options, :random_rowid, false) do
-        " RANDOM ROWID"
+        suffixes ++ [" RANDOM ROWID"]
       else
-        ""
+        suffixes
       end
+
+    suffixes =
+      if table.options && Keyword.get(table.options, :strict, false) do
+        suffixes ++ [" STRICT"]
+      else
+        suffixes
+      end
+
+    table_suffix = Enum.join(suffixes)
 
     {table_constraints, table_suffix}
   end

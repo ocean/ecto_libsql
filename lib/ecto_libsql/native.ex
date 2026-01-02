@@ -283,6 +283,321 @@ defmodule EctoLibSql.Native do
     end
   end
 
+  @doc """
+  Normalise query arguments to a positional parameter list.
+
+  ## Arguments
+
+  - `conn_id` - The connection identifier
+  - `statement` - The SQL statement (used for named parameter introspection)
+  - `args` - The arguments to normalise; must be a list or map
+
+  ## Returns
+
+  - `list` - Positional parameter list on success
+  - `{:error, reason}` - Error tuple if args is invalid or map conversion fails
+
+  ## Accepted Types
+
+  - **List**: Returned as-is (positional parameters)
+  - **Map**: Converted to positional list using statement parameter introspection
+
+  Any other type returns `{:error, "arguments must be a list or map"}`.
+  """
+  @spec normalise_arguments(String.t(), String.t(), list() | map()) ::
+          list() | {:error, term()}
+  def normalise_arguments(conn_id, statement, args) do
+    case args do
+      list when is_list(list) ->
+        list
+
+      map when is_map(map) ->
+        # Convert named parameters map to positional list.
+        # Returns list on success, {:error, reason} on preparation failure.
+        map_to_positional_args(conn_id, statement, map)
+
+      _other ->
+        {:error, "arguments must be a list or map"}
+    end
+  end
+
+  @doc false
+  defp remove_param_prefix(name) when is_binary(name) do
+    case String.first(name) do
+      ":" -> String.slice(name, 1..-1//1)
+      "@" -> String.slice(name, 1..-1//1)
+      "$" -> String.slice(name, 1..-1//1)
+      _ -> name
+    end
+  end
+
+  @doc false
+  # Extract a parameter name at the given index from a prepared statement.
+  # Returns the name with prefix removed, or nil if lookup fails.
+  defp extract_param_name(conn_id, stmt_id, idx) do
+    case statement_parameter_name(conn_id, stmt_id, idx) do
+      name when is_binary(name) ->
+        # Remove prefix (:, @, $) if present. Keep as string.
+        remove_param_prefix(name)
+
+      nil ->
+        # Positional parameter (?) - use nil as marker.
+        nil
+
+      {:error, _reason} ->
+        # Parameter name lookup failed, use nil as fallback.
+        nil
+
+      _ ->
+        nil
+    end
+  end
+
+  @doc false
+  # Convert a map of named parameters to a positional list using statement introspection.
+  # Returns list on success, {:error, reason} on failure.
+  defp convert_map_to_positional(conn_id, stmt_id, map) do
+    case statement_parameter_count(conn_id, stmt_id) do
+      count when is_integer(count) and count >= 0 ->
+        param_names =
+          if count == 0,
+            do: [],
+            else: Enum.map(1..count, &extract_param_name(conn_id, stmt_id, &1))
+
+        # Convert map to positional list using the names.
+        # Support both atom and string keys in the input map.
+        Enum.map(param_names, &get_map_value_flexible(map, &1))
+
+      {:error, reason} ->
+        {:error, reason}
+    end
+  end
+
+  @doc false
+  # Get a value from a map, supporting both atom and string keys.
+  # This avoids creating atoms at runtime while allowing users to pass
+  # either %{name: value} or %{"name" => value}.
+  defp get_map_value_flexible(_map, nil), do: nil
+
+  defp get_map_value_flexible(map, name) when is_binary(name) do
+    # Try atom key first (more common), then string key.
+    atom_key = String.to_existing_atom(name)
+    Map.get(map, atom_key, Map.get(map, name, nil))
+  rescue
+    ArgumentError ->
+      # Atom doesn't exist, try string key only.
+      Map.get(map, name, nil)
+  end
+
+  # ETS-based LRU cache for parameter metadata.
+  # Unlike persistent_term, this cache has a maximum size and evicts old entries.
+  # This prevents unbounded memory growth from dynamic SQL workloads.
+  #
+  # Memory considerations:
+  # - Maximum 1000 entries, evicts 500 oldest when full
+  # - Each entry stores: SQL statement string, list of parameter names, access timestamp
+  # - For applications with many unique dynamic queries (e.g., dynamic filters, search),
+  #   the cache may consume several MB depending on query complexity
+  # - Use clear_param_cache/0 to reclaim memory if needed
+  # - Use param_cache_size/0 to monitor cache utilisation
+  @param_cache_table :ecto_libsql_param_cache
+  @param_cache_max_size 1000
+  @param_cache_evict_count 500
+
+  @doc """
+  Clear the parameter name cache.
+
+  The cache stores SQL statements and their parameter name mappings to avoid
+  repeated introspection overhead. Each entry contains the full SQL string,
+  parameter names list, and access timestamp.
+
+  Use this function to:
+  - Reclaim memory in applications with many dynamic queries
+  - Reset cache state during testing
+  - Force re-introspection after schema changes
+
+  The cache will be automatically rebuilt as queries are executed.
+  Use `param_cache_size/0` to monitor cache utilisation before clearing.
+  """
+  @spec clear_param_cache() :: :ok
+  def clear_param_cache do
+    case :ets.whereis(@param_cache_table) do
+      :undefined -> :ok
+      _ref -> :ets.delete_all_objects(@param_cache_table)
+    end
+
+    :ok
+  end
+
+  @doc """
+  Get the current size of the parameter name cache.
+
+  Returns the number of cached SQL statement parameter mappings.
+  The cache has a maximum size of #{@param_cache_max_size} entries.
+
+  Useful for monitoring cache utilisation in applications with dynamic queries.
+  If the cache frequently hits the maximum, consider whether query patterns
+  could be optimised to reduce unique SQL variations.
+  """
+  @spec param_cache_size() :: non_neg_integer()
+  def param_cache_size do
+    case :ets.whereis(@param_cache_table) do
+      :undefined -> 0
+      _ref -> :ets.info(@param_cache_table, :size)
+    end
+  end
+
+  @doc false
+  defp ensure_param_cache_table do
+    case :ets.whereis(@param_cache_table) do
+      :undefined ->
+        # Create the table with read_concurrency for fast lookups.
+        # Use try/rescue to handle race condition where another process
+        # creates the table between whereis and new.
+        try do
+          :ets.new(@param_cache_table, [
+            :set,
+            :public,
+            :named_table,
+            read_concurrency: true,
+            write_concurrency: true
+          ])
+        rescue
+          ArgumentError ->
+            # Table was created by another process, that's fine.
+            :ok
+        end
+
+      _ref ->
+        :ok
+    end
+  end
+
+  @doc false
+  defp get_cached_param_names(statement) do
+    ensure_param_cache_table()
+
+    case :ets.lookup(@param_cache_table, statement) do
+      [{^statement, param_names, _access_time}] ->
+        # Update access time synchronously for correct LRU tracking.
+        # ETS updates are fast (microseconds), so no need for async.
+        :ets.update_element(@param_cache_table, statement, {3, System.monotonic_time()})
+        param_names
+
+      [] ->
+        nil
+    end
+  end
+
+  @doc false
+  defp cache_param_names(statement, param_names) do
+    ensure_param_cache_table()
+
+    # Check cache size and evict if needed.
+    cache_size = :ets.info(@param_cache_table, :size)
+
+    if cache_size >= @param_cache_max_size do
+      evict_oldest_entries()
+    end
+
+    # Insert with current access time.
+    :ets.insert(@param_cache_table, {statement, param_names, System.monotonic_time()})
+    param_names
+  end
+
+  @doc false
+  defp evict_oldest_entries do
+    # Get all entries with their access times.
+    entries = :ets.tab2list(@param_cache_table)
+
+    # Sort by access time (oldest first) and take the ones to evict.
+    entries
+    |> Enum.sort_by(fn {_stmt, _names, access_time} -> access_time end)
+    |> Enum.take(@param_cache_evict_count)
+    |> Enum.each(fn {stmt, _names, _time} -> :ets.delete(@param_cache_table, stmt) end)
+  end
+
+  @doc false
+  defp map_to_positional_args(conn_id, statement, param_map) do
+    # Check cache first to avoid repeated preparation overhead.
+    case get_cached_param_names(statement) do
+      nil ->
+        # Cache miss - introspect and cache parameter names.
+        # Returns list on success, {:error, reason} on failure.
+        introspect_and_cache_params(conn_id, statement, param_map)
+
+      param_names ->
+        # Cache hit - convert map to positional list using cached order.
+        # Support both atom and string keys in the input map.
+        Enum.map(param_names, fn name ->
+          get_map_value_flexible(param_map, name)
+        end)
+    end
+  end
+
+  @doc false
+  defp introspect_and_cache_params(conn_id, statement, param_map) do
+    # Prepare the statement to introspect parameters.
+    stmt_id = prepare_statement(conn_id, statement)
+
+    # stmt_id is a string UUID on success, or error tuple on failure.
+    case stmt_id do
+      stmt_id when is_binary(stmt_id) ->
+        # Get parameter count, propagating errors instead of silently falling back to 0.
+        case statement_parameter_count(conn_id, stmt_id) do
+          count when is_integer(count) and count >= 0 ->
+            # Extract parameter names in order (kept as strings to avoid atom creation).
+            param_names =
+              if count == 0 do
+                []
+              else
+                Enum.map(1..count, &extract_param_name(conn_id, stmt_id, &1))
+              end
+
+            # Clean up prepared statement.
+            close_stmt(stmt_id)
+
+            # Cache the parameter names for future calls.
+            cache_param_names(statement, param_names)
+
+            # Convert map to positional list using the names.
+            # Support both atom and string keys in the input map.
+            Enum.map(param_names, fn name ->
+              get_map_value_flexible(param_map, name)
+            end)
+
+          {:error, reason} ->
+            # Clean up prepared statement before returning error.
+            close_stmt(stmt_id)
+            {:error, reason}
+        end
+
+      {:error, reason} ->
+        # Propagate the preparation error to callers.
+        {:error, reason}
+    end
+  end
+
+  @doc false
+  # Normalise arguments for prepared statements using stmt_id introspection.
+  # This avoids re-preparing the statement since we already have the stmt_id.
+  # Returns list on success, {:error, reason} on failure.
+  def normalise_arguments_for_stmt(conn_id, stmt_id, args) do
+    case args do
+      list when is_list(list) ->
+        # Already positional, return as-is.
+        list
+
+      map when is_map(map) ->
+        # Convert named parameters map to positional list using stmt introspection.
+        # Propagate errors instead of silently treating them as zero-parameter statements.
+        convert_map_to_positional(conn_id, stmt_id, map)
+
+      _ ->
+        {:error, "arguments must be a list or map"}
+    end
+  end
+
   @doc false
   def execute_non_trx(query, state, args) do
     query(state, query, args)
@@ -294,7 +609,23 @@ defmodule EctoLibSql.Native do
         %EctoLibSql.Query{statement: statement} = query,
         args
       ) do
-    case query_args(conn_id, mode, syncx, statement, args) do
+    # Convert named parameters (map) to positional parameters (list).
+    # Returns {:error, reason} if parameter introspection fails.
+    case normalise_arguments(conn_id, statement, args) do
+      {:error, reason} ->
+        {:error,
+         %EctoLibSql.Error{
+           message: "Failed to prepare statement for parameter introspection: #{reason}"
+         }, state}
+
+      args_for_execution ->
+        do_query(conn_id, mode, syncx, statement, args_for_execution, query, state)
+    end
+  end
+
+  @doc false
+  defp do_query(conn_id, mode, syncx, statement, args_for_execution, query, state) do
+    case query_args(conn_id, mode, syncx, statement, args_for_execution) do
       %{
         "columns" => columns,
         "rows" => rows,
@@ -343,25 +674,41 @@ defmodule EctoLibSql.Native do
         %EctoLibSql.Query{statement: statement} = query,
         args
       ) do
-    # Detect the command type to route correctly
+    # Convert named parameters (map) to positional parameters (list).
+    # Returns {:error, reason} if parameter introspection fails.
+    case normalise_arguments(conn_id, statement, args) do
+      {:error, reason} ->
+        {:error,
+         %EctoLibSql.Error{
+           message: "Failed to prepare statement for parameter introspection: #{reason}"
+         }, state}
+
+      args_for_execution ->
+        do_execute_with_trx(conn_id, trx_id, statement, args_for_execution, query, state)
+    end
+  end
+
+  @doc false
+  defp do_execute_with_trx(conn_id, trx_id, statement, args_for_execution, query, state) do
+    # Detect the command type to route correctly.
     command = detect_command(statement)
 
-    # For SELECT statements (even without RETURNING), use query_with_trx_args
-    # For INSERT/UPDATE/DELETE with RETURNING, use query_with_trx_args
-    # For INSERT/UPDATE/DELETE without RETURNING, use execute_with_transaction
-    # Use word-boundary regex to detect RETURNING precisely (matching Rust NIF behavior)
+    # For SELECT statements (even without RETURNING), use query_with_trx_args.
+    # For INSERT/UPDATE/DELETE with RETURNING, use query_with_trx_args.
+    # For INSERT/UPDATE/DELETE without RETURNING, use execute_with_transaction.
+    # Use word-boundary regex to detect RETURNING precisely (matching Rust NIF behaviour).
     has_returning = Regex.match?(~r/\bRETURNING\b/i, statement)
     should_query = command == :select or has_returning
 
     if should_query do
-      # Use query_with_trx_args for SELECT or statements with RETURNING
-      case query_with_trx_args(trx_id, conn_id, statement, args) do
+      # Use query_with_trx_args for SELECT or statements with RETURNING.
+      case query_with_trx_args(trx_id, conn_id, statement, args_for_execution) do
         %{
           "columns" => columns,
           "rows" => rows,
           "num_rows" => num_rows
         } ->
-          # For INSERT/UPDATE/DELETE without actual returned rows, normalize empty lists to nil
+          # For INSERT/UPDATE/DELETE without actual returned rows, normalise empty lists to nil
           # This ensures consistency with non-transactional path
           {columns, rows} =
             if command in [:insert, :update, :delete] and columns == [] and rows == [] do
@@ -384,7 +731,7 @@ defmodule EctoLibSql.Native do
       end
     else
       # Use execute_with_transaction for INSERT/UPDATE/DELETE without RETURNING
-      case execute_with_transaction(trx_id, conn_id, statement, args) do
+      case execute_with_transaction(trx_id, conn_id, statement, args_for_execution) do
         num_rows when is_integer(num_rows) ->
           result = %EctoLibSql.Result{
             command: command,
@@ -560,11 +907,17 @@ defmodule EctoLibSql.Native do
     - state: The connection state
     - stmt_id: The statement ID from prepare/2
     - sql: The original SQL (for sync detection)
-    - args: List of parameters
+    - args: List of positional parameters OR map with atom keys for named parameters
 
-  ## Example
+  ## Examples
+
+      # Positional parameters
       {:ok, stmt_id} = EctoLibSql.Native.prepare(state, "INSERT INTO users (name) VALUES (?)")
-      {:ok, rows_affected} = EctoLibSql.Native.execute_stmt(state, stmt_id, "INSERT INTO users (name) VALUES (?)", ["Alice"])
+      {:ok, rows_affected} = EctoLibSql.Native.execute_stmt(state, stmt_id, sql, ["Alice"])
+
+      # Named parameters with atom keys
+      {:ok, stmt_id} = EctoLibSql.Native.prepare(state, "INSERT INTO users (name) VALUES (:name)")
+      {:ok, rows_affected} = EctoLibSql.Native.execute_stmt(state, stmt_id, sql, %{name: "Alice"})
   """
   def execute_stmt(
         %EctoLibSql.State{conn_id: conn_id, mode: mode, sync: syncx} = _state,
@@ -572,12 +925,19 @@ defmodule EctoLibSql.Native do
         sql,
         args
       ) do
-    case execute_prepared(conn_id, stmt_id, mode, syncx, sql, args) do
-      num_rows when is_integer(num_rows) ->
-        {:ok, num_rows}
-
+    # Normalise arguments (convert map to positional list if needed).
+    case normalise_arguments_for_stmt(conn_id, stmt_id, args) do
       {:error, reason} ->
-        {:error, reason}
+        {:error, "Failed to normalise parameters: #{reason}"}
+
+      normalised_args ->
+        case execute_prepared(conn_id, stmt_id, mode, syncx, sql, normalised_args) do
+          num_rows when is_integer(num_rows) ->
+            {:ok, num_rows}
+
+          {:error, reason} ->
+            {:error, reason}
+        end
     end
   end
 
@@ -588,30 +948,43 @@ defmodule EctoLibSql.Native do
   ## Parameters
     - state: The connection state
     - stmt_id: The statement ID from prepare/2
-    - args: List of parameters
+    - args: List of positional parameters OR map with atom keys for named parameters
 
-  ## Example
+  ## Examples
+
+      # Positional parameters
       {:ok, stmt_id} = EctoLibSql.Native.prepare(state, "SELECT * FROM users WHERE id = ?")
       {:ok, result} = EctoLibSql.Native.query_stmt(state, stmt_id, [42])
+
+      # Named parameters with atom keys
+      {:ok, stmt_id} = EctoLibSql.Native.prepare(state, "SELECT * FROM users WHERE id = :id")
+      {:ok, result} = EctoLibSql.Native.query_stmt(state, stmt_id, %{id: 42})
   """
   def query_stmt(
         %EctoLibSql.State{conn_id: conn_id, mode: mode, sync: syncx} = _state,
         stmt_id,
         args
       ) do
-    case query_prepared(conn_id, stmt_id, mode, syncx, args) do
-      %{"columns" => columns, "rows" => rows, "num_rows" => num_rows} ->
-        result = %EctoLibSql.Result{
-          command: :select,
-          columns: columns,
-          rows: rows,
-          num_rows: num_rows
-        }
-
-        {:ok, result}
-
+    # Normalise arguments (convert map to positional list if needed).
+    case normalise_arguments_for_stmt(conn_id, stmt_id, args) do
       {:error, reason} ->
-        {:error, reason}
+        {:error, "Failed to normalise parameters: #{reason}"}
+
+      normalised_args ->
+        case query_prepared(conn_id, stmt_id, mode, syncx, normalised_args) do
+          %{"columns" => columns, "rows" => rows, "num_rows" => num_rows} ->
+            result = %EctoLibSql.Result{
+              command: :select,
+              columns: columns,
+              rows: rows,
+              num_rows: num_rows
+            }
+
+            {:ok, result}
+
+          {:error, reason} ->
+            {:error, reason}
+        end
     end
   end
 
