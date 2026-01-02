@@ -76,6 +76,18 @@ defmodule EctoLibSql.FuzzTest do
     ])
   end
 
+  # Generate SQL injection strings that always contain injection characters.
+  # This avoids the FilterTooNarrowError when filtering sql_injection_gen().
+  defp sql_injection_with_chars_gen do
+    gen all(
+          prefix <- string(:alphanumeric, max_length: 20),
+          injection_char <- member_of(["'", "\"", ";", "--", "/*"]),
+          suffix <- string(:alphanumeric, max_length: 20)
+        ) do
+      prefix <> injection_char <> suffix
+    end
+  end
+
   # Generate various data types that might be used as query parameters
   defp query_param_gen do
     one_of([
@@ -344,12 +356,7 @@ defmodule EctoLibSql.FuzzTest do
     end
 
     property "rejects all SQL injection attempts in savepoint names", %{state: state} do
-      check all(
-              injection <- sql_injection_gen(),
-              # Only test strings that look like injection attempts.
-              String.valid?(injection) and
-                String.contains?(injection, ["'", "\"", ";", "--", "/*"])
-            ) do
+      check all(injection <- sql_injection_with_chars_gen()) do
         # Each iteration needs a fresh connection to avoid transaction conflicts.
         case EctoLibSql.handle_begin([], state) do
           {:ok, :begin, trx_state} ->
