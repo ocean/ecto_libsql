@@ -1649,6 +1649,69 @@ ALTER TABLE users ALTER COLUMN age TO age TEXT DEFAULT '0'
 ALTER TABLE users ALTER COLUMN email TO email TEXT NOT NULL
 ```
 
+#### Generated/Computed Columns
+
+SQLite 3.31+ and libSQL support GENERATED ALWAYS AS columns (computed columns). These are columns whose values are computed from an expression:
+
+```elixir
+defmodule MyApp.Repo.Migrations.CreateUsers do
+  use Ecto.Migration
+
+  def change do
+    create table(:users) do
+      add :first_name, :string, null: false
+      add :last_name, :string, null: false
+      # Virtual generated column (computed on read, not stored)
+      add :full_name, :string, generated: "first_name || ' ' || last_name"
+
+      timestamps()
+    end
+  end
+end
+```
+
+**Stored Generated Columns:**
+
+Use `stored: true` to persist the computed value (updated automatically on insert/update):
+
+```elixir
+create table(:products) do
+  add :price, :float, null: false
+  add :quantity, :integer, null: false
+  # Stored - value is written to disk
+  add :total_value, :float, generated: "price * quantity", stored: true
+
+  timestamps()
+end
+```
+
+**Options:**
+- `generated: "expression"` - SQL expression to compute the column value
+- `stored: true` - Store the computed value (default is VIRTUAL/not stored)
+
+**Constraints (SQLite limitations):**
+- Generated columns **cannot** have a DEFAULT value
+- Generated columns **cannot** be part of a PRIMARY KEY
+- The expression must be deterministic (no RANDOM(), CURRENT_TIME, etc.)
+- STORED generated columns can be indexed; VIRTUAL columns cannot
+
+**SQL Output:**
+```sql
+-- Virtual (default)
+CREATE TABLE users (
+  "first_name" TEXT NOT NULL,
+  "last_name" TEXT NOT NULL,
+  "full_name" TEXT GENERATED ALWAYS AS (first_name || ' ' || last_name)
+)
+
+-- Stored
+CREATE TABLE products (
+  "price" REAL NOT NULL,
+  "quantity" INTEGER NOT NULL,
+  "total_value" REAL GENERATED ALWAYS AS (price * quantity) STORED
+)
+```
+
 ### Basic Queries
 
 #### Insert
@@ -2087,6 +2150,10 @@ rename table(:users), :old_field, to: :new_field       # RENAME COLUMN
 # ⚠️ LIBSQL EXTENSIONS (not in standard SQLite)
 alter table(:users) do: modify :age, :string           # ALTER COLUMN - libSQL only
 create table(:sessions, options: [random_rowid: true]) # RANDOM ROWID - libSQL only
+
+# ✅ SQLite 3.31+ / LIBSQL
+add :full_name, :string, generated: "first || ' ' || last"    # VIRTUAL computed column
+add :total, :float, generated: "price * qty", stored: true    # STORED computed column
 ```
 
 **Important Notes:**
@@ -2101,6 +2168,11 @@ create table(:sessions, options: [random_rowid: true]) # RANDOM ROWID - libSQL o
 3. **RANDOM ROWID** is a libSQL extension for security/privacy
    - Prevents ID enumeration attacks
    - Mutually exclusive with WITHOUT ROWID and AUTOINCREMENT
+
+4. **Generated Columns** are available in SQLite 3.31+ and libSQL
+   - Use `generated: "expression"` option with optional `stored: true`
+   - Cannot have DEFAULT values or be PRIMARY KEYs
+   - STORED columns are persisted; VIRTUAL columns are computed on read
 
 **Standard SQLite Workaround (if not using libSQL's ALTER COLUMN):**
 
