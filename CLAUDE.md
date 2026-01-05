@@ -22,7 +22,7 @@
 
 **MANDATORY WORKFLOW:**
 
-1. **File issues for remaining work** - Create Beads issues for anything that needs follow-up
+1. **File issues for remaining work** - Create Beads issues for anything that needs follow-up (see [Issue Tracking with Beads](#issue-tracking-with-beads))
 2. **Run quality gates** (if code changed) - Tests, linters, builds
 3. **Update issue status** - Close finished work, update in-progress items
 4. **COMMIT** - This is MANDATORY:
@@ -248,6 +248,50 @@ After PR is merged, clean up:
 git checkout main
 git pull origin main
 git branch -d feature-descriptive-name     # Delete local branch
+```
+
+#### Issue Tracking with Beads
+
+This project uses **Beads** (`bd` command) for issue tracking across sessions. Beads persists work context in `.beads/issues.jsonl`.
+
+**When to use Beads vs TodoWrite:**
+- **Beads**: Multi-session work, dependencies between tasks, discovered work that needs tracking
+- **TodoWrite**: Simple single-session task execution
+
+When in doubt, prefer Beads—persistence you don't need beats lost context.
+
+**Essential commands:**
+```bash
+# Finding work
+bd ready                           # Show issues ready to work (no blockers)
+bd list --status=open              # All open issues
+bd show <id>                       # Detailed issue view with dependencies
+
+# Creating & updating (priority: 0-4, NOT "high"/"low")
+bd create --title="..." --type=task|bug|feature --priority=2
+bd update <id> --status=in_progress
+bd close <id>                      # Or: bd close <id1> <id2> ...
+
+# Dependencies
+bd dep add <issue> <depends-on>    # Add dependency
+bd blocked                         # Show all blocked issues
+
+# Sync & health
+bd sync --from-main                # Pull beads updates from main
+bd stats                           # Project statistics
+bd doctor                          # Check for issues
+bd prime                           # Session recovery after compaction
+```
+
+**Typical workflow:**
+```bash
+# Starting work
+bd ready && bd show <id> && bd update <id> --status=in_progress
+
+# Completing work
+bd close <id1> <id2> ...           # Close completed issues
+bd sync --from-main                # Pull latest beads
+git add . && git commit -m "..."   # Commit changes
 ```
 
 ### Adding a New NIF Function
