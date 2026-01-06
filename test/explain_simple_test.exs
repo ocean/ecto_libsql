@@ -73,9 +73,34 @@ defmodule EctoLibSql.ExplainSimpleTest do
     # The result should be a list of maps
     result = Ecto.Adapters.SQL.explain(TestRepo, :all, query)
 
-    IO.inspect(result, label: "EXPLAIN result")
     # Check it's a list of results
     assert is_list(result)
     assert length(result) > 0
+  end
+
+  test "EXPLAIN on non-existent table returns error" do
+    sql = "EXPLAIN QUERY PLAN SELECT * FROM non_existent_table"
+
+    assert {:error, %EctoLibSql.Error{message: message}} =
+             Ecto.Adapters.SQL.query(TestRepo, sql, [])
+
+    assert message =~ "no such table" or message =~ "non_existent_table"
+  end
+
+  test "EXPLAIN with invalid SQL syntax returns error" do
+    sql = "EXPLAIN QUERY PLAN SELECTT * FROM explain_test_users"
+
+    assert {:error, %EctoLibSql.Error{}} = Ecto.Adapters.SQL.query(TestRepo, sql, [])
+  end
+
+  test "EXPLAIN on empty table returns query plan" do
+    # EXPLAIN should work even on empty tables - it shows the query plan, not data.
+    sql = "EXPLAIN QUERY PLAN SELECT * FROM explain_test_users WHERE id = 999999"
+    {:ok, result} = Ecto.Adapters.SQL.query(TestRepo, sql, [])
+
+    assert is_struct(result, EctoLibSql.Result)
+    assert is_list(result.rows)
+    # Should still return a query plan even for a query that would return no rows.
+    assert length(result.rows) > 0
   end
 end
