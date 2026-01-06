@@ -338,6 +338,35 @@ defmodule Ecto.Integration.EctoLibSqlTest do
       assert length(TestRepo.all(User)) == 3
     end
 
+    test "insert_all with returning option" do
+      users_data = [
+        %{
+          name: "ReturnAlice",
+          email: "ret-alice@example.com",
+          inserted_at: ~N[2024-01-01 00:00:00],
+          updated_at: ~N[2024-01-01 00:00:00]
+        },
+        %{
+          name: "ReturnBob",
+          email: "ret-bob@example.com",
+          inserted_at: ~N[2024-01-01 00:00:00],
+          updated_at: ~N[2024-01-01 00:00:00]
+        }
+      ]
+
+      {count, returned_rows} = TestRepo.insert_all(User, users_data, returning: [:id, :name])
+
+      assert count == 2
+      assert length(returned_rows) == 2
+
+      # Check that we got valid IDs back
+      [first, second] = returned_rows
+      assert first.id != nil
+      assert first.name == "ReturnAlice"
+      assert second.id != nil
+      assert second.name == "ReturnBob"
+    end
+
     test "update_all" do
       TestRepo.insert(%User{name: "Alice", email: "alice@example.com", active: true})
       TestRepo.insert(%User{name: "Bob", email: "bob@example.com", active: true})

@@ -9,6 +9,71 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Named Parameters Execution Support**
+  - Full support for SQLite named parameter syntax in prepared statements and direct execution
+  - **Three SQLite syntaxes supported**: `:name`, `@name`, `$name`
+  - **Transparent conversion**: Map-based named parameters automatically converted to positional arguments for internal execution
+  - **Use cases**: Dynamic query building, parameter validation, better debuggability, API introspection
+  - **Execution paths**: Works with prepared statements, transactions, batch operations, and cursor streaming
+  - **Backward compatibility**: Existing positional parameter syntax (`?`) continues to work unchanged
+  - **Implementation**: Automatic parameter binding detection and conversion in both transactional and non-transactional paths
+  - **Usage examples**:
+    ```elixir
+    # Named parameters in prepared statements
+    {:ok, stmt_id} = EctoLibSql.Native.prepare(
+      state,
+      "SELECT * FROM users WHERE email = :email AND status = :status"
+    )
+    
+    # Execute with named parameters as map
+    {:ok, result} = EctoLibSql.Native.query_stmt(
+      state,
+      stmt_id,
+      %{"email" => "alice@example.com", "status" => "active"}
+    )
+    
+    # Alternative syntaxes
+    "SELECT * FROM users WHERE email = @email"
+    "SELECT * FROM users WHERE email = $email"
+    
+    # Works with direct execution
+    {:ok, _, result, state} = EctoLibSql.handle_execute(
+      "INSERT INTO users (name, email) VALUES (:name, :email)",
+      %{"name" => "Alice", "email" => "alice@example.com"},
+      [],
+      state
+    )
+    
+    # Works with transactions
+    {:ok, :begin, state} = EctoLibSql.handle_begin([], state)
+    {:ok, _, _, state} = EctoLibSql.handle_execute(
+      "UPDATE users SET status = :status WHERE id = :id",
+      %{"status" => "inactive", "id" => 123},
+      [],
+      state
+    )
+    {:ok, _, state} = EctoLibSql.handle_commit([], state)
+    ```
+  - **Type handling**: All value types (strings, integers, floats, binaries, nil) properly converted
+  - **Parameter validation**: Uses `stmt_parameter_name/3` introspection for validation
+  - **Edge cases handled**: Empty parameter maps, missing parameters with proper error messages, mixed positional and named parameters
+  - **Added comprehensive test coverage** in `test/named_parameters_execution_test.exs` covering all SQLite syntaxes, CRUD operations, transactions, batch operations, and backward compatibility
+
+- **Query-Based UPSERT Support (on_conflict with Ecto.Query)**
+  - Extended `on_conflict` support to handle query-based updates
+  - Allows using keyword list syntax for dynamic update operations:
+    ```elixir
+    Repo.insert(changeset,
+      on_conflict: [set: [name: "updated", updated_at: DateTime.utc_now()]],
+      conflict_target: [:email]
+    )
+    ```
+  - Supports `:set` and `:inc` operations in the update clause
+  - Generates proper `ON CONFLICT (...) DO UPDATE SET ...` SQL
+  - Requires explicit `:conflict_target` (LibSQL/SQLite requirement)
+  - Implementation in `connection.ex:594-601` with `update_all_for_on_conflict/1` helper
+  - 3 new tests covering query-based on_conflict with set, inc, and error cases
+
 - **CTE (Common Table Expression) Support**
   - Full support for SQL WITH clauses in Ecto queries
   - Both simple and recursive CTEs supported

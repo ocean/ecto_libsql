@@ -222,6 +222,53 @@ changes = EctoLibSql.Native.get_changes(state)
 IO.puts("Rows affected: #{changes}")
 ```
 
+### UPSERT (INSERT ... ON CONFLICT)
+
+EctoLibSql supports all Ecto `on_conflict` options for upsert operations:
+
+```elixir
+# Ignore conflicts (do nothing on duplicate key)
+{:ok, user} = Repo.insert(changeset,
+  on_conflict: :nothing,
+  conflict_target: [:email]
+)
+
+# Replace all fields on conflict
+{:ok, user} = Repo.insert(changeset,
+  on_conflict: :replace_all,
+  conflict_target: [:email]
+)
+
+# Replace specific fields only
+{:ok, user} = Repo.insert(changeset,
+  on_conflict: {:replace, [:name, :updated_at]},
+  conflict_target: [:email]
+)
+
+# Replace all except specific fields
+{:ok, user} = Repo.insert(changeset,
+  on_conflict: {:replace_all_except, [:id, :inserted_at]},
+  conflict_target: [:email]
+)
+
+# Query-based update with keyword list syntax
+{:ok, user} = Repo.insert(changeset,
+  on_conflict: [set: [name: "Updated Name", updated_at: DateTime.utc_now()]],
+  conflict_target: [:email]
+)
+
+# Increment counter on conflict
+{:ok, counter} = Repo.insert(counter_changeset,
+  on_conflict: [inc: [count: 1]],
+  conflict_target: [:key]
+)
+```
+
+**Notes:**
+- `:conflict_target` is required for LibSQL/SQLite (unlike PostgreSQL)
+- Composite unique indexes work: `conflict_target: [:slug, :parent_slug]`
+- Named constraints (`ON CONFLICT ON CONSTRAINT name`) are not supported
+
 ### SELECT
 
 ```elixir
@@ -438,7 +485,115 @@ end)
 
 ### Prepared Statements
 
-Prepared statements offer significant performance improvements for repeated queries and prevent SQL injection. As of v0.7.0, statement caching is automatic and highly optimised.
+Prepared statements offer significant performance improvements for repeated queries and prevent SQL injection. As of v0.7.0, statement caching is automatic and highly optimised. Named parameters provide flexible parameter binding with three SQLite syntaxes.
+
+#### Named Parameters
+
+SQLite supports three named parameter syntaxes for more readable and maintainable queries:
+
+```elixir
+# Syntax 1: Colon prefix (:name)
+"SELECT * FROM users WHERE email = :email AND status = :status"
+
+# Syntax 2: At-sign prefix (@name)
+"SELECT * FROM users WHERE email = @email AND status = @status"
+
+# Syntax 3: Dollar sign prefix ($name)
+"SELECT * FROM users WHERE email = $email AND status = $status"
+```
+
+Execute with map-based parameters:
+
+```elixir
+# Prepared statement with named parameters
+{:ok, stmt_id} = EctoLibSql.Native.prepare(
+  state,
+  "SELECT * FROM users WHERE email = :email AND status = :status"
+)
+
+{:ok, result} = EctoLibSql.Native.query_stmt(
+  state,
+  stmt_id,
+  %{"email" => "alice@example.com", "status" => "active"}
+)
+```
+
+Direct execution with named parameters:
+
+```elixir
+# INSERT with named parameters
+{:ok, _, _, state} = EctoLibSql.handle_execute(
+  "INSERT INTO users (name, email, age) VALUES (:name, :email, :age)",
+  %{"name" => "Alice", "email" => "alice@example.com", "age" => 30},
+  [],
+  state
+)
+
+# UPDATE with named parameters
+{:ok, _, _, state} = EctoLibSql.handle_execute(
+  "UPDATE users SET status = :status, updated_at = :now WHERE id = :user_id",
+  %{"status" => "inactive", "now" => DateTime.utc_now(), "user_id" => 123},
+  [],
+  state
+)
+
+# DELETE with named parameters
+{:ok, _, _, state} = EctoLibSql.handle_execute(
+  "DELETE FROM users WHERE id = :user_id AND email = :email",
+  %{"user_id" => 123, "email" => "alice@example.com"},
+  [],
+  state
+)
+```
+
+Named parameters in transactions:
+
+```elixir
+{:ok, :begin, state} = EctoLibSql.handle_begin([], state)
+
+{:ok, _, _, state} = EctoLibSql.handle_execute(
+  """
+  INSERT INTO users (name, email) VALUES (:name, :email)
+  """,
+  %{"name" => "Alice", "email" => "alice@example.com"},
+  [],
+  state
+)
+
+{:ok, _, _, state} = EctoLibSql.handle_execute(
+  "UPDATE users SET verified = 1 WHERE email = :email",
+  %{"email" => "alice@example.com"},
+  [],
+  state
+)
+
+{:ok, _, state} = EctoLibSql.handle_commit([], state)
+```
+
+**Benefits:**
+- **Readability**: Clear parameter names make queries self-documenting
+- **Maintainability**: Easier to refactor when parameter names are explicit
+- **Type safety**: Parameter validation can check required parameters upfront
+- **Flexibility**: Use any of three SQLite syntaxes interchangeably
+- **Prevention**: Prevents SQL injection attacks through proper parameter binding
+
+**Backward Compatibility:**
+Positional parameters (`?`) still work unchanged:
+
+```elixir
+# Positional parameters still work
+{:ok, _, result, state} = EctoLibSql.handle_execute(
+  "SELECT * FROM users WHERE email = ? AND status = ?",
+  ["alice@example.com", "active"],
+  [],
+  state
+)
+
+# Named and positional can coexist in separate queries within the same codebase
+```
+
+**Avoiding Mixed Syntax:**
+While SQLite technically permits mixing positional (`?`) and named (`:name`) parameters in a single statement, this is discouraged. Named parameters receive implicit numeric indices which can conflict with positional parameters, leading to unexpected binding order. This adapter's map-based approach naturally avoids this issue—pass a list for positional queries, or a map for named queries, but don't mix within a single statement.
 
 #### How Statement Caching Works
 
@@ -1133,6 +1288,317 @@ end
 {:ok, state} = EctoLibSql.connect(MyApp.DatabaseConfig.connection_opts())
 ```
 
+### JSON Schema Helpers
+
+EctoLibSql provides `EctoLibSql.JSON` module with comprehensive helpers for working with JSON and JSONB data. LibSQL 3.45.1 has JSON1 built into the core with support for both text JSON and efficient JSONB binary format.
+
+#### JSON Functions
+
+```elixir
+alias EctoLibSql.JSON
+
+# Extract values from JSON
+{:ok, theme} = JSON.extract(state, ~s({"user":{"prefs":{"theme":"dark"}}}), "$.user.prefs.theme")
+# Returns: {:ok, "dark"}
+
+# Check JSON type
+{:ok, type} = JSON.type(state, ~s({"count":42}), "$.count")
+# Returns: {:ok, "integer"}
+
+# Validate JSON
+{:ok, true} = JSON.is_valid(state, ~s({"valid":true}))
+{:ok, false} = JSON.is_valid(state, "not json")
+
+# Create JSON structures
+{:ok, array} = JSON.array(state, [1, 2.5, "hello", nil])
+# Returns: {:ok, "[1,2.5,\"hello\",null]"}
+
+{:ok, obj} = JSON.object(state, ["name", "Alice", "age", 30, "active", true])
+# Returns: {:ok, "{\"name\":\"Alice\",\"age\":30,\"active\":true}"}
+```
+
+#### Iterating Over JSON
+
+```elixir
+# Iterate over array elements or object members
+{:ok, items} = JSON.each(state, ~s([1,2,3]), "$")
+# Returns: {:ok, [{0, 1, "integer"}, {1, 2, "integer"}, {2, 3, "integer"}]}
+
+# Recursively iterate all values (flattening)
+{:ok, tree} = JSON.tree(state, ~s({"a":{"b":1},"c":[2,3]}), "$")
+# Returns: all nested values with their full paths
+```
+
+#### JSONB Binary Format
+
+JSONB is a more efficient binary encoding of JSON with 5-10% smaller size and faster processing:
+
+```elixir
+# Convert to binary JSONB format
+json_string = ~s({"name":"Alice","age":30})
+{:ok, jsonb_binary} = JSON.convert(state, json_string, :jsonb)
+
+# All JSON functions work with both text and JSONB
+{:ok, value} = JSON.extract(state, jsonb_binary, "$.name")
+# Transparently works with binary format
+
+# Convert back to text JSON
+{:ok, canonical} = JSON.convert(state, json_string, :json)
+```
+
+#### Arrow Operators (-> and ->>)
+
+The `->` and `->>` operators provide concise syntax for JSON access in queries:
+
+```elixir
+# -> returns JSON (always)
+fragment = JSON.arrow_fragment("settings", "theme")
+# Returns: "settings -> 'theme'"
+
+# ->> returns SQL type (text/int/real/null)
+fragment = JSON.arrow_fragment("settings", "theme", :double_arrow)
+# Returns: "settings ->> 'theme'"
+
+# Use in Ecto queries - Option 1: Using the helper function
+arrow_sql = JSON.arrow_fragment("data", "active", :double_arrow)
+from u in User,
+  where: fragment(arrow_sql <> " = ?", true)
+
+# Option 2: Direct inline SQL (simpler approach)
+from u in User,
+  where: fragment("data ->> 'active' = ?", true)
+```
+
+#### Ecto Integration
+
+JSON helpers work seamlessly with Ecto:
+
+```elixir
+defmodule MyApp.User do
+  use Ecto.Schema
+  import Ecto.Changeset
+
+  schema "users" do
+    field :name, :string
+    field :settings, :map  # Stored as JSON/JSONB
+    timestamps()
+  end
+end
+
+# In your repository context
+import Ecto.Query
+
+# Query with JSON extraction
+from u in User,
+  where: fragment("json_extract(?, ?) = ?", u.settings, "$.theme", "dark"),
+  select: u.name
+
+# Or using the helpers - Option 1: Arrow fragment helper
+arrow_sql = JSON.arrow_fragment("settings", "theme", :double_arrow)
+from u in User,
+  where: fragment(arrow_sql <> " = ?", "dark")
+
+# Option 2: Direct inline SQL (simpler for static fields)
+from u in User,
+  where: fragment("settings ->> 'theme' = ?", "dark")
+
+# Update JSON fields
+from u in User,
+  where: u.id == ^user_id,
+  update: [set: [settings: fragment("json_set(?, ?, ?)", u.settings, "$.theme", "light")]]
+```
+
+#### JSON Modification Functions
+
+Create, update, and manipulate JSON structures:
+
+```elixir
+# Quote a value for JSON
+{:ok, quoted} = JSON.json_quote(state, "hello \"world\"")
+# Returns: {:ok, "\"hello \\\"world\\\"\""}
+
+# Get JSON array/object length (SQLite 3.9.0+)
+{:ok, len} = JSON.json_length(state, ~s([1,2,3,4,5]))
+# Returns: {:ok, 5}
+
+# Get JSON structure depth (SQLite 3.9.0+)
+{:ok, depth} = JSON.depth(state, ~s({"a":{"b":{"c":1}}}))
+# Returns: {:ok, 4}
+
+# Set a value (creates path if not exists)
+{:ok, json} = JSON.set(state, ~s({"a":1}), "$.b", 2)
+# Returns: {:ok, "{\"a\":1,\"b\":2}"}
+
+# Replace a value (only if path exists)
+{:ok, json} = JSON.replace(state, ~s({"a":1,"b":2}), "$.a", 10)
+# Returns: {:ok, "{\"a\":10,\"b\":2}"}
+
+# Insert without replacing
+{:ok, json} = JSON.insert(state, ~s({"a":1}), "$.b", 2)
+# Returns: {:ok, "{\"a\":1,\"b\":2}"}
+
+# Remove keys/paths
+{:ok, json} = JSON.remove(state, ~s({"a":1,"b":2,"c":3}), "$.b")
+# Returns: {:ok, "{\"a\":1,\"c\":3}"}
+
+# Remove multiple paths
+{:ok, json} = JSON.remove(state, ~s({"a":1,"b":2,"c":3}), ["$.a", "$.c"])
+# Returns: {:ok, "{\"b\":2}"}
+
+# Apply a JSON Merge Patch (RFC 7396)
+# Keys in patch are object keys, not JSON paths
+{:ok, json} = JSON.patch(state, ~s({"a":1,"b":2}), ~s({"a":10,"c":3}))
+# Returns: {:ok, "{\"a\":10,\"b\":2,\"c\":3}"}
+
+# Remove a key by patching with null
+{:ok, json} = JSON.patch(state, ~s({"a":1,"b":2,"c":3}), ~s({"b":null}))
+# Returns: {:ok, "{\"a\":1,\"c\":3}"}
+
+# Get all keys from a JSON object (SQLite 3.9.0+)
+{:ok, keys} = JSON.keys(state, ~s({"name":"Alice","age":30}))
+# Returns: {:ok, "[\"age\",\"name\"]"}  (sorted)
+```
+
+#### Real-World Example: Settings Management
+
+```elixir
+defmodule MyApp.UserPreferences do
+  alias EctoLibSql.JSON
+
+  def get_preference(state, settings_json, key_path) do
+    JSON.extract(state, settings_json, "$.#{key_path}")
+  end
+
+  def set_preference(state, settings_json, key_path, value) do
+    # Build JSON path from key path
+    json_path = "$.#{key_path}"
+    
+    # Use JSON.set instead of raw SQL
+    JSON.set(state, settings_json, json_path, value)
+  end
+
+  def update_theme(state, settings_json, theme) do
+    JSON.set(state, settings_json, "$.theme", theme)
+  end
+
+  def toggle_notifications(state, settings_json) do
+    # Get current value
+    {:ok, current} = JSON.extract(state, settings_json, "$.notifications")
+    new_value = not current
+    
+    # Update it
+    JSON.set(state, settings_json, "$.notifications", new_value)
+  end
+
+  def remove_preference(state, settings_json, key_path) do
+    json_path = "$.#{key_path}"
+    JSON.remove(state, settings_json, json_path)
+  end
+
+  def validate_settings(state, settings_json) do
+    JSON.is_valid(state, settings_json)
+  end
+
+  def get_structure_info(state, settings_json) do
+    with {:ok, is_valid} <- JSON.is_valid(state, settings_json),
+         {:ok, json_type} <- JSON.type(state, settings_json),
+         {:ok, depth} <- JSON.depth(state, settings_json) do
+      {:ok, %{valid: is_valid, type: json_type, depth: depth}}
+    end
+  end
+
+  # Build settings from scratch
+  def create_default_settings(state) do
+    JSON.object(state, [
+      "theme", "light",
+      "notifications", true,
+      "language", "en",
+      "timezone", "UTC"
+    ])
+  end
+
+  # Merge settings with defaults
+  def merge_with_defaults(state, user_settings, defaults) do
+    with {:ok, user_map} <- JSON.tree(state, user_settings),
+         {:ok, defaults_map} <- JSON.tree(state, defaults) do
+      # In practice, you'd merge these maps here
+      {:ok, user_settings}
+    end
+  end
+end
+
+# Usage
+{:ok, state} = EctoLibSql.connect(database: "app.db")
+settings = ~s({"theme":"dark","notifications":true,"language":"es"})
+
+# Get a preference
+{:ok, theme} = MyApp.UserPreferences.get_preference(state, settings, "theme")
+# Returns: {:ok, "dark"}
+
+# Update a preference
+{:ok, new_settings} = MyApp.UserPreferences.update_theme(state, settings, "light")
+
+# Toggle notifications
+{:ok, new_settings} = MyApp.UserPreferences.toggle_notifications(state, settings)
+
+# Validate settings
+{:ok, valid?} = MyApp.UserPreferences.validate_settings(state, settings)
+# Returns: {:ok, true}
+
+# Get structure info
+{:ok, info} = MyApp.UserPreferences.get_structure_info(state, settings)
+# Returns: {:ok, %{valid: true, type: "object", depth: 2}}
+```
+
+#### Comparison: Set vs Replace vs Insert vs Patch
+
+The modification functions have different behaviors:
+
+```elixir
+json = ~s({"a":1,"b":2})
+
+# SET: Creates or replaces any path (uses JSON paths like "$.key")
+{:ok, result} = JSON.set(state, json, "$.c", 3)
+# Result: {"a":1,"b":2,"c":3}
+
+{:ok, result} = JSON.set(state, json, "$.a", 100)
+# Result: {"a":100,"b":2}
+
+# REPLACE: Only updates existing paths, ignores new paths (uses JSON paths)
+{:ok, result} = JSON.replace(state, json, "$.c", 3)
+# Result: {"a":1,"b":2}  (c not added)
+
+{:ok, result} = JSON.replace(state, json, "$.a", 100)
+# Result: {"a":100,"b":2}  (existing path updated)
+
+# INSERT: Adds new values without replacing existing ones (uses JSON paths)
+{:ok, result} = JSON.insert(state, json, "$.c", 3)
+# Result: {"a":1,"b":2,"c":3}
+
+{:ok, result} = JSON.insert(state, json, "$.a", 100)
+# Result: {"a":1,"b":2}  (existing path unchanged)
+
+# PATCH: Applies JSON Merge Patch (RFC 7396) - keys are object keys, not paths
+{:ok, result} = JSON.patch(state, json, ~s({"a":10,"c":3}))
+# Result: {"a":10,"b":2,"c":3}
+
+# Use null to remove keys
+{:ok, result} = JSON.patch(state, json, ~s({"b":null}))
+# Result: {"a":1}
+```
+
+**When to use each function:**
+- **SET/REPLACE/INSERT**: For path-based updates using JSON paths (e.g., "$.user.name")
+- **PATCH**: For bulk top-level key updates (implements RFC 7396 JSON Merge Patch)
+
+#### Performance Notes
+
+- JSONB format reduces storage by 5-10% vs text JSON
+- JSONB processes in less than half the CPU cycles
+- All JSON functions accept both text and JSONB transparently
+- For frequent extractions, consider denormalising commonly accessed fields
+- Use `json_each()` and `json_tree()` for flattening/searching
+
 ---
 
 ## Ecto Integration
@@ -1298,6 +1764,100 @@ mix ecto.migrate   # Run migrations
 mix ecto.rollback  # Rollback last migration
 ```
 
+#### STRICT Tables (Type Enforcement)
+
+STRICT tables enforce strict type checking - columns must be one of the allowed SQLite types. This prevents accidental type mismatches and data corruption:
+
+```elixir
+# Create a STRICT table for type safety
+defmodule MyApp.Repo.Migrations.CreateUsers do
+  use Ecto.Migration
+
+  def change do
+    create table(:users, strict: true) do
+      add :id, :integer, primary_key: true
+      add :name, :string, null: false
+      add :email, :string, null: false
+      add :age, :integer
+      add :balance, :float, default: 0.0
+      add :avatar, :binary
+      add :is_active, :boolean, default: true
+
+      timestamps()
+    end
+
+    create unique_index(:users, [:email])
+  end
+end
+```
+
+**Benefits:**
+- **Type Safety**: Enforces that columns only accept their declared types (TEXT, INTEGER, REAL, BLOB, NULL)
+- **Data Integrity**: Prevents accidental type coercion that could lead to bugs
+- **Better Errors**: Clear error messages when incorrect types are inserted
+- **Performance**: Can enable better query optimisation by knowing exact column types
+
+**Allowed Types in STRICT Tables:**
+- `INT`, `INTEGER` - Integer values only
+- `TEXT` - Text values only
+- `BLOB` - Binary data only
+- `REAL` - Floating-point values only
+- `NULL` - NULL values only (rarely used)
+
+**Usage Examples:**
+
+```elixir
+# STRICT table with various types
+create table(:products, strict: true) do
+  add :sku, :string, null: false              # Must be TEXT
+  add :name, :string, null: false             # Must be TEXT
+  add :quantity, :integer, default: 0         # Must be INTEGER
+  add :price, :float, null: false             # Must be REAL
+  add :description, :text                     # Must be TEXT
+  add :image_data, :binary                    # Must be BLOB
+  add :published_at, :utc_datetime            # Stored as TEXT (ISO8601 format)
+  timestamps()
+end
+
+# Combining STRICT with RANDOM ROWID
+create table(:api_keys, options: [strict: true, random_rowid: true]) do
+  add :user_id, references(:users, on_delete: :delete_all)  # INTEGER
+  add :key, :string, null: false                            # TEXT
+  add :secret, :string, null: false                         # TEXT
+  add :last_used_at, :utc_datetime                          # TEXT
+  timestamps()
+end
+```
+
+**Restrictions:**
+- STRICT is a libSQL/SQLite 3.37+ extension (not available in older versions)
+- Type affinity is enforced: generic types like `TEXT(50)` or `DATE` are not allowed
+- Dynamic type changes (e.g., storing integers in TEXT columns) will fail with type errors
+- Standard SQLite does not support STRICT tables
+
+**SQL Output:**
+```sql
+CREATE TABLE users (
+  id INTEGER PRIMARY KEY,
+  name TEXT NOT NULL,
+  email TEXT NOT NULL,
+  age INTEGER,
+  balance REAL DEFAULT 0.0,
+  avatar BLOB,
+  is_active INTEGER DEFAULT 1,
+  inserted_at TEXT,
+  updated_at TEXT
+) STRICT
+```
+
+**Error Example:**
+```elixir
+# This will fail on a STRICT table:
+Repo.query!("INSERT INTO users (name, email, age) VALUES (?, ?, ?)",
+  [123, "alice@example.com", "thirty"])  # ← age is string, not INTEGER
+# Error: "Type mismatch" (SQLite enforces STRICT)
+```
+
 #### RANDOM ROWID Support (libSQL Extension)
 
 For security and privacy, use RANDOM ROWID to generate pseudorandom row IDs instead of sequential integers:
@@ -1398,6 +1958,69 @@ end
 ```sql
 ALTER TABLE users ALTER COLUMN age TO age TEXT DEFAULT '0'
 ALTER TABLE users ALTER COLUMN email TO email TEXT NOT NULL
+```
+
+#### Generated/Computed Columns
+
+SQLite 3.31+ and libSQL support GENERATED ALWAYS AS columns (computed columns). These are columns whose values are computed from an expression:
+
+```elixir
+defmodule MyApp.Repo.Migrations.CreateUsers do
+  use Ecto.Migration
+
+  def change do
+    create table(:users) do
+      add :first_name, :string, null: false
+      add :last_name, :string, null: false
+      # Virtual generated column (computed on read, not stored)
+      add :full_name, :string, generated: "first_name || ' ' || last_name"
+
+      timestamps()
+    end
+  end
+end
+```
+
+**Stored Generated Columns:**
+
+Use `stored: true` to persist the computed value (updated automatically on insert/update):
+
+```elixir
+create table(:products) do
+  add :price, :float, null: false
+  add :quantity, :integer, null: false
+  # Stored - value is written to disk
+  add :total_value, :float, generated: "price * quantity", stored: true
+
+  timestamps()
+end
+```
+
+**Options:**
+- `generated: "expression"` - SQL expression to compute the column value
+- `stored: true` - Store the computed value (default is VIRTUAL/not stored)
+
+**Constraints (SQLite limitations):**
+- Generated columns **cannot** have a DEFAULT value
+- Generated columns **cannot** be part of a PRIMARY KEY
+- The expression must be deterministic (no RANDOM(), CURRENT_TIME, etc.)
+- STORED generated columns can be indexed; VIRTUAL columns cannot
+
+**SQL Output:**
+```sql
+-- Virtual (default)
+CREATE TABLE users (
+  "first_name" TEXT NOT NULL,
+  "last_name" TEXT NOT NULL,
+  "full_name" TEXT GENERATED ALWAYS AS (first_name || ' ' || last_name)
+)
+
+-- Stored
+CREATE TABLE products (
+  "price" REAL NOT NULL,
+  "quantity" INTEGER NOT NULL,
+  "total_value" REAL GENERATED ALWAYS AS (price * quantity) STORED
+)
 ```
 
 ### Basic Queries
@@ -1838,6 +2461,10 @@ rename table(:users), :old_field, to: :new_field       # RENAME COLUMN
 # ⚠️ LIBSQL EXTENSIONS (not in standard SQLite)
 alter table(:users) do: modify :age, :string           # ALTER COLUMN - libSQL only
 create table(:sessions, options: [random_rowid: true]) # RANDOM ROWID - libSQL only
+
+# ✅ SQLite 3.31+ / LIBSQL
+add :full_name, :string, generated: "first || ' ' || last"    # VIRTUAL computed column
+add :total, :float, generated: "price * qty", stored: true    # STORED computed column
 ```
 
 **Important Notes:**
@@ -1852,6 +2479,11 @@ create table(:sessions, options: [random_rowid: true]) # RANDOM ROWID - libSQL o
 3. **RANDOM ROWID** is a libSQL extension for security/privacy
    - Prevents ID enumeration attacks
    - Mutually exclusive with WITHOUT ROWID and AUTOINCREMENT
+
+4. **Generated Columns** are available in SQLite 3.31+ and libSQL
+   - Use `generated: "expression"` option with optional `stored: true`
+   - Cannot have DEFAULT values or be PRIMARY KEYs
+   - STORED columns are persisted; VIRTUAL columns are computed on read
 
 **Standard SQLite Workaround (if not using libSQL's ALTER COLUMN):**
 
@@ -2139,6 +2771,106 @@ Generates SQL for cosine distance calculation.
 - `vector` (list | String.t()): Query vector
 
 **Returns:** String SQL expression
+
+### JSON Helper Functions (EctoLibSql.JSON)
+
+The `EctoLibSql.JSON` module provides helpers for working with JSON and JSONB data in libSQL 3.45.1+.
+
+#### `EctoLibSql.JSON.extract/3`
+
+Extract a value from JSON at the specified path.
+
+**Parameters:**
+- `state` (EctoLibSql.State): Connection state
+- `json` (String.t() | binary): JSON text or JSONB binary data
+- `path` (String.t()): JSON path expression (e.g., "$.key" or "$[0]")
+
+**Returns:** `{:ok, value}` or `{:error, reason}`
+
+#### `EctoLibSql.JSON.type/2` and `EctoLibSql.JSON.type/3`
+
+Get the type of a value in JSON at the specified path.
+
+**Parameters:**
+- `state` (EctoLibSql.State): Connection state
+- `json` (String.t() | binary): JSON text or JSONB binary data
+- `path` (String.t(), optional, default "$"): JSON path expression
+
+**Returns:** `{:ok, type}` where type is one of: null, true, false, integer, real, text, array, object
+
+#### `EctoLibSql.JSON.is_valid/2`
+
+Check if a string is valid JSON.
+
+**Parameters:**
+- `state` (EctoLibSql.State): Connection state
+- `json` (String.t()): String to validate as JSON
+
+**Returns:** `{:ok, boolean}` or `{:error, reason}`
+
+#### `EctoLibSql.JSON.array/2`
+
+Create a JSON array from a list of values.
+
+**Parameters:**
+- `state` (EctoLibSql.State): Connection state
+- `values` (list): List of values to include in the array
+
+**Returns:** `{:ok, json_array}` - JSON text representation of the array
+
+#### `EctoLibSql.JSON.object/2`
+
+Create a JSON object from a list of key-value pairs.
+
+**Parameters:**
+- `state` (EctoLibSql.State): Connection state
+- `pairs` (list): List of alternating [key1, value1, key2, value2, ...]
+
+**Returns:** `{:ok, json_object}` - JSON text representation of the object
+
+#### `EctoLibSql.JSON.each/2` and `EctoLibSql.JSON.each/3`
+
+Iterate over elements of a JSON array or object members.
+
+**Parameters:**
+- `state` (EctoLibSql.State): Connection state
+- `json` (String.t() | binary): JSON text or JSONB binary data
+- `path` (String.t(), optional, default "$"): JSON path expression
+
+**Returns:** `{:ok, [{key, value, type}]}` - List of members with metadata
+
+#### `EctoLibSql.JSON.tree/2` and `EctoLibSql.JSON.tree/3`
+
+Recursively iterate over all values in a JSON structure.
+
+**Parameters:**
+- `state` (EctoLibSql.State): Connection state
+- `json` (String.t() | binary): JSON text or JSONB binary data
+- `path` (String.t(), optional, default "$"): JSON path expression
+
+**Returns:** `{:ok, [{full_key, atom, type}]}` - List of all values with paths
+
+#### `EctoLibSql.JSON.convert/2` and `EctoLibSql.JSON.convert/3`
+
+Convert text JSON to canonical form, optionally returning JSONB binary format.
+
+**Parameters:**
+- `state` (EctoLibSql.State): Connection state
+- `json` (String.t()): JSON text string
+- `format` (`:json | :jsonb`, optional, default `:json`): Output format
+
+**Returns:** `{:ok, json}` as text or `{:ok, jsonb}` as binary, or `{:error, reason}`
+
+#### `EctoLibSql.JSON.arrow_fragment/2` and `EctoLibSql.JSON.arrow_fragment/3`
+
+Helper to create SQL fragments for Ecto queries using JSON operators.
+
+**Parameters:**
+- `json_column` (String.t()): Column name or fragment
+- `path` (String.t() | integer): JSON path (string key or array index)
+- `operator` (`:arrow | :double_arrow`, optional, default `:arrow`): Operator type
+
+**Returns:** String for use in `Ecto.Query.fragment/1`
 
 ### Sync Functions
 

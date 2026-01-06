@@ -275,6 +275,8 @@ defmodule EctoLibSql.PragmaTest do
       # Clean up
       EctoLibSql.disconnect([], state2)
       File.rm(test_db2)
+      File.rm(test_db2 <> "-wal")
+      File.rm(test_db2 <> "-shm")
     end
   end
 end
