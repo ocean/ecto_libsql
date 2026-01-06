@@ -342,6 +342,22 @@ pub fn should_use_query(sql: &str) -> bool {
         return false;
     }
 
+    // Check if starts with EXPLAIN (case-insensitive)
+    // EXPLAIN always returns rows, so treat it like a query
+    if len - start >= 7
+        && (bytes[start] == b'E' || bytes[start] == b'e')
+        && (bytes[start + 1] == b'X' || bytes[start + 1] == b'x')
+        && (bytes[start + 2] == b'P' || bytes[start + 2] == b'p')
+        && (bytes[start + 3] == b'L' || bytes[start + 3] == b'l')
+        && (bytes[start + 4] == b'A' || bytes[start + 4] == b'a')
+        && (bytes[start + 5] == b'I' || bytes[start + 5] == b'i')
+        && (bytes[start + 6] == b'N' || bytes[start + 6] == b'n')
+        // Verify it's followed by whitespace or end of string
+        && (start + 7 >= len || bytes[start + 7].is_ascii_whitespace())
+    {
+        return true;
+    }
+
     // Check if starts with SELECT (case-insensitive)
     if len - start >= 6
         && (bytes[start] == b'S' || bytes[start] == b's')
