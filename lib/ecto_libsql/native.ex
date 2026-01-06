@@ -902,29 +902,9 @@ defmodule EctoLibSql.Native do
     end
   end
 
-  @doc false
-  # Determine if a SQL statement returns rows (SELECT, EXPLAIN, WITH, or statements with RETURNING)
-  defp statement_returns_rows?(sql) when is_binary(sql) do
-    sql = String.trim(sql)
-    
-    case sql do
-      # Check for EXPLAIN (returns rows)
-      <<"EXPLAIN", rest::binary>> -> String.match?(rest, ~r/^\s/)
-      <<"explain", rest::binary>> -> String.match?(rest, ~r/^\s/)
-      # Check for SELECT
-      <<"SELECT", rest::binary>> -> String.match?(rest, ~r/^\s/)
-      <<"select", rest::binary>> -> String.match?(rest, ~r/^\s/)
-      # Check for WITH (CTEs return rows)
-      <<"WITH", rest::binary>> -> String.match?(rest, ~r/^\s/)
-      <<"with", rest::binary>> -> String.match?(rest, ~r/^\s/)
-      # Check for RETURNING clause (INSERT/UPDATE/DELETE with RETURNING)
-      _ -> String.match?(sql, ~r/\bRETURNING\b/i)
-    end
-  end
-
   @doc """
   Execute a prepared statement with arguments.
-  
+
   Automatically routes to query_stmt if the statement returns rows (e.g., SELECT, EXPLAIN, RETURNING),
   or to execute_prepared if it doesn't (e.g., INSERT/UPDATE/DELETE without RETURNING).
 
@@ -951,33 +931,35 @@ defmodule EctoLibSql.Native do
       # INSERT with RETURNING
       {:ok, stmt_id} = EctoLibSql.Native.prepare(state, "INSERT INTO users (name) VALUES (?) RETURNING *")
       {:ok, result} = EctoLibSql.Native.execute_stmt(state, stmt_id, sql, ["Alice"])
-   """
+  """
   def execute_stmt(
         %EctoLibSql.State{conn_id: conn_id, mode: mode, sync: syncx} = state,
         stmt_id,
         sql,
         args
       ) do
-    # Check if this statement returns rows
-    if statement_returns_rows?(sql) do
-      # Use query_stmt path for statements that return rows
-      query_stmt(state, stmt_id, args)
-    else
-      # Use execute path for statements that don't return rows
-      # Normalise arguments (convert map to positional list if needed).
-      case normalise_arguments_for_stmt(conn_id, stmt_id, args) do
-        {:error, reason} ->
-          {:error, "Failed to normalise parameters: #{reason}"}
+    # Check if this statement returns rows (uses the NIF for consistency with handle_execute).
+    case should_use_query_path(sql) do
+      true ->
+        # Use query_stmt path for statements that return rows.
+        query_stmt(state, stmt_id, args)
 
-        normalised_args ->
-          case execute_prepared(conn_id, stmt_id, mode, syncx, sql, normalised_args) do
-            num_rows when is_integer(num_rows) ->
-              {:ok, num_rows}
+      false ->
+        # Use execute path for statements that don't return rows.
+        # Normalise arguments (convert map to positional list if needed).
+        case normalise_arguments_for_stmt(conn_id, stmt_id, args) do
+          {:error, reason} ->
+            {:error, "Failed to normalise parameters: #{reason}"}
 
-            {:error, reason} ->
-              {:error, reason}
-          end
-      end
+          normalised_args ->
+            case execute_prepared(conn_id, stmt_id, mode, syncx, sql, normalised_args) do
+              num_rows when is_integer(num_rows) ->
+                {:ok, num_rows}
+
+              {:error, reason} ->
+                {:error, reason}
+            end
+        end
     end
   end
 
