@@ -155,20 +155,29 @@ defmodule EctoLibSql do
     # Check if query returns rows (SELECT, EXPLAIN, WITH, RETURNING clauses)
     # If so, route through query path instead of execute path
     sql = query_struct.statement
-    
+
+    # Convert map arguments to list if needed (NIFs expect lists).
+    normalised_args = normalise_args_for_query(sql, args)
+
     case EctoLibSql.Native.should_use_query_path(sql) do
       true ->
-        # Query returns rows, use the query path
+        # Query returns rows, use the query path.
         if trx_id do
-          EctoLibSql.Native.query_with_trx_args(trx_id, state.conn_id, sql, args)
+          EctoLibSql.Native.query_with_trx_args(trx_id, state.conn_id, sql, normalised_args)
           |> format_query_result(state)
         else
-          EctoLibSql.Native.query_args(state.conn_id, state.mode, state.sync, sql, args)
+          EctoLibSql.Native.query_args(
+            state.conn_id,
+            state.mode,
+            state.sync,
+            sql,
+            normalised_args
+          )
           |> format_query_result(state)
         end
-      
+
       false ->
-        # Query doesn't return rows, use the execute path (INSERT/UPDATE/DELETE)
+        # Query doesn't return rows, use the execute path (INSERT/UPDATE/DELETE).
         if trx_id do
           EctoLibSql.Native.execute_with_trx(state, query_struct, args)
         else
@@ -184,11 +193,58 @@ defmodule EctoLibSql do
       rows: rows,
       num_rows: num_rows
     }
+
     {:ok, %EctoLibSql.Query{}, result, state}
   end
 
   defp format_query_result({:error, reason}, state) do
-    {:error, %EctoLibSql.Query{}, reason, state}
+    error = build_error(reason)
+    {:error, error, state}
+  end
+
+  # Build an EctoLibSql.Error from various reason formats.
+  defp build_error(%EctoLibSql.Error{} = error), do: error
+
+  defp build_error(reason) when is_binary(reason) do
+    %EctoLibSql.Error{message: reason, sqlite: %{code: :error, message: reason}}
+  end
+
+  defp build_error(reason) when is_map(reason) do
+    message = Map.get(reason, :message) || Map.get(reason, "message") || inspect(reason)
+    %EctoLibSql.Error{message: message, sqlite: %{code: :error, message: message}}
+  end
+
+  defp build_error(reason) do
+    message = inspect(reason)
+    %EctoLibSql.Error{message: message, sqlite: %{code: :error, message: message}}
+  end
+
+  # Convert map arguments to a list by extracting named parameters from SQL.
+  # If args is already a list, return it unchanged.
+  defp normalise_args_for_query(_sql, args) when is_list(args), do: args
+
+  defp normalise_args_for_query(sql, args) when is_map(args) do
+    # Extract named parameters from SQL in order of appearance.
+    # Supports :name, $name, and @name formats.
+    param_names = extract_named_params(sql)
+
+    # Convert map values to list in parameter order.
+    Enum.map(param_names, fn name ->
+      # Try atom key first, then string key.
+      case Map.fetch(args, name) do
+        {:ok, value} -> value
+        :error -> Map.get(args, to_string(name))
+      end
+    end)
+  end
+
+  # Extract named parameter names from SQL in order of appearance.
+  # Returns a list of atom keys (e.g., [:name, :age] for "WHERE name = :name AND age = :age").
+  defp extract_named_params(sql) do
+    # Match :name, $name, or @name patterns.
+    ~r/[:$@]([a-zA-Z_][a-zA-Z0-9_]*)/
+    |> Regex.scan(sql)
+    |> Enum.map(fn [_full, name] -> String.to_atom(name) end)
   end
 
   @impl true
