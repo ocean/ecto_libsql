@@ -326,6 +326,9 @@ pub fn query_with_trx_args<'a>(
     query: &str,
     args: Vec<Term<'a>>,
 ) -> NifResult<Term<'a>> {
+    // Validate UTF-8 as defence against CVE-2025-47736.
+    utils::validate_utf8_sql(query)?;
+
     // Decode args before locking
     let decoded_args: Vec<libsql::Value> = args
         .into_iter()

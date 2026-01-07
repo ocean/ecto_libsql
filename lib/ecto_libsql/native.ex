@@ -408,16 +408,31 @@ defmodule EctoLibSql.Native do
   end
 
   # Validate that all required parameters exist in the map.
-  # Raises ArgumentError if any parameters are missing.
+  # Raises ArgumentError if any parameters are missing or if map is used with positional params.
   defp validate_params_exist(param_map, param_names) do
+    # Check if we have positional parameters (nil entries from ?).
+    has_positional = Enum.any?(param_names, &is_nil/1)
+
+    if has_positional do
+      # SQL uses positional parameters (?), but user provided a map.
+      # This is a type mismatch - positional params require a list.
+      raise ArgumentError,
+            "Cannot use named parameter map with SQL that has positional parameters (?). " <>
+              "Use a list of values instead, e.g., [value1, value2] not %{key: value}"
+    end
+
+    # Filter out any nil names (shouldn't happen after above check, but defensive).
+    named_params = Enum.reject(param_names, &is_nil/1)
+
+    # Validate that all named parameters exist in the map.
     missing_params =
-      Enum.filter(param_names, fn name ->
+      Enum.filter(named_params, fn name ->
         not has_map_key_flexible?(param_map, name)
       end)
 
     if missing_params != [] do
       missing_list = Enum.map_join(missing_params, ", ", &":#{&1}")
-      all_params = Enum.map_join(param_names, ", ", &":#{&1}")
+      all_params = Enum.map_join(named_params, ", ", &":#{&1}")
 
       raise ArgumentError,
             "Missing required parameters: #{missing_list}. " <>

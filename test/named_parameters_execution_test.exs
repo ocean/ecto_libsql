@@ -591,5 +591,20 @@ defmodule EctoLibSql.NamedParametersExecutionTest do
 
       assert result.num_rows == 1
     end
+
+    test "Map parameters with positional SQL raises clear error", %{state: state} do
+      # Try to use a map with SQL that has positional parameters (?).
+      # Should raise clear error explaining the mismatch.
+      assert_raise ArgumentError,
+                   ~r/Cannot use named parameter map with SQL that has positional parameters/,
+                   fn ->
+                     EctoLibSql.handle_execute(
+                       "INSERT INTO users (id, name, email, age) VALUES (?, ?, ?, ?)",
+                       %{id: 1, name: "Test", email: "test@example.com", age: 30},
+                       [],
+                       state
+                     )
+                   end
+    end
   end
 end

@@ -128,6 +128,9 @@ pub fn declare_cursor_with_context(
     sql: &str,
     args: Vec<Term>,
 ) -> NifResult<String> {
+    // Validate UTF-8 as defence against CVE-2025-47736.
+    utils::validate_utf8_sql(sql)?;
+
     let decoded_args: Vec<Value> = args
         .into_iter()
         .map(|t| utils::decode_term_to_value(t))
