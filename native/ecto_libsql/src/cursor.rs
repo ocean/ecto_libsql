@@ -31,6 +31,9 @@ use rustler::{Atom, Binary, Encoder, Env, NifResult, OwnedBinary, Term};
 /// Returns a cursor ID on success, error on failure.
 #[rustler::nif(schedule = "DirtyIo")]
 pub fn declare_cursor(conn_id: &str, sql: &str, args: Vec<Term>) -> NifResult<String> {
+    // Validate UTF-8 as defence against CVE-2025-47736.
+    utils::validate_utf8_sql(sql)?;
+
     let conn_map = utils::safe_lock(&CONNECTION_REGISTRY, "declare_cursor conn_map")?;
 
     let client = conn_map

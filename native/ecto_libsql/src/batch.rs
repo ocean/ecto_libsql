@@ -4,7 +4,9 @@
 /// and without transactional semantics. Supports both statement-level batch
 /// execution (with parameterized queries) and native SQL batch execution.
 use crate::constants::{CONNECTION_REGISTRY, TOKIO_RUNTIME};
-use crate::utils::{collect_rows, decode_term_to_value, safe_lock, safe_lock_arc};
+use crate::utils::{
+    collect_rows, decode_term_to_value, safe_lock, safe_lock_arc, validate_utf8_sql,
+};
 use libsql::Value;
 use rustler::types::atom::nil;
 use rustler::{Atom, Encoder, Env, NifResult, Term};
@@ -201,6 +203,9 @@ pub fn execute_transactional_batch<'a>(
 /// statements that don't return rows or conditional statements not executed.
 #[rustler::nif(schedule = "DirtyIo")]
 pub fn execute_batch_native<'a>(env: Env<'a>, conn_id: &str, sql: &str) -> NifResult<Term<'a>> {
+    // Validate UTF-8 as defence against CVE-2025-47736.
+    validate_utf8_sql(sql)?;
+
     let conn_map = safe_lock(&CONNECTION_REGISTRY, "execute_batch_native conn_map")?;
 
     if let Some(client) = conn_map.get(conn_id) {

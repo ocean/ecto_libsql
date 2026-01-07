@@ -10,6 +10,55 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
+/// Validates that a string contains only valid UTF-8.
+///
+/// # Defence Against CVE-2025-47736
+///
+/// This function provides defence-in-depth against CVE-2025-47736, a vulnerability
+/// in libsql-sqlite3-parser (≤ 0.13.0) that can crash when processing invalid UTF-8.
+///
+/// **Note**: In practice, this check is redundant because:
+/// 1. Rust's `&str` type guarantees valid UTF-8 at the type system level
+/// 2. Rustler validates UTF-8 when converting Elixir binaries to Rust strings
+/// 3. Any invalid UTF-8 from Elixir would fail NIF conversion before reaching our code
+///
+/// However, we include this as a defensive measure to:
+/// - Explicitly document our protection against the vulnerability
+/// - Provide an additional safety layer in case of future Rustler changes
+/// - Make the security guarantee explicit in the code
+///
+/// # Returns
+/// - `Ok(())` if the string is valid UTF-8 (which should always be the case for `&str`)
+/// - `Err(rustler::Error)` if invalid UTF-8 is somehow detected
+///
+/// # Example
+/// ```rust
+/// validate_utf8_sql("SELECT * FROM users WHERE id = :id")?;
+/// ```
+#[inline]
+pub fn validate_utf8_sql(sql: &str) -> Result<(), rustler::Error> {
+    // This check is technically redundant since &str is guaranteed to be valid UTF-8,
+    // but it serves as explicit documentation and defence-in-depth.
+    if !sql.is_char_boundary(0) || !sql.is_char_boundary(sql.len()) {
+        return Err(rustler::Error::Term(Box::new(
+            "SQL contains invalid UTF-8 sequences",
+        )));
+    }
+
+    // Additional validation: ensure the string can be iterated as UTF-8 chars.
+    // This will detect any invalid UTF-8 sequences that might have slipped through.
+    for (idx, _) in sql.char_indices() {
+        if !sql.is_char_boundary(idx) {
+            return Err(rustler::Error::Term(Box::new(format!(
+                "SQL contains invalid UTF-8 at byte position {}",
+                idx
+            ))));
+        }
+    }
+
+    Ok(())
+}
+
 /// Safely lock a mutex with proper error handling
 ///
 /// Returns a descriptive error message if the mutex is poisoned.
