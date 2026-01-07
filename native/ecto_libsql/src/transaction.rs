@@ -326,8 +326,8 @@ pub fn query_with_trx_args<'a>(
     query: &str,
     args: Vec<Term<'a>>,
 ) -> NifResult<Term<'a>> {
-    // Validate UTF-8 as defence against CVE-2025-47736.
-    utils::validate_utf8_sql(query)?;
+    // UTF-8 validation is guaranteed by Rust's &str type and Rustler's conversion,
+    // so we can rely on the type system rather than runtime checks.
 
     // Decode args before locking
     let decoded_args: Vec<libsql::Value> = args

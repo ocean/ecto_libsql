@@ -5,7 +5,7 @@
 use crate::constants::*;
 use crate::utils::{
     build_empty_result, collect_rows, enhance_constraint_error, safe_lock, safe_lock_arc,
-    should_use_query, validate_utf8_sql,
+    should_use_query,
 };
 use libsql::Value;
 use rustler::{Atom, Env, NifResult, Term};
@@ -38,8 +38,8 @@ pub fn query_args<'a>(
     query: &str,
     args: Vec<Term<'a>>,
 ) -> NifResult<Term<'a>> {
-    // Validate UTF-8 as defence against CVE-2025-47736.
-    validate_utf8_sql(query)?;
+    // UTF-8 validation is guaranteed by Rust's &str type and Rustler's conversion,
+    // so we can rely on the type system rather than runtime checks.
 
     let client = {
         let conn_map = safe_lock(&CONNECTION_REGISTRY, "query_args conn_map")?;
@@ -183,8 +183,8 @@ pub fn do_sync(conn_id: &str, mode: Atom) -> NifResult<(Atom, String)> {
 /// Returns a map with keys: `columns`, `rows`, `num_rows`
 #[rustler::nif(schedule = "DirtyIo")]
 pub fn pragma_query<'a>(env: Env<'a>, conn_id: &str, pragma_stmt: &str) -> NifResult<Term<'a>> {
-    // Validate UTF-8 as defence against CVE-2025-47736.
-    validate_utf8_sql(pragma_stmt)?;
+    // UTF-8 validation is guaranteed by Rust's &str type and Rustler's conversion,
+    // so we can rely on the type system rather than runtime checks.
 
     let conn_map = safe_lock(&CONNECTION_REGISTRY, "pragma_query conn_map")?;
 

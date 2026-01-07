@@ -31,8 +31,8 @@ use rustler::{Atom, Binary, Encoder, Env, NifResult, OwnedBinary, Term};
 /// Returns a cursor ID on success, error on failure.
 #[rustler::nif(schedule = "DirtyIo")]
 pub fn declare_cursor(conn_id: &str, sql: &str, args: Vec<Term>) -> NifResult<String> {
-    // Validate UTF-8 as defence against CVE-2025-47736.
-    utils::validate_utf8_sql(sql)?;
+    // UTF-8 validation is guaranteed by Rust's &str type and Rustler's conversion,
+    // so we can rely on the type system rather than runtime checks.
 
     let conn_map = utils::safe_lock(&CONNECTION_REGISTRY, "declare_cursor conn_map")?;
 
@@ -128,8 +128,8 @@ pub fn declare_cursor_with_context(
     sql: &str,
     args: Vec<Term>,
 ) -> NifResult<String> {
-    // Validate UTF-8 as defence against CVE-2025-47736.
-    utils::validate_utf8_sql(sql)?;
+    // UTF-8 validation is guaranteed by Rust's &str type and Rustler's conversion,
+    // so we can rely on the type system rather than runtime checks.
 
     let decoded_args: Vec<Value> = args
         .into_iter()
