@@ -14,7 +14,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Table creation**: Use `:rtree => true` option in Ecto migrations
   - **Dimensions supported**: 1D to 5D (3 to 11 columns total including ID)
   - **Column structure**: First column must be `id` (integer primary key), followed by min/max coordinate pairs
-  - **Validation**: Automatic validation of column count (odd numbers only), column naming, and dimensional constraints
+  - **Validation**: Automatic validation of column count (odd numbers only), first-column requirements (must be 'id'), and dimensional constraints
   - **Use cases**: Geographic bounding boxes, collision detection, time-range queries, spatial indexing
   - **Migration example**:
     ```elixir
