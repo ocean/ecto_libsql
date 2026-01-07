@@ -186,6 +186,8 @@ defmodule Ecto.Adapters.LibSql.Connection do
 
     # Check if this is an R*Tree virtual table
     if table.options && Keyword.get(table.options, :rtree, false) do
+      # Validate that no incompatible options are set with :rtree
+      validate_rtree_options!(table.options)
       create_rtree_table(table_name, if_not_exists, columns)
     else
       # Standard table creation
@@ -500,6 +502,25 @@ defmodule Ecto.Adapters.LibSql.Connection do
     [
       "CREATE VIRTUAL TABLE#{if_not_exists} #{table_name} USING rtree(#{column_list})"
     ]
+  end
+
+  defp validate_rtree_options!(options) do
+    # R*Tree virtual tables are incompatible with standard table options
+    # Check for any non-:rtree options that would be silently ignored
+    incompatible_options =
+      Keyword.keys(options)
+      |> Enum.reject(&(&1 == :rtree))
+
+    unless Enum.empty?(incompatible_options) do
+      options_str = Enum.map_join(incompatible_options, ", ", &inspect/1)
+
+      raise ArgumentError,
+            "R*Tree virtual tables do not support standard table options. " <>
+              "Found incompatible options: #{options_str}. " <>
+              "R*Tree tables can only use the :rtree option."
+    end
+
+    :ok
   end
 
   defp validate_rtree_columns!(columns) do

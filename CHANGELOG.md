@@ -14,7 +14,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - **Table creation**: Use `:rtree => true` option in Ecto migrations
   - **Dimensions supported**: 1D to 5D (3 to 11 columns total including ID)
   - **Column structure**: First column must be `id` (integer primary key), followed by min/max coordinate pairs
-  - **Validation**: Automatic validation of column count (odd numbers only), first-column requirements (must be 'id'), and dimensional constraints
+  - **Validation**: Automatic validation of column count (odd numbers only), first-column requirements (must be 'id'), dimensional constraints, and incompatible table options
+  - **Table options**: R*Tree virtual tables reject standard table options (`:strict`, `:random_rowid`, `:without_rowid`) with clear error messages
   - **Use cases**: Geographic bounding boxes, collision detection, time-range queries, spatial indexing
   - **Migration example**:
     ```elixir
@@ -28,7 +29,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     ```
   - **Query patterns**: Point containment, bounding box intersection, range queries
   - **Virtual table syntax**: Generates `CREATE VIRTUAL TABLE ... USING rtree(...)` DDL
-  - **Implementation**: New `create_rtree_table/3` and `validate_rtree_columns!/1` helpers in `connection.ex`
+  - **Implementation**: New `create_rtree_table/3`, `validate_rtree_options!/1`, and `validate_rtree_columns!/1` helpers in `connection.ex`
   - **Comprehensive test coverage** in `test/rtree_test.exs` covering 2D/3D tables, validation, queries, and CRUD operations
   - **Documentation**: Full guide in AGENTS.md with examples for geographic data, time-series, and hybrid vector+spatial search
   - **Comparison guide**: R*Tree vs Vector Search decision matrix in documentation

@@ -1107,7 +1107,7 @@ distance_sql = EctoLibSql.Native.vector_distance_cos("description_embedding", qu
 
 ### R*Tree Spatial Indexing
 
-R*Tree is a specialized spatial index for efficient multi-dimensional range queries. Perfect for geospatial data, collision detection, and time-series queries.
+R*Tree is a specialised spatial index for efficient multi-dimensional range queries. Perfect for geospatial data, collision detection, and time-series queries.
 
 #### Creating R*Tree Tables
 
@@ -1134,6 +1134,7 @@ end
 - Remaining columns come in min/max pairs (2D, 3D, 4D, or 5D)
 - Total columns must be odd (3, 5, 7, 9, or 11)
 - Minimum 3 columns (id + 1 dimension), maximum 11 columns (id + 5 dimensions)
+- R*Tree tables are virtual tables and do not support standard table options like `:strict`, `:random_rowid`, or `:without_rowid`
 
 #### 2D Example: Geographic Boundaries
 
@@ -1210,7 +1211,7 @@ result = Ecto.Adapters.SQL.query!(
   SELECT id FROM events
   WHERE max_x >= 90 AND min_x <= 110
     AND max_y >= 190 AND min_y <= 210
-    AND max_time >= #{query_start} AND min_time <= #{end_time}
+    AND max_time >= #{query_start} AND min_time <= #{query_end}
   """
 )
 ```

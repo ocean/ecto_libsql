@@ -208,6 +208,51 @@ defmodule Ecto.RTreeTest do
         execute_ddl({:create, table, columns})
       end
     end
+
+    test "rejects R*Tree table with incompatible options" do
+      import Ecto.Adapters.LibSql.Connection
+
+      # Test with :strict option
+      table = %Ecto.Migration.Table{
+        name: :invalid_rtree,
+        prefix: nil,
+        options: [rtree: true, strict: true]
+      }
+
+      columns = [
+        {:add, :id, :integer, [primary_key: true]},
+        {:add, :min_lat, :float, []},
+        {:add, :max_lat, :float, []},
+        {:add, :min_lng, :float, []},
+        {:add, :max_lng, :float, []}
+      ]
+
+      assert_raise ArgumentError, ~r/do not support standard table options/, fn ->
+        execute_ddl({:create, table, columns})
+      end
+
+      # Test with :random_rowid option
+      table = %Ecto.Migration.Table{
+        name: :invalid_rtree,
+        prefix: nil,
+        options: [rtree: true, random_rowid: true]
+      }
+
+      assert_raise ArgumentError, ~r/Found incompatible options: :random_rowid/, fn ->
+        execute_ddl({:create, table, columns})
+      end
+
+      # Test with multiple incompatible options
+      table = %Ecto.Migration.Table{
+        name: :invalid_rtree,
+        prefix: nil,
+        options: [rtree: true, strict: true, random_rowid: true]
+      }
+
+      assert_raise ArgumentError, ~r/do not support standard table options/, fn ->
+        execute_ddl({:create, table, columns})
+      end
+    end
   end
 
   describe "R*Tree queries" do
