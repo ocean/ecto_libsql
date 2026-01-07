@@ -279,6 +279,22 @@ defmodule EctoLibSql do
 
   # Extract named parameter names from SQL in order of appearance.
   # Returns a list of strings to avoid atom table exhaustion from dynamic SQL.
+  #
+  # LIMITATION: This regex-based approach cannot distinguish between parameter-like
+  # patterns in SQL string literals or comments and actual parameters. For example:
+  #
+  #   SELECT ':not_a_param', name FROM users WHERE id = :actual_param
+  #
+  # Would extract both "not_a_param" and "actual_param", even though the first
+  # appears in a string literal. This is an edge case that would require a full
+  # SQL parser to handle correctly (tracking quoted strings, escaped characters,
+  # and comment blocks). In practice, this limitation rarely causes issues because:
+  # 1. SQL string literals containing parameter-like patterns are uncommon
+  # 2. The validation will catch truly missing parameters
+  # 3. Extra entries in the parameter list are ignored during binding
+  #
+  # If this becomes problematic, consider using a proper SQL parser or the
+  # prepared statement introspection approach used in lib/ecto_libsql/native.ex.
   defp extract_named_params(sql) do
     # Match :name, $name, or @name patterns.
     ~r/[:$@]([a-zA-Z_][a-zA-Z0-9_]*)/
