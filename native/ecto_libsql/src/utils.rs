@@ -32,8 +32,11 @@ use std::time::Duration;
 /// - `Err(rustler::Error)` if invalid UTF-8 is somehow detected
 ///
 /// # Example
-/// ```rust
+/// ```rust,no_run
+/// use ecto_libsql::utils::validate_utf8_sql;
+///
 /// validate_utf8_sql("SELECT * FROM users WHERE id = :id")?;
+/// # Ok::<(), rustler::Error>(())
 /// ```
 #[inline]
 pub fn validate_utf8_sql(sql: &str) -> Result<(), rustler::Error> {
