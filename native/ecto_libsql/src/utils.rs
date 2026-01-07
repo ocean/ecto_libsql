@@ -10,8 +10,6 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Duration;
 
-
-
 /// Safely lock a mutex with proper error handling
 ///
 /// Returns a descriptive error message if the mutex is poisoned.

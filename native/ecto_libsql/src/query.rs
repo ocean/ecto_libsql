@@ -38,9 +38,6 @@ pub fn query_args<'a>(
     query: &str,
     args: Vec<Term<'a>>,
 ) -> NifResult<Term<'a>> {
-    // UTF-8 validation is guaranteed by Rust's &str type and Rustler's conversion,
-    // so we can rely on the type system rather than runtime checks.
-
     let client = {
         let conn_map = safe_lock(&CONNECTION_REGISTRY, "query_args conn_map")?;
         conn_map
@@ -183,9 +180,6 @@ pub fn do_sync(conn_id: &str, mode: Atom) -> NifResult<(Atom, String)> {
 /// Returns a map with keys: `columns`, `rows`, `num_rows`
 #[rustler::nif(schedule = "DirtyIo")]
 pub fn pragma_query<'a>(env: Env<'a>, conn_id: &str, pragma_stmt: &str) -> NifResult<Term<'a>> {
-    // UTF-8 validation is guaranteed by Rust's &str type and Rustler's conversion,
-    // so we can rely on the type system rather than runtime checks.
-
     let conn_map = safe_lock(&CONNECTION_REGISTRY, "pragma_query conn_map")?;
 
     if let Some(client) = conn_map.get(conn_id) {
