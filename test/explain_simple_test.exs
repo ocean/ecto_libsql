@@ -25,6 +25,11 @@ defmodule EctoLibSql.ExplainSimpleTest do
   @test_db "z_ecto_libsql_test-explain-simple.db"
 
   setup_all do
+    # Clean up any existing test database files
+    File.rm(@test_db)
+    File.rm(@test_db <> "-shm")
+    File.rm(@test_db <> "-wal")
+
     {:ok, _} = TestRepo.start_link(database: @test_db)
 
     Ecto.Adapters.SQL.query!(TestRepo, """
@@ -47,6 +52,11 @@ defmodule EctoLibSql.ExplainSimpleTest do
       catch
         _, _ -> nil
       end
+
+      # Clean up all database files
+      File.rm(@test_db)
+      File.rm(@test_db <> "-shm")
+      File.rm(@test_db <> "-wal")
     end)
 
     {:ok, []}

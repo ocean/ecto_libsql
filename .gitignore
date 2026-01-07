@@ -33,9 +33,8 @@ ecto_libsql-*.tar
 # Erlang PLTs for Dialyzer
 /priv/plts/
 
-# Test databases
-z_ecto_libsql_test-*.db
-z_ecto_libsql_test-*.db-*
+# Test databases (including WAL and SHM files)
+z_ecto_libsql_test*
 
 # Local environment variables.
 .env.local

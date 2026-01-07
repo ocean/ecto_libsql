@@ -11,11 +11,20 @@ defmodule Ecto.RTreeTest do
   @test_db "z_ecto_libsql_test-rtree.db"
 
   setup_all do
-    # Clean up any existing test database
+    # Clean up any existing test database files
     File.rm(@test_db)
+    File.rm(@test_db <> "-shm")
+    File.rm(@test_db <> "-wal")
 
     # Start the test repo
     {:ok, _} = TestRepo.start_link(database: @test_db)
+
+    # Clean up after all tests complete
+    on_exit(fn ->
+      File.rm(@test_db)
+      File.rm(@test_db <> "-shm")
+      File.rm(@test_db <> "-wal")
+    end)
 
     :ok
   end
