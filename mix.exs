@@ -79,7 +79,7 @@ defmodule EctoLibSql.MixProject do
       main: "EctoLibSql",
       source_ref: "v#{@version}",
       source_url: @source_url,
-      extras: ["README.md", "CHANGELOG.md", "AGENTS.md", "ECTO_MIGRATION_GUIDE.md"],
+      extras: ["README.md", "CHANGELOG.md", "AGENTS.md", "ECTO_MIGRATION_GUIDE.md", "SECURITY.md"],
       groups_for_modules: [
         "Core Modules": [EctoLibSql, EctoLibSql.Native],
         "Support Modules": [

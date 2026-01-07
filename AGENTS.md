@@ -2870,7 +2870,7 @@ Helper to create SQL fragments for Ecto queries using JSON operators.
 - `path` (String.t() | integer): JSON path (string key or array index)
 - `operator` (`:arrow | :double_arrow`, optional, default `:arrow`): Operator type
 
-**Returns:** String for use in `Ecto.Query.fragment/1`
+**Returns:** String for use in Ecto.Query.fragment/1
 
 ### Sync Functions
 
