@@ -13,7 +13,7 @@ Welcome to ecto_libsql! This guide provides comprehensive documentation, API ref
 - How to integrate ecto_libsql into your Elixir/Phoenix application
 - Configuration and connection management
 - Ecto schemas, migrations, and queries
-- Advanced features (vector search, encryption, batching)
+- Advanced features (vector search, R*Tree spatial indexing, encryption, batching)
 - Real-world usage examples and patterns
 - Performance optimisation for your applications
 
@@ -32,6 +32,7 @@ Welcome to ecto_libsql! This guide provides comprehensive documentation, API ref
   - [Connection Management](#connection-management)
   - [PRAGMA Configuration](#pragma-configuration)
   - [Vector Search](#vector-search)
+  - [R*Tree Spatial Indexing](#rtree-spatial-indexing)
   - [Encryption](#encryption)
 - [Ecto Integration](#ecto-integration)
   - [Quick Start with Ecto](#quick-start-with-ecto)
@@ -1102,6 +1103,210 @@ distance_sql = EctoLibSql.Native.vector_distance_cos("description_embedding", qu
   [],
   state
 )
+```
+
+### R*Tree Spatial Indexing
+
+R*Tree is a specialized spatial index for efficient multi-dimensional range queries. Perfect for geospatial data, collision detection, and time-series queries.
+
+#### Creating R*Tree Tables
+
+R*Tree tables are created as virtual tables using the `:rtree => true` option in migrations:
+
+```elixir
+defmodule MyApp.Repo.Migrations.CreateLocationsRTree do
+  use Ecto.Migration
+
+  def change do
+    create table(:geo_regions, rtree: true) do
+      add :id, :integer, primary_key: true
+      add :min_lat, :float
+      add :max_lat, :float
+      add :min_lng, :float
+      add :max_lng, :float
+    end
+  end
+end
+```
+
+**Important R*Tree Requirements:**
+- First column must be named `id` (integer primary key)
+- Remaining columns come in min/max pairs (2D, 3D, 4D, or 5D)
+- Total columns must be odd (3, 5, 7, 9, or 11)
+- Minimum 3 columns (id + 1 dimension), maximum 11 columns (id + 5 dimensions)
+
+#### 2D Example: Geographic Boundaries
+
+```elixir
+# Create table for geographic regions
+Ecto.Adapters.SQL.query!(
+  Repo,
+  """
+  CREATE VIRTUAL TABLE geo_regions USING rtree(
+    id,
+    min_lat, max_lat,
+    min_lng, max_lng
+  )
+  """
+)
+
+# Insert bounding boxes for regions
+# Sydney: -34.0 to -33.8 lat, 151.0 to 151.3 lng
+Ecto.Adapters.SQL.query!(
+  Repo,
+  "INSERT INTO geo_regions VALUES (1, -34.0, -33.8, 151.0, 151.3)"
+)
+
+# Melbourne: -38.0 to -37.7 lat, 144.8 to 145.1 lng
+Ecto.Adapters.SQL.query!(
+  Repo,
+  "INSERT INTO geo_regions VALUES (2, -38.0, -37.7, 144.8, 145.1)"
+)
+
+# Find regions containing a point (Sydney: -33.87, 151.21)
+result = Ecto.Adapters.SQL.query!(
+  Repo,
+  """
+  SELECT id FROM geo_regions
+  WHERE min_lat <= -33.87 AND max_lat >= -33.87
+    AND min_lng <= 151.21 AND max_lng >= 151.21
+  """
+)
+# Returns: [[1]]
+```
+
+#### 3D Example: Spatial + Time Ranges
+
+```elixir
+# Create table for events with location and time bounds
+Ecto.Adapters.SQL.query!(
+  Repo,
+  """
+  CREATE VIRTUAL TABLE events USING rtree(
+    id,
+    min_x, max_x,      -- X coordinate bounds
+    min_y, max_y,      -- Y coordinate bounds
+    min_time, max_time -- Time bounds (Unix timestamp)
+  )
+  """
+)
+
+# Insert event: Conference at (100, 200) from Jan 1-3, 2025
+start_time = DateTime.to_unix(~U[2025-01-01 00:00:00Z])
+end_time = DateTime.to_unix(~U[2025-01-03 23:59:59Z])
+
+Ecto.Adapters.SQL.query!(
+  Repo,
+  "INSERT INTO events VALUES (1, 100, 100, 200, 200, #{start_time}, #{end_time})"
+)
+
+# Find events in area (90-110, 190-210) during Jan 2025
+query_start = DateTime.to_unix(~U[2025-01-01 00:00:00Z])
+query_end = DateTime.to_unix(~U[2025-01-31 23:59:59Z])
+
+result = Ecto.Adapters.SQL.query!(
+  Repo,
+  """
+  SELECT id FROM events
+  WHERE max_x >= 90 AND min_x <= 110
+    AND max_y >= 190 AND min_y <= 210
+    AND max_time >= #{query_start} AND min_time <= #{end_time}
+  """
+)
+```
+
+#### Using with Ecto Schemas
+
+While R*Tree tables are virtual tables, you can still define schemas for them:
+
+```elixir
+defmodule MyApp.GeoRegion do
+  use Ecto.Schema
+
+  @primary_key {:id, :integer, autogenerate: false}
+  schema "geo_regions" do
+    field :min_lat, :float
+    field :max_lat, :float
+    field :min_lng, :float
+    field :max_lng, :float
+  end
+end
+
+# Insert using Ecto
+region = %MyApp.GeoRegion{
+  id: 1,
+  min_lat: -34.0,
+  max_lat: -33.8,
+  min_lng: 151.0,
+  max_lng: 151.3
+}
+Repo.insert!(region)
+
+# Query using fragments
+import Ecto.Query
+
+# Find regions containing a point
+point_lat = -33.87
+point_lng = 151.21
+
+query = from r in MyApp.GeoRegion,
+  where: fragment("min_lat <= ? AND max_lat >= ?", ^point_lat, ^point_lat),
+  where: fragment("min_lng <= ? AND max_lng >= ?", ^point_lng, ^point_lng)
+
+regions = Repo.all(query)
+```
+
+#### Common Query Patterns
+
+```elixir
+# 1. Point containment: Does bounding box contain this point?
+"""
+SELECT id FROM rtree_table
+WHERE min_x <= ?1 AND max_x >= ?1
+  AND min_y <= ?2 AND max_y >= ?2
+"""
+
+# 2. Bounding box intersection: Do two boxes overlap?
+"""
+SELECT id FROM rtree_table
+WHERE max_x >= ?1 AND min_x <= ?2  -- Query box: ?1 to ?2
+  AND max_y >= ?3 AND min_y <= ?4  -- Query box: ?3 to ?4
+"""
+
+# 3. Range query: All items within bounds
+"""
+SELECT id FROM rtree_table
+WHERE min_x >= ?1 AND max_x <= ?2
+  AND min_y >= ?3 AND max_y <= ?4
+"""
+```
+
+#### R*Tree vs Vector Search
+
+**Use R*Tree when:**
+- You have bounding box data (geographic regions, time ranges)
+- You need exact range queries (all items within bounds)
+- Working with 1-5 dimensional coordinate data
+- Query performance is critical for range lookups
+
+**Use Vector Search when:**
+- You have high-dimensional embeddings (384-1536+ dimensions)
+- You need similarity/distance-based search
+- Working with semantic search, recommendations, or ML features
+- Approximate nearest neighbors is acceptable
+
+**Hybrid Approach:**
+```elixir
+# Combine both for location-aware semantic search
+"""
+SELECT p.*, vector_distance_cos(p.embedding, ?1) as similarity
+FROM products p
+JOIN geo_regions r ON r.id = p.region_id
+WHERE r.min_lat <= ?2 AND r.max_lat >= ?2
+  AND r.min_lng <= ?3 AND r.max_lng >= ?3
+ORDER BY similarity
+LIMIT 10
+"""
 ```
 
 ### Connection Management
@@ -4113,3 +4318,29 @@ Found a bug or have a feature request? Please open an issue on GitHub!
 ## License
 
 Apache 2.0
+
+## Landing the Plane (Session Completion)
+
+**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
+
+**MANDATORY WORKFLOW:**
+
+1. **File issues for remaining work** - Create issues for anything that needs follow-up
+2. **Run quality gates** (if code changed) - Tests, linters, builds
+3. **Update issue status** - Close finished work, update in-progress items
+4. **PUSH TO REMOTE** - This is MANDATORY:
+   ```bash
+   git pull --rebase
+   bd sync
+   git push
+   git status  # MUST show "up to date with origin"
+   ```
+5. **Clean up** - Clear stashes, prune remote branches
+6. **Verify** - All changes committed AND pushed
+7. **Hand off** - Provide context for next session
+
+**CRITICAL RULES:**
+- Work is NOT complete until `git push` succeeds
+- NEVER stop before pushing - that leaves work stranded locally
+- NEVER say "ready to push when you are" - YOU must push
+- If push fails, resolve and retry until it succeeds

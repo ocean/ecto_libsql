@@ -184,17 +184,23 @@ defmodule Ecto.Adapters.LibSql.Connection do
     table_name = quote_table(table.prefix, table.name)
     if_not_exists = if command == :create_if_not_exists, do: " IF NOT EXISTS", else: ""
 
-    # Check if we have a composite primary key.
-    composite_pk = composite_primary_key?(columns)
+    # Check if this is an R*Tree virtual table
+    if table.options && Keyword.get(table.options, :rtree, false) do
+      create_rtree_table(table_name, if_not_exists, columns)
+    else
+      # Standard table creation
+      # Check if we have a composite primary key.
+      composite_pk = composite_primary_key?(columns)
 
-    column_definitions =
-      Enum.map_join(columns, ", ", &column_definition(&1, composite_pk))
+      column_definitions =
+        Enum.map_join(columns, ", ", &column_definition(&1, composite_pk))
 
-    {table_constraints, table_suffix} = table_options(table, columns)
+      {table_constraints, table_suffix} = table_options(table, columns)
 
-    [
-      "CREATE TABLE#{if_not_exists} #{table_name} (#{column_definitions}#{table_constraints})#{table_suffix}"
-    ]
+      [
+        "CREATE TABLE#{if_not_exists} #{table_name} (#{column_definitions}#{table_constraints})#{table_suffix}"
+      ]
+    end
   end
 
   def execute_ddl({:drop, %Ecto.Migration.Table{} = table, _}) do
@@ -472,6 +478,60 @@ defmodule Ecto.Adapters.LibSql.Connection do
     table_suffix = Enum.join(suffixes)
 
     {table_constraints, table_suffix}
+  end
+
+  defp create_rtree_table(table_name, if_not_exists, columns) do
+    # R*Tree virtual tables require specific column structure:
+    # First column: integer primary key (id)
+    # Remaining columns: coordinate pairs (min/max)
+
+    # Extract column names for R*Tree
+    rtree_columns =
+      Enum.map(columns, fn {:add, name, _type, _opts} ->
+        Atom.to_string(name)
+      end)
+
+    # Validate column structure
+    validate_rtree_columns!(rtree_columns)
+
+    # Build R*Tree column list: id, min1, max1, min2, max2, ...
+    column_list = Enum.join(rtree_columns, ", ")
+
+    [
+      "CREATE VIRTUAL TABLE#{if_not_exists} #{table_name} USING rtree(#{column_list})"
+    ]
+  end
+
+  defp validate_rtree_columns!(columns) do
+    # R*Tree requires odd number of columns (3 to 11)
+    # First column is ID, then min/max pairs
+    num_columns = length(columns)
+
+    cond do
+      num_columns < 3 ->
+        raise ArgumentError,
+              "R*Tree tables require at least 3 columns (id + 1 dimension). Got #{num_columns} columns."
+
+      num_columns > 11 ->
+        raise ArgumentError,
+              "R*Tree tables support maximum 11 columns (id + 5 dimensions). Got #{num_columns} columns."
+
+      rem(num_columns, 2) == 0 ->
+        raise ArgumentError,
+              "R*Tree tables require odd number of columns (id + min/max pairs). Got #{num_columns} columns."
+
+      true ->
+        :ok
+    end
+
+    # Validate first column is 'id'
+    [first_column | _rest] = columns
+    unless first_column == "id" do
+      raise ArgumentError,
+            "R*Tree tables must have 'id' as the first column. Got '#{first_column}' instead."
+    end
+
+    :ok
   end
 
   ## Query Helpers

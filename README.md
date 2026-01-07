@@ -90,6 +90,7 @@ For lower-level control, you can use the DBConnection interface directly:
 
 **Advanced Features**
 - Vector similarity search
+- R*Tree spatial indexing for multi-dimensional range queries
 - Database encryption (local AES-256-CBC and Turso remote encryption)
 - WebSocket and HTTP protocols
 - Cursor-based streaming for large result sets (via DBConnection interface)
