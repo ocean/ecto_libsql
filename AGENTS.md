@@ -1107,19 +1107,20 @@ distance_sql = EctoLibSql.Native.vector_distance_cos("description_embedding", qu
 
 ### R*Tree Spatial Indexing
 
-R*Tree is a specialised spatial index for efficient multi-dimensional range queries. Perfect for geospatial data, collision detection, and time-series queries.
+R*Tree is a specialised spatial index for efficient multidimensional range queries. Perfect for geospatial data, collision detection, and time-series queries.
 
 #### Creating R*Tree Tables
 
-R*Tree tables are created as virtual tables using the `:rtree => true` option in migrations:
+R*Tree tables are created as virtual tables by passing `rtree: true` to the table options in migrations. Two approaches prevent duplicate id columns:
+
+**Option 1: Use Ecto's default id (recommended)**
 
 ```elixir
 defmodule MyApp.Repo.Migrations.CreateLocationsRTree do
   use Ecto.Migration
 
   def change do
-    create table(:geo_regions, rtree: true) do
-      add :id, :integer, primary_key: true
+    create table(:geo_regions, options: [rtree: true]) do
       add :min_lat, :float
       add :max_lat, :float
       add :min_lng, :float
@@ -1129,9 +1130,33 @@ defmodule MyApp.Repo.Migrations.CreateLocationsRTree do
 end
 ```
 
+Ecto automatically creates the `id` column, resulting in: `id, min_lat, max_lat, min_lng, max_lng` (5 columns, odd ✓).
+
+**Option 2: Disable default id and add explicit id**
+
+```elixir
+defmodule MyApp.Repo.Migrations.CreateEventsRTree do
+  use Ecto.Migration
+
+  def change do
+    create table(:events, options: [rtree: true], primary_key: false) do
+      add :id, :integer, primary_key: true
+      add :min_x, :float
+      add :max_x, :float
+      add :min_y, :float
+      add :max_y, :float
+      add :min_time, :integer
+      add :max_time, :integer
+    end
+  end
+end
+```
+
+This creates: `id, min_x, max_x, min_y, max_y, min_time, max_time` (7 columns, odd ✓).
+
 **Important R*Tree Requirements:**
 - First column must be named `id` (integer primary key)
-- Remaining columns come in min/max pairs (2D, 3D, 4D, or 5D)
+- Remaining columns come in min/max pairs (1D, 2D, 3D, 4D, or 5D multidimensional)
 - Total columns must be odd (3, 5, 7, 9, or 11)
 - Minimum 3 columns (id + 1 dimension), maximum 11 columns (id + 5 dimensions)
 - R*Tree tables are virtual tables and do not support standard table options like `:strict`, `:random_rowid`, or `:without_rowid`
