@@ -75,7 +75,9 @@ defmodule EctoLibSqlSmokeTest do
     test "handles invalid SQL with error", state do
       {:ok, state} = EctoLibSql.connect(state[:opts])
       query = %EctoLibSql.Query{statement: "SELECT * FROM not_existing_table"}
-      assert {:error, %EctoLibSql.Error{}, _state} = EctoLibSql.handle_execute(query, [], [], state)
+
+      assert {:error, %EctoLibSql.Error{}, _state} =
+               EctoLibSql.handle_execute(query, [], [], state)
     end
 
     test "can execute multiple statements", state do
@@ -118,10 +120,53 @@ defmodule EctoLibSqlSmokeTest do
 
       # Insert data
       insert = %EctoLibSql.Query{statement: "INSERT INTO users (name, email) VALUES (?, ?)"}
-      {:ok, _query, _result, state} = EctoLibSql.handle_execute(insert, ["Alice", "alice@example.com"], [], state)
+
+      {:ok, _query, _result, state} =
+        EctoLibSql.handle_execute(insert, ["Alice", "alice@example.com"], [], state)
 
       # Commit
       assert {:ok, _commit_result, _state} = EctoLibSql.handle_commit([], state)
+    end
+
+    test "can begin, execute, and rollback", state do
+      {:ok, state} = EctoLibSql.connect(state[:opts])
+
+      # Create table first
+      create = %EctoLibSql.Query{
+        statement:
+          "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, email TEXT)"
+      }
+
+      {:ok, _query, _result, state} = EctoLibSql.handle_execute(create, [], [], state)
+
+      # Insert initial data to verify rollback doesn't affect pre-transaction data
+      insert_initial = %EctoLibSql.Query{
+        statement: "INSERT INTO users (name, email) VALUES (?, ?)"
+      }
+
+      {:ok, _query, _result, state} =
+        EctoLibSql.handle_execute(insert_initial, ["Bob", "bob@example.com"], [], state)
+
+      # Begin transaction
+      {:ok, _begin_result, state} = EctoLibSql.handle_begin([], state)
+
+      # Insert data in transaction
+      insert_txn = %EctoLibSql.Query{
+        statement: "INSERT INTO users (name, email) VALUES (?, ?)"
+      }
+
+      {:ok, _query, _result, state} =
+        EctoLibSql.handle_execute(insert_txn, ["Charlie", "charlie@example.com"], [], state)
+
+      # Rollback transaction
+      {:ok, _rollback_result, state} = EctoLibSql.handle_rollback([], state)
+
+      # Verify only initial data exists (rollback worked)
+      select = %EctoLibSql.Query{statement: "SELECT COUNT(*) FROM users"}
+      {:ok, _query, result, _state} = EctoLibSql.handle_execute(select, [], [], state)
+
+      # Should have only 1 row (Bob), not 2 (Bob and Charlie)
+      assert [[1]] = result.rows
     end
   end
 end
