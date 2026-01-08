@@ -46,6 +46,7 @@
 - [Architecture](#architecture)
 - [Code Structure](#code-structure)
 - [Development Workflow](#development-workflow)
+- [Issue Tracking with Beads](#issue-tracking-with-beads)
 - [Error Handling Patterns](#error-handling-patterns)
 - [Testing](#testing)
 - [Common Tasks](#common-tasks)
@@ -258,7 +259,7 @@ This project uses **Beads** (`bd` command) for issue tracking across sessions. B
 - **Beads**: Multi-session work, dependencies between tasks, discovered work that needs tracking
 - **TodoWrite**: Simple single-session task execution
 
-When in doubt, prefer Beads—persistence you don't need beats lost context.
+When in doubt, prefer Beads — persistence you don't need beats lost context.
 
 **Essential commands:**
 ```bash
@@ -293,6 +294,14 @@ bd close <id1> <id2> ...           # Close completed issues
 bd sync --from-main                # Pull latest beads
 git add . && git commit -m "..."   # Commit changes
 ```
+
+#### Best Practices
+
+- Check `bd ready` at session start to find available work
+- Update status as you work (in_progress → closed)
+- Create new issues with `bd create` when you discover tasks
+- Use descriptive titles and set appropriate priority/type
+- Always `bd sync` before ending session
 
 ### Adding a New NIF Function
 

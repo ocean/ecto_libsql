@@ -38,3 +38,6 @@ z_ecto_libsql_test*
 
 # Local environment variables.
 .env.local
+
+# bv (beads viewer) local config and caches
+.bv/
