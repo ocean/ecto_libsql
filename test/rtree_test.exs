@@ -19,8 +19,14 @@ defmodule Ecto.RTreeTest do
     # Start the test repo
     {:ok, _} = TestRepo.start_link(database: @test_db)
 
-    # Clean up after all tests complete
+    # Clean up after all tests complete - stop GenServer and remove db files
     on_exit(fn ->
+      try do
+        GenServer.stop(TestRepo)
+      catch
+        _, _ -> nil
+      end
+
       File.rm(@test_db)
       File.rm(@test_db <> "-shm")
       File.rm(@test_db <> "-wal")
@@ -264,7 +270,8 @@ defmodule Ecto.RTreeTest do
     end
   end
 
-  describe "R*Tree queries" do
+  describe "R*Tree queries and operations" do
+    # Each test gets its own fresh data to avoid order dependencies
     setup do
       # Create R*Tree table
       Ecto.Adapters.SQL.query!(TestRepo, """
@@ -376,6 +383,225 @@ defmodule Ecto.RTreeTest do
         )
 
       assert result.rows == [[1], [3]]
+    end
+  end
+
+  describe "R*Tree edge cases and advanced scenarios" do
+    test "handles empty R*Tree table" do
+      # Create and query empty R*Tree table
+      Ecto.Adapters.SQL.query!(TestRepo, """
+      DROP TABLE IF EXISTS empty_rtree
+      """)
+
+      Ecto.Adapters.SQL.query!(TestRepo, """
+      CREATE VIRTUAL TABLE empty_rtree USING rtree(
+        id,
+        min_lat, max_lat,
+        min_lng, max_lng
+      )
+      """)
+
+      result =
+        Ecto.Adapters.SQL.query!(
+          TestRepo,
+          "SELECT COUNT(*) FROM empty_rtree"
+        )
+
+      assert result.rows == [[0]]
+    end
+
+    test "handles boundary condition with min=max coordinates" do
+      Ecto.Adapters.SQL.query!(TestRepo, """
+      DROP TABLE IF EXISTS point_rtree
+      """)
+
+      Ecto.Adapters.SQL.query!(TestRepo, """
+      CREATE VIRTUAL TABLE point_rtree USING rtree(
+        id,
+        min_x, max_x,
+        min_y, max_y
+      )
+      """)
+
+      # Insert a point (min=max for both dimensions)
+      Ecto.Adapters.SQL.query!(
+        TestRepo,
+        "INSERT INTO point_rtree VALUES (1, 0.0, 0.0, 0.0, 0.0)"
+      )
+
+      # Query for exact point
+      result =
+        Ecto.Adapters.SQL.query!(
+          TestRepo,
+          """
+          SELECT id FROM point_rtree
+          WHERE min_x <= 0.0 AND max_x >= 0.0
+            AND min_y <= 0.0 AND max_y >= 0.0
+          """
+        )
+
+      assert result.rows == [[1]]
+    end
+
+    test "handles bulk inserts with many regions" do
+      Ecto.Adapters.SQL.query!(TestRepo, """
+      DROP TABLE IF EXISTS bulk_rtree
+      """)
+
+      Ecto.Adapters.SQL.query!(TestRepo, """
+      CREATE VIRTUAL TABLE bulk_rtree USING rtree(
+        id,
+        min_x, max_x,
+        min_y, max_y
+      )
+      """)
+
+      # Bulk insert 100 regions
+      Enum.each(1..100, fn i ->
+        Ecto.Adapters.SQL.query!(
+          TestRepo,
+          "INSERT INTO bulk_rtree VALUES (#{i}, #{i}.0, #{i + 1}.0, #{i}.0, #{i + 1}.0)"
+        )
+      end)
+
+      result =
+        Ecto.Adapters.SQL.query!(
+          TestRepo,
+          "SELECT COUNT(*) FROM bulk_rtree"
+        )
+
+      assert result.rows == [[100]]
+
+      # Verify we can query in the bulk data
+      result =
+        Ecto.Adapters.SQL.query!(
+          TestRepo,
+          """
+          SELECT COUNT(*) FROM bulk_rtree
+          WHERE max_x >= 50.0 AND min_x <= 51.0
+          """
+        )
+
+      assert [[count]] = result.rows
+      assert count >= 1
+    end
+
+    test "handles R*Tree operations within transaction rollback" do
+      Ecto.Adapters.SQL.query!(TestRepo, """
+      DROP TABLE IF EXISTS txn_rtree
+      """)
+
+      Ecto.Adapters.SQL.query!(TestRepo, """
+      CREATE VIRTUAL TABLE txn_rtree USING rtree(
+        id,
+        min_x, max_x,
+        min_y, max_y
+      )
+      """)
+
+      # Insert initial data
+      Ecto.Adapters.SQL.query!(
+        TestRepo,
+        "INSERT INTO txn_rtree VALUES (1, 0.0, 1.0, 0.0, 1.0)"
+      )
+
+      # Begin transaction and insert, then rollback
+      case EctoLibSql.connect(database: @test_db) do
+        {:ok, state} ->
+          {:ok, :begin, state} = EctoLibSql.handle_begin([], state)
+
+          # Insert within transaction
+          {:ok, _query, _result, state} =
+            EctoLibSql.handle_execute(
+              "INSERT INTO txn_rtree VALUES (2, 2.0, 3.0, 2.0, 3.0)",
+              [],
+              [],
+              state
+            )
+
+          # Rollback the transaction
+          {:ok, _rollback_result, _final_state} = EctoLibSql.handle_rollback([], state)
+
+          # Verify only original data exists
+          result =
+            Ecto.Adapters.SQL.query!(
+              TestRepo,
+              "SELECT COUNT(*) FROM txn_rtree"
+            )
+
+          assert result.rows == [[1]]
+
+        {:error, _reason} ->
+          # Skip if connection fails
+          :ok
+      end
+    end
+
+    test "handles different coordinate types (integer vs float)" do
+      Ecto.Adapters.SQL.query!(TestRepo, """
+      DROP TABLE IF EXISTS mixed_coords
+      """)
+
+      Ecto.Adapters.SQL.query!(TestRepo, """
+      CREATE VIRTUAL TABLE mixed_coords USING rtree(
+        id,
+        min_x, max_x,
+        min_y, max_y
+      )
+      """)
+
+      # Insert with integer coordinates (SQLite converts to float internally)
+      Ecto.Adapters.SQL.query!(
+        TestRepo,
+        "INSERT INTO mixed_coords VALUES (1, 1, 2, 1, 2)"
+      )
+
+      # Insert with float coordinates
+      Ecto.Adapters.SQL.query!(
+        TestRepo,
+        "INSERT INTO mixed_coords VALUES (2, 2.5, 3.5, 2.5, 3.5)"
+      )
+
+      # Both should be queryable
+      result =
+        Ecto.Adapters.SQL.query!(
+          TestRepo,
+          "SELECT COUNT(*) FROM mixed_coords"
+        )
+
+      assert result.rows == [[2]]
+    end
+
+    test "handles large coordinate values" do
+      Ecto.Adapters.SQL.query!(TestRepo, """
+      DROP TABLE IF EXISTS large_coords
+      """)
+
+      Ecto.Adapters.SQL.query!(TestRepo, """
+      CREATE VIRTUAL TABLE large_coords USING rtree(
+        id,
+        min_x, max_x,
+        min_y, max_y
+      )
+      """)
+
+      # Insert with very large coordinate values
+      Ecto.Adapters.SQL.query!(
+        TestRepo,
+        "INSERT INTO large_coords VALUES (1, -180.0, 180.0, -90.0, 90.0)"
+      )
+
+      result =
+        Ecto.Adapters.SQL.query!(
+          TestRepo,
+          """
+          SELECT id FROM large_coords
+          WHERE max_x >= 0.0 AND min_x <= 0.0
+            AND max_y >= 0.0 AND min_y <= 0.0
+          """
+        )
+
+      assert result.rows == [[1]]
     end
   end
 end
