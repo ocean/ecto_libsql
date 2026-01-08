@@ -1,4 +1,11 @@
-defmodule EctoLibSql.StatementCachingBenchmarkTest do
+defmodule EctoLibSql.StatementCachingPerformanceTest do
+  @moduledoc """
+  Performance tests for prepared statement caching.
+
+  These tests verify that prepared statements maintain good performance
+  characteristics when reused. The timing information is for visibility
+  and documentation - tests always pass regardless of timing.
+  """
   use ExUnit.Case, async: false
 
   alias EctoLibSql.Native

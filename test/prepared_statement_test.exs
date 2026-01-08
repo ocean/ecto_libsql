@@ -310,6 +310,281 @@ defmodule EctoLibSql.PreparedStatementTest do
     end
   end
 
+  describe "statement reset and caching" do
+    test "reset statement for reuse without re-prepare", %{state: state} do
+      # Create logs table
+      {:ok, _query, _result, state} =
+        exec_sql(state, "CREATE TABLE logs (id INTEGER PRIMARY KEY AUTOINCREMENT, message TEXT)")
+
+      # Prepare statement once
+      {:ok, stmt_id} = Native.prepare(state, "INSERT INTO logs (message) VALUES (?)")
+
+      # Execute multiple times - statement caching handles reset automatically
+      for i <- 1..5 do
+        {:ok, _rows} =
+          Native.execute_stmt(
+            state,
+            stmt_id,
+            "INSERT INTO logs (message) VALUES (?)",
+            ["Log #{i}"]
+          )
+      end
+
+      # Verify all inserts succeeded
+      {:ok, _query, result, _state} = exec_sql(state, "SELECT COUNT(*) FROM logs")
+      assert [[5]] = result.rows
+
+      # Cleanup
+      Native.close_stmt(stmt_id)
+    end
+
+    test "reset clears parameter bindings", %{state: state} do
+      {:ok, stmt_id} = Native.prepare(state, "INSERT INTO users VALUES (?, ?, ?)")
+
+      # Execute with parameters - automatic reset between calls
+      {:ok, _} =
+        Native.execute_stmt(state, stmt_id, "INSERT INTO users VALUES (?, ?, ?)", [
+          1,
+          "Alice",
+          "alice@example.com"
+        ])
+
+      # Execute with different parameters - no manual reset needed
+      {:ok, _} =
+        Native.execute_stmt(state, stmt_id, "INSERT INTO users VALUES (?, ?, ?)", [
+          2,
+          "Bob",
+          "bob@example.com"
+        ])
+
+      # Verify both inserts
+      {:ok, _query, result, _state} = exec_sql(state, "SELECT name FROM users ORDER BY id")
+      assert [["Alice"], ["Bob"]] = result.rows
+
+      Native.close_stmt(stmt_id)
+    end
+  end
+
+  describe "statement reset - explicit reset" do
+    test "reset_stmt clears statement state explicitly", %{state: state} do
+      {:ok, stmt_id} = Native.prepare(state, "INSERT INTO users VALUES (?, ?, ?)")
+
+      # Execute first insertion
+      {:ok, _} =
+        Native.execute_stmt(state, stmt_id, "INSERT INTO users VALUES (?, ?, ?)", [
+          1,
+          "Alice",
+          "alice@example.com"
+        ])
+
+      # Explicitly reset the statement
+      assert :ok = Native.reset_stmt(state, stmt_id)
+
+      # Execute second insertion after reset
+      {:ok, _} =
+        Native.execute_stmt(state, stmt_id, "INSERT INTO users VALUES (?, ?, ?)", [
+          2,
+          "Bob",
+          "bob@example.com"
+        ])
+
+      # Verify both inserts succeeded
+      {:ok, _query, result, _state} = exec_sql(state, "SELECT name FROM users ORDER BY id")
+      assert [["Alice"], ["Bob"]] = result.rows
+
+      Native.close_stmt(stmt_id)
+    end
+
+    test "reset_stmt can be called multiple times", %{state: state} do
+      {:ok, stmt_id} = Native.prepare(state, "INSERT INTO users VALUES (?, ?, ?)")
+
+      # Execute and reset multiple times
+      for i <- 1..5 do
+        {:ok, _} =
+          Native.execute_stmt(state, stmt_id, "INSERT INTO users VALUES (?, ?, ?)", [
+            i,
+            "User#{i}",
+            "user#{i}@example.com"
+          ])
+
+        # Explicit reset
+        assert :ok = Native.reset_stmt(state, stmt_id)
+      end
+
+      # Verify all inserts
+      {:ok, _query, result, _state} = exec_sql(state, "SELECT COUNT(*) FROM users")
+      assert [[5]] = result.rows
+
+      Native.close_stmt(stmt_id)
+    end
+
+    test "reset_stmt returns error for invalid statement", %{state: state} do
+      # Try to reset non-existent statement
+      assert {:error, _reason} = Native.reset_stmt(state, "invalid_stmt_id")
+    end
+  end
+
+  describe "statement get_stmt_columns - full metadata" do
+    test "get_stmt_columns returns column metadata", %{state: state} do
+      {:ok, stmt_id} = Native.prepare(state, "SELECT * FROM users WHERE id = ?")
+
+      # Get full column metadata
+      {:ok, columns} = Native.get_stmt_columns(state, stmt_id)
+
+      # Should return list of tuples: {name, origin_name, decl_type}
+      assert is_list(columns)
+      assert length(columns) == 3
+
+      # Verify column metadata structure
+      [
+        {col1_name, col1_origin, col1_type},
+        {col2_name, col2_origin, col2_type},
+        {col3_name, col3_origin, col3_type}
+      ] = columns
+
+      # Check column 1 (id)
+      assert col1_name == "id"
+      assert col1_origin == "id"
+      assert col1_type == "INTEGER"
+
+      # Check column 2 (name)
+      assert col2_name == "name"
+      assert col2_origin == "name"
+      assert col2_type == "TEXT"
+
+      # Check column 3 (email)
+      assert col3_name == "email"
+      assert col3_origin == "email"
+      assert col3_type == "TEXT"
+
+      Native.close_stmt(stmt_id)
+    end
+
+    test "get_stmt_columns works with aliased columns", %{state: state} do
+      {:ok, stmt_id} =
+        Native.prepare(
+          state,
+          "SELECT id as user_id, name as full_name, email as mail FROM users"
+        )
+
+      {:ok, columns} = Native.get_stmt_columns(state, stmt_id)
+
+      assert length(columns) == 3
+
+      # Check aliased column names
+      [{col1_name, _, _}, {col2_name, _, _}, {col3_name, _, _}] = columns
+
+      assert col1_name == "user_id"
+      assert col2_name == "full_name"
+      assert col3_name == "mail"
+
+      Native.close_stmt(stmt_id)
+    end
+
+    test "get_stmt_columns works with expressions", %{state: state} do
+      {:ok, stmt_id} =
+        Native.prepare(
+          state,
+          "SELECT COUNT(*) as total, MAX(id) as max_id FROM users"
+        )
+
+      {:ok, columns} = Native.get_stmt_columns(state, stmt_id)
+
+      assert length(columns) == 2
+
+      [{col1_name, _, _}, {col2_name, _, _}] = columns
+
+      assert col1_name == "total"
+      assert col2_name == "max_id"
+
+      Native.close_stmt(stmt_id)
+    end
+
+    test "get_stmt_columns returns error for invalid statement", %{state: state} do
+      # Try to get columns for non-existent statement
+      assert {:error, _reason} = Native.get_stmt_columns(state, "invalid_stmt_id")
+    end
+  end
+
+  describe "statement parameter introspection" do
+    test "parameter_count with named parameters", %{state: state} do
+      # Test with colon-style named parameters (:name)
+      {:ok, stmt_id} =
+        Native.prepare(
+          state,
+          "INSERT INTO users (id, name, email) VALUES (:id, :name, :email)"
+        )
+
+      # Get parameter names (note: SQLite uses 1-based indexing)
+      {:ok, param1} = Native.stmt_parameter_name(state, stmt_id, 1)
+      assert param1 == ":id"
+
+      {:ok, param2} = Native.stmt_parameter_name(state, stmt_id, 2)
+      assert param2 == ":name"
+
+      {:ok, param3} = Native.stmt_parameter_name(state, stmt_id, 3)
+      assert param3 == ":email"
+
+      Native.close_stmt(stmt_id)
+    end
+
+    test "parameter_name returns nil for positional parameters", %{state: state} do
+      {:ok, stmt_id} =
+        Native.prepare(state, "SELECT * FROM users WHERE name = ? AND email = ?")
+
+      # Positional parameters should return nil
+      {:ok, param1} = Native.stmt_parameter_name(state, stmt_id, 1)
+      assert param1 == nil
+
+      {:ok, param2} = Native.stmt_parameter_name(state, stmt_id, 2)
+      assert param2 == nil
+
+      Native.close_stmt(stmt_id)
+    end
+
+    test "parameter_name supports dollar-style parameters", %{state: state} do
+      # Test with dollar-style named parameters ($name)
+      {:ok, stmt_id} =
+        Native.prepare(state, "SELECT * FROM users WHERE id = $id AND name = $name")
+
+      {:ok, param1} = Native.stmt_parameter_name(state, stmt_id, 1)
+      assert param1 == "$id"
+
+      {:ok, param2} = Native.stmt_parameter_name(state, stmt_id, 2)
+      assert param2 == "$name"
+
+      Native.close_stmt(stmt_id)
+    end
+
+    test "parameter_name supports at-style parameters", %{state: state} do
+      # Test with at-style named parameters (@name)
+      {:ok, stmt_id} =
+        Native.prepare(state, "SELECT * FROM users WHERE id = @id AND name = @name")
+
+      {:ok, param1} = Native.stmt_parameter_name(state, stmt_id, 1)
+      assert param1 == "@id"
+
+      {:ok, param2} = Native.stmt_parameter_name(state, stmt_id, 2)
+      assert param2 == "@name"
+
+      Native.close_stmt(stmt_id)
+    end
+
+    test "parameter_name handles mixed positional and named parameters", %{state: state} do
+      # SQLite allows mixing positional and named parameters
+      {:ok, stmt_id} =
+        Native.prepare(state, "SELECT * FROM users WHERE id = :id AND name = ?")
+
+      {:ok, param1} = Native.stmt_parameter_name(state, stmt_id, 1)
+      assert param1 == ":id"
+
+      {:ok, param2} = Native.stmt_parameter_name(state, stmt_id, 2)
+      assert param2 == nil
+
+      Native.close_stmt(stmt_id)
+    end
+  end
+
   describe "statement binding behaviour (ported from ecto_sql)" do
     test "prepared statement auto-reset of bindings between executions", %{state: state} do
       # Source: ecto_sql prepared statement tests
