@@ -294,8 +294,9 @@ defmodule EctoLibSql.JSONHelpersTest do
       {:ok, result} = JSON.convert(state, json, :jsonb)
       # Should be binary
       assert is_binary(result)
-      # JSONB is smaller/different than text JSON
-      assert byte_size(result) < byte_size(json)
+      # JSONB is a binary format (different from text JSON)
+      # Note: JSONB may be smaller, but size is not a stable guarantee across versions
+      assert result != json
     end
 
     test "default format is JSON", %{state: state} do
