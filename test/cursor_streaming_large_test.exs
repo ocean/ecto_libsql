@@ -377,20 +377,23 @@ defmodule EctoLibSql.CursorStreamingLargeTest do
   end
 
   defp fetch_all_ids(state, cursor, query, opts) do
-    # Use accumulator to avoid O(n²) list concatenation
+    # Use accumulator to avoid O(n²) list concatenation.
+    # Collect batches in reverse order, then flatten with nested reverses for correctness.
     fetch_all_ids_acc(state, cursor, query, opts, [])
     |> Enum.reverse()
+    |> List.flatten()
   end
 
   defp fetch_all_ids_acc(state, cursor, query, opts, acc) do
     case EctoLibSql.handle_fetch(query, cursor, opts, state) do
       {:cont, result, next_state} ->
         ids = Enum.map(result.rows, fn [id] -> id end)
-        fetch_all_ids_acc(next_state, cursor, query, opts, Enum.reverse(ids) ++ acc)
+        # Collect batches as nested lists to avoid intermediate reversals
+        fetch_all_ids_acc(next_state, cursor, query, opts, [ids | acc])
 
       {:halt, result, _state} ->
         ids = Enum.map(result.rows, fn [id] -> id end)
-        Enum.reverse(ids) ++ acc
+        [ids | acc]
     end
   end
 

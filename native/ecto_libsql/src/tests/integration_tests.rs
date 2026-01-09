@@ -17,7 +17,14 @@ use uuid::Uuid;
 ///
 /// This guard must be declared FIRST in tests so its Drop impl runs LAST,
 /// ensuring files are deleted only after the db connection is fully closed.
-/// This prevents Windows file-lock issues with .db, .db-wal, and .db-shm files.
+/// This prevents Windows file-lock issues with .db, .db-wal, .db-shm, and other
+/// SQLite auxiliary files. Removes all five file types for parity with Elixir's
+/// cleanup_db_files/1 helper:
+/// - .db (main database file)
+/// - .db-wal (Write-Ahead Log)
+/// - .db-shm (Shared Memory)
+/// - .db-journal (Journal file)
+/// - .db-info (Info file for replication metadata)
 struct TestDbGuard {
     db_path: PathBuf,
 }
@@ -40,6 +47,14 @@ impl Drop for TestDbGuard {
         // Remove SHM (Shared Memory) file
         let shm_path = format!("{}-shm", self.db_path.display());
         let _ = fs::remove_file(&shm_path);
+
+        // Remove JOURNAL file (SQLite rollback journal)
+        let journal_path = format!("{}-journal", self.db_path.display());
+        let _ = fs::remove_file(&journal_path);
+
+        // Remove INFO file (replication metadata for remote replicas)
+        let info_path = format!("{}-info", self.db_path.display());
+        let _ = fs::remove_file(&info_path);
     }
 }
 
