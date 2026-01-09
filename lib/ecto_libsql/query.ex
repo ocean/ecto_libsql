@@ -38,7 +38,49 @@ defmodule EctoLibSql.Query do
 
     def describe(query, _opts), do: query
 
-    def encode(_query, params, _opts), do: params
+    # Convert Elixir types to SQLite-compatible values before sending to NIF
+    def encode(_query, params, _opts) do
+      Enum.map(params, &encode_param/1)
+    end
+
+    defp encode_param(%DateTime{} = dt), do: DateTime.to_iso8601(dt)
+    defp encode_param(%NaiveDateTime{} = dt), do: NaiveDateTime.to_iso8601(dt)
+    defp encode_param(%Date{} = d), do: Date.to_iso8601(d)
+    defp encode_param(%Time{} = t), do: Time.to_iso8601(t)
+    defp encode_param(%Decimal{} = d), do: Decimal.to_string(d)
+    defp encode_param(value), do: value
+
+    # Normalize results for ecto_sql compatibility.
+    # Rules:
+    # 1. columns MUST ALWAYS be a list (even empty []), NEVER nil
+    # 2. rows should be nil only for write commands without RETURNING that affected rows
+    # 3. For all other cases (SELECT, RETURNING queries), rows must be a list
+    def decode(_query, result, _opts) when is_map(result) do
+      columns = case Map.get(result, :columns) do
+        nil -> []
+        cols when is_list(cols) -> cols
+        _ -> []
+      end
+
+      cmd = Map.get(result, :command)
+      rows = Map.get(result, :rows)
+      num_rows = Map.get(result, :num_rows, 0)
+
+      rows = cond do
+        # Write commands that affected rows but have no RETURNING -> rows should be nil
+        cmd in [:insert, :update, :delete] and rows == [] and num_rows > 0 and columns == [] ->
+          nil
+        # All other cases: rows must be a list
+        rows == nil ->
+          []
+        true ->
+          rows
+      end
+
+      result
+      |> Map.put(:columns, columns)
+      |> Map.put(:rows, rows)
+    end
 
     def decode(_query, result, _opts), do: result
   end
