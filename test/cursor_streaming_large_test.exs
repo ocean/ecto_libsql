@@ -231,8 +231,8 @@ defmodule EctoLibSql.CursorStreamingLargeTest do
       # Fetch multiple batches
       batch_count = count_batches(state, cursor, query, max_rows: 100)
 
-      # Should have multiple batches of 100 rows plus remainder
-      assert batch_count >= 9, "Should have at least 9 batches for 1000 rows with batch size 100"
+      # Should have exactly 11 batches: 10 with 100 rows each, plus 1 final batch with 0 rows
+      assert batch_count == 11, "Should have exactly 11 batches for 1000 rows with batch size 100"
     end
 
     test "cursor with aggregation query", %{state: state} do
@@ -369,24 +369,32 @@ defmodule EctoLibSql.CursorStreamingLargeTest do
     end
   end
 
-  defp fetch_all_binary_rows(state, cursor, query, opts) do
+  # Generic helper to collect all rows from a cursor by repeatedly fetching batches
+  defp fetch_all_cursor_rows(state, cursor, query, opts) do
     case EctoLibSql.handle_fetch(query, cursor, opts, state) do
       {:cont, result, next_state} ->
-        result.rows ++ fetch_all_binary_rows(next_state, cursor, query, opts)
+        result.rows ++ fetch_all_cursor_rows(next_state, cursor, query, opts)
 
       {:halt, result, _state} ->
         result.rows
     end
   end
 
-  defp fetch_all_computed_rows(state, cursor, query, opts) do
-    case EctoLibSql.handle_fetch(query, cursor, opts, state) do
-      {:cont, result, next_state} ->
-        result.rows ++ fetch_all_computed_rows(next_state, cursor, query, opts)
+  # Aliases for backwards compatibility and semantic clarity
+  defp fetch_all_binary_rows(state, cursor, query, opts) do
+    fetch_all_cursor_rows(state, cursor, query, opts)
+  end
 
-      {:halt, result, _state} ->
-        result.rows
-    end
+  defp fetch_all_computed_rows(state, cursor, query, opts) do
+    fetch_all_cursor_rows(state, cursor, query, opts)
+  end
+
+  defp fetch_all_group_rows(state, cursor, query, opts) do
+    fetch_all_cursor_rows(state, cursor, query, opts)
+  end
+
+  defp fetch_all_distinct_rows(state, cursor, query, opts) do
+    fetch_all_cursor_rows(state, cursor, query, opts)
   end
 
   defp count_batches(state, cursor, query, opts) do
@@ -396,26 +404,6 @@ defmodule EctoLibSql.CursorStreamingLargeTest do
 
       {:halt, _result, _state} ->
         1
-    end
-  end
-
-  defp fetch_all_group_rows(state, cursor, query, opts) do
-    case EctoLibSql.handle_fetch(query, cursor, opts, state) do
-      {:cont, result, next_state} ->
-        result.rows ++ fetch_all_group_rows(next_state, cursor, query, opts)
-
-      {:halt, result, _state} ->
-        result.rows
-    end
-  end
-
-  defp fetch_all_distinct_rows(state, cursor, query, opts) do
-    case EctoLibSql.handle_fetch(query, cursor, opts, state) do
-      {:cont, result, next_state} ->
-        result.rows ++ fetch_all_distinct_rows(next_state, cursor, query, opts)
-
-      {:halt, result, _state} ->
-        result.rows
     end
   end
 end
