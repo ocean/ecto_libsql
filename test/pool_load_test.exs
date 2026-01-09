@@ -38,6 +38,29 @@ defmodule EctoLibSql.PoolLoadTest do
     {:ok, test_db: test_db}
   end
 
+  # ============================================================================
+  # HELPER FUNCTIONS FOR EDGE CASE DATA
+  # ============================================================================
+
+  defp generate_edge_case_values(task_num) do
+    [
+      "normal_value_#{task_num}",         # Normal string
+      nil,                                # NULL value
+      "",                                  # Empty string
+      String.duplicate("x", 1000),        # Large string (1KB)
+      "special_chars_!@#$%^&*()_+-=[]{};" # Special characters
+    ]
+  end
+
+  defp insert_edge_case_value(state, value) do
+    EctoLibSql.handle_execute(
+      "INSERT INTO test_data (value) VALUES (?)",
+      [value],
+      [],
+      state
+    )
+  end
+
   describe "concurrent independent connections" do
     @tag :slow
     @tag :flaky
@@ -108,9 +131,82 @@ defmodule EctoLibSql.PoolLoadTest do
       success_count = Enum.count(results, fn r -> match?({:ok, _, _, _}, r) end)
       assert success_count == 10
     end
-  end
 
-  describe "long-running operations" do
+    @tag :slow
+    @tag :flaky
+    test "concurrent connections with edge-case data (NULL, empty, large values)", %{
+      test_db: test_db
+    } do
+      # Spawn 5 concurrent connections, each inserting multiple edge-case values
+      tasks =
+        Enum.map(1..5, fn task_num ->
+          Task.async(fn ->
+            {:ok, state} = EctoLibSql.connect(database: test_db, busy_timeout: 30_000)
+
+            try do
+              # Insert each edge-case value for this task
+              edge_values = generate_edge_case_values(task_num)
+
+              results =
+                Enum.map(edge_values, fn value ->
+                  insert_edge_case_value(state, value)
+                end)
+
+              # All inserts should succeed
+              all_ok = Enum.all?(results, fn r -> match?({:ok, _, _, _}, r) end)
+              if all_ok, do: {:ok, :all_edge_cases_inserted}, else: {:error, :some_inserts_failed}
+            after
+              EctoLibSql.disconnect([], state)
+            end
+          end)
+        end)
+
+      results = Task.await_many(tasks, 30_000)
+
+      # All edge-case inserts should succeed
+      Enum.each(results, fn result ->
+        assert {:ok, :all_edge_cases_inserted} = result
+      end)
+
+      # Verify all inserts: 5 tasks × 5 edge cases = 25 rows
+      {:ok, state} = EctoLibSql.connect(database: test_db, busy_timeout: 30_000)
+
+      {:ok, _query, result, _state} =
+        EctoLibSql.handle_execute("SELECT COUNT(*) FROM test_data", [], [], state)
+
+      EctoLibSql.disconnect([], state)
+
+      assert [[25]] = result.rows
+
+      # Verify we can read back the NULL values and empty strings
+      {:ok, state} = EctoLibSql.connect(database: test_db, busy_timeout: 30_000)
+
+      {:ok, _query, null_result, _state} =
+        EctoLibSql.handle_execute(
+          "SELECT COUNT(*) FROM test_data WHERE value IS NULL",
+          [],
+          [],
+          state
+        )
+
+      {:ok, _query, empty_result, _state} =
+        EctoLibSql.handle_execute(
+          "SELECT COUNT(*) FROM test_data WHERE value = ''",
+          [],
+          [],
+          state
+        )
+
+      EctoLibSql.disconnect([], state)
+
+      # Should have 5 NULL values (one per task)
+      assert [[5]] = null_result.rows
+      # Should have 5 empty strings (one per task)
+      assert [[5]] = empty_result.rows
+      end
+      end
+
+      describe "long-running operations" do
     @tag :slow
     @tag :flaky
     test "long transaction doesn't cause timeout issues", %{test_db: test_db} do
@@ -265,7 +361,9 @@ defmodule EctoLibSql.PoolLoadTest do
                 )
 
               # Cause error (intentionally ignore it to test recovery)
-              _error_result = EctoLibSql.handle_execute("BAD SQL", [], [], state)
+              # Discard error state - next operation uses original state
+              error_result = EctoLibSql.handle_execute("BAD SQL", [], [], state)
+              assert {:error, _reason, _state} = error_result
 
               # Recovery insert - verify it succeeds
               case EctoLibSql.handle_execute(
@@ -376,67 +474,151 @@ defmodule EctoLibSql.PoolLoadTest do
   end
 
   describe "transaction isolation" do
-    @tag :slow
-    @tag :flaky
-    test "concurrent transactions don't interfere with each other", %{test_db: test_db} do
-      tasks =
-        Enum.map(1..4, fn i ->
-          Task.async(fn ->
-            {:ok, state} = EctoLibSql.connect(database: test_db, busy_timeout: 30_000)
+     @tag :slow
+     @tag :flaky
+     test "concurrent transactions don't interfere with each other", %{test_db: test_db} do
+       tasks =
+         Enum.map(1..4, fn i ->
+           Task.async(fn ->
+             {:ok, state} = EctoLibSql.connect(database: test_db, busy_timeout: 30_000)
 
-            try do
-              {:ok, trx_state} = EctoLibSql.Native.begin(state)
+             try do
+               {:ok, trx_state} = EctoLibSql.Native.begin(state)
 
-              {:ok, _query, _result, trx_state} =
-                EctoLibSql.handle_execute(
-                  "INSERT INTO test_data (value) VALUES (?)",
-                  ["iso_#{i}"],
-                  [],
-                  trx_state
-                )
+               {:ok, _query, _result, trx_state} =
+                 EctoLibSql.handle_execute(
+                   "INSERT INTO test_data (value) VALUES (?)",
+                   ["iso_#{i}"],
+                   [],
+                   trx_state
+                 )
 
-              # Slight delay to increase overlap
-              Process.sleep(10)
+               # Slight delay to increase overlap
+               Process.sleep(10)
 
-              # Explicitly handle commit result to catch errors
-              case EctoLibSql.Native.commit(trx_state) do
-                {:ok, _committed_state} ->
-                  {:ok, :committed}
+               # Explicitly handle commit result to catch errors
+               case EctoLibSql.Native.commit(trx_state) do
+                 {:ok, _committed_state} ->
+                   {:ok, :committed}
 
-                {:error, reason} ->
-                  {:error, {:commit_failed, reason}}
-              end
-            after
-              EctoLibSql.disconnect([], state)
-            end
-          end)
-        end)
+                 {:error, reason} ->
+                   {:error, {:commit_failed, reason}}
+               end
+             after
+               EctoLibSql.disconnect([], state)
+             end
+           end)
+         end)
 
-      results = Task.await_many(tasks, 30_000)
+       results = Task.await_many(tasks, 30_000)
 
-      # All commits should succeed; fail test if any error occurred
-      Enum.each(results, fn result ->
-        case result do
-          {:ok, :committed} ->
-            :ok
+       # All commits should succeed; fail test if any error occurred
+       Enum.each(results, fn result ->
+         case result do
+           {:ok, :committed} ->
+             :ok
 
-          {:error, {:commit_failed, reason}} ->
-            flunk("Concurrent transaction commit failed: #{inspect(reason)}")
+           {:error, {:commit_failed, reason}} ->
+             flunk("Concurrent transaction commit failed: #{inspect(reason)}")
 
-          other ->
-            flunk("Unexpected result from concurrent transaction: #{inspect(other)}")
-        end
-      end)
+           other ->
+             flunk("Unexpected result from concurrent transaction: #{inspect(other)}")
+         end
+       end)
 
-      # All inserts should be visible
-      {:ok, state} = EctoLibSql.connect(database: test_db, busy_timeout: 30_000)
+       # All inserts should be visible
+       {:ok, state} = EctoLibSql.connect(database: test_db, busy_timeout: 30_000)
 
-      {:ok, _query, result, _state} =
-        EctoLibSql.handle_execute("SELECT COUNT(*) FROM test_data", [], [], state)
+       {:ok, _query, result, _state} =
+         EctoLibSql.handle_execute("SELECT COUNT(*) FROM test_data", [], [], state)
 
-      EctoLibSql.disconnect([], state)
+       EctoLibSql.disconnect([], state)
 
-      assert [[4]] = result.rows
-    end
-  end
+       assert [[4]] = result.rows
+     end
+
+     @tag :slow
+     @tag :flaky
+     test "concurrent transactions with edge-case data maintain isolation", %{test_db: test_db} do
+       # Each task inserts edge-case values in a transaction
+       tasks =
+         Enum.map(1..4, fn task_num ->
+           Task.async(fn ->
+             {:ok, state} = EctoLibSql.connect(database: test_db, busy_timeout: 30_000)
+
+             try do
+               {:ok, trx_state} = EctoLibSql.Native.begin(state)
+
+               # Insert edge-case values within transaction
+               edge_values = generate_edge_case_values(task_num)
+
+               insert_results =
+                 Enum.map(edge_values, fn value ->
+                   {:ok, _query, _result, new_state} = insert_edge_case_value(trx_state, value)
+                   new_state
+                 end)
+
+               # Use final state after all inserts
+               final_trx_state = List.last(insert_results) || trx_state
+
+               # Slight delay to increase overlap with other transactions
+               Process.sleep(10)
+
+               # Commit the transaction containing all edge-case values
+               case EctoLibSql.Native.commit(final_trx_state) do
+                 {:ok, _committed_state} ->
+                   {:ok, :committed_with_edge_cases}
+
+                 {:error, reason} ->
+                   {:error, {:commit_failed, reason}}
+               end
+             after
+               EctoLibSql.disconnect([], state)
+             end
+           end)
+         end)
+
+       results = Task.await_many(tasks, 30_000)
+
+       # All commits should succeed
+       Enum.each(results, fn result ->
+         case result do
+           {:ok, :committed_with_edge_cases} ->
+             :ok
+
+           {:error, {:commit_failed, reason}} ->
+             flunk("Edge-case transaction commit failed: #{inspect(reason)}")
+
+           other ->
+             flunk("Unexpected result from edge-case transaction: #{inspect(other)}")
+         end
+       end)
+
+       # Verify all edge-case data was inserted: 4 tasks × 5 edge cases = 20 rows
+       {:ok, state} = EctoLibSql.connect(database: test_db, busy_timeout: 30_000)
+
+       {:ok, _query, result, _state} =
+         EctoLibSql.handle_execute("SELECT COUNT(*) FROM test_data", [], [], state)
+
+       EctoLibSql.disconnect([], state)
+
+       assert [[20]] = result.rows
+
+       # Verify NULL values survived transaction boundaries
+       {:ok, state} = EctoLibSql.connect(database: test_db, busy_timeout: 30_000)
+
+       {:ok, _query, null_result, _state} =
+         EctoLibSql.handle_execute(
+           "SELECT COUNT(*) FROM test_data WHERE value IS NULL",
+           [],
+           [],
+           state
+         )
+
+       EctoLibSql.disconnect([], state)
+
+       # Should have 4 NULL values (one per task)
+       assert [[4]] = null_result.rows
+     end
+   end
 end
