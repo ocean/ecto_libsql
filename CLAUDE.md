@@ -10,7 +10,11 @@
 ## Quick Rules
 
 - **British/Australian English** for all code, comments, and documentation (except SQL keywords and compatibility requirements)
-- **ALWAYS format before committing**: `mix format --check-formatted` and `cargo fmt`
+- **⚠️ CRITICAL: ALWAYS check formatting BEFORE committing**:
+  1. Run formatters: `mix format && cd native/ecto_libsql && cargo fmt`
+  2. Verify checks pass: `mix format --check-formatted && cargo fmt --check`
+  3. **Only then** commit: `git commit -m "..."`
+  - Formatting issues caught at check time, not after commit
 - **NEVER use `.unwrap()` in production Rust code** - use `safe_lock` helpers (see [Error Handling](#error-handling-patterns))
 - **Tests MAY use `.unwrap()`** for simplicity
 
@@ -558,13 +562,26 @@ for i in {1..10}; do mix test test/file.exs:42; done # Race conditions
 
 ### Pre-Commit Checklist
 
+**STRICT ORDER (do NOT skip steps or reorder)**:
+
 ```bash
-mix format && cd native/ecto_libsql && cargo fmt    # Format
-mix test && cd native/ecto_libsql && cargo test     # Test
-mix format --check-formatted                        # Verify format
-cd native/ecto_libsql && cargo clippy               # Lint (optional)
+# 1. Format code (must come FIRST)
+mix format && cd native/ecto_libsql && cargo fmt
+
+# 2. Run tests (catch logic errors)
+mix test && cd native/ecto_libsql && cargo test
+
+# 3. Verify formatting checks (MUST PASS before commit)
+mix format --check-formatted && cd native/ecto_libsql && cargo fmt --check
+
+# 4. Lint checks (optional but recommended)
+cd native/ecto_libsql && cargo clippy
+
+# 5. Only commit if all checks above passed
 git commit -m "feat: descriptive message"
 ```
+
+**⚠️ Critical**: If ANY check fails, fix it and re-run that check before proceeding. Never commit with failing checks.
 
 ### Release Process
 
