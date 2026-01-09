@@ -21,6 +21,10 @@ defmodule EctoLibSql.JSONHelpersTest do
         state
       )
 
+    on_exit(fn ->
+      EctoLibSql.disconnect([], state)
+    end)
+
     {:ok, state: state}
   end
 
