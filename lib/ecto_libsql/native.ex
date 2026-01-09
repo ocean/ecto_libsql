@@ -704,13 +704,17 @@ defmodule EctoLibSql.Native do
             num_rows
           end
 
-        # For INSERT/UPDATE/DELETE without RETURNING, columns and rows will be empty
-        # Set them to nil to match Ecto's expectations
-        {columns, rows} =
-          if command in [:insert, :update, :delete] and columns == [] and rows == [] do
-            {nil, nil}
-          else
-            {columns, rows}
+        # Normalize: columns MUST be a list, rows nil only for successful writes without RETURNING
+        columns = columns || []
+
+        rows =
+          cond do
+            command in [:insert, :update, :delete] and columns == [] and rows == [] and actual_num_rows > 0 ->
+              nil
+            rows == nil ->
+              []
+            true ->
+              rows
           end
 
         result = %EctoLibSql.Result{
@@ -767,13 +771,17 @@ defmodule EctoLibSql.Native do
           "rows" => rows,
           "num_rows" => num_rows
         } ->
-          # For INSERT/UPDATE/DELETE without actual returned rows, normalise empty lists to nil
-          # This ensures consistency with non-transactional path
-          {columns, rows} =
-            if command in [:insert, :update, :delete] and columns == [] and rows == [] do
-              {nil, nil}
-            else
-              {columns, rows}
+          # Normalize: columns MUST be a list, rows nil only for successful writes without RETURNING
+          columns = columns || []
+
+          rows =
+            cond do
+              command in [:insert, :update, :delete] and columns == [] and rows == [] and num_rows > 0 ->
+                nil
+              rows == nil ->
+                []
+              true ->
+                rows
             end
 
           result = %EctoLibSql.Result{
@@ -790,10 +798,13 @@ defmodule EctoLibSql.Native do
       end
     else
       # Use execute_with_transaction for INSERT/UPDATE/DELETE without RETURNING
+      # columns MUST be [] (not nil), rows should be nil
       case execute_with_transaction(trx_id, conn_id, statement, args_for_execution) do
         num_rows when is_integer(num_rows) ->
           result = %EctoLibSql.Result{
             command: command,
+            columns: [],
+            rows: nil,
             num_rows: num_rows
           }
 
