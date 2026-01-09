@@ -916,7 +916,7 @@ defmodule EctoLibSql.PreparedStatementTest do
     end
 
     test "prepared statements maintain isolation when reset concurrently", %{state: state} do
-      # Setup: Create test data
+      # Setup: Create test data (IDs 1-10)
       Enum.each(1..10, fn i ->
         {:ok, _query, _result, _} =
           exec_sql(state, "INSERT INTO users (id, name, email) VALUES (?, ?, ?)", [
@@ -936,27 +936,30 @@ defmodule EctoLibSql.PreparedStatementTest do
             {:ok, result} = Native.query_stmt(state, stmt_id, [task_num])
             assert length(result.rows) == 1
 
-            [id, name, _email] = hd(result.rows)
+            [id, name, email] = hd(result.rows)
             assert id == task_num
             assert name == "User#{task_num}"
+            assert email == "user#{task_num}@example.com"
 
             # Explicitly reset statement to clear bindings
             :ok = Native.reset_stmt(state, stmt_id)
 
-            # Execute again after reset
+            # Execute again after reset - should query IDs 6-10
             {:ok, result2} = Native.query_stmt(state, stmt_id, [task_num + 5])
 
-            # Should get different data after reset
-            case result2.rows do
-              [[new_id, _, _]] ->
-                # Either get the new ID or empty result is fine
-                # (depends on whether ID exists)
-                assert new_id == task_num + 5 or new_id == nil
+            # After reset, prepared statement must return the correct row
+            assert length(result2.rows) == 1, "Should get exactly one row after reset"
 
-              [] ->
-                # No data for that ID - this is fine
-                :ok
-            end
+            [new_id, new_name, new_email] = hd(result2.rows)
+
+            assert new_id == task_num + 5,
+                   "ID should be #{task_num + 5}, got #{new_id}"
+
+            assert new_name == "User#{task_num + 5}",
+                   "Name should be User#{task_num + 5}, got #{new_name}"
+
+            assert new_email == "user#{task_num + 5}@example.com",
+                   "Email should be user#{task_num + 5}@example.com, got #{new_email}"
 
             :ok
           end)

@@ -7,6 +7,11 @@ defmodule EctoLibSql.ConnectionRecoveryTest do
 
   setup do
     {:ok, state} = EctoLibSql.connect(database: ":memory:")
+
+    on_exit(fn ->
+      EctoLibSql.disconnect([], state)
+    end)
+
     {:ok, state: state}
   end
 

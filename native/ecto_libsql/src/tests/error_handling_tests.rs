@@ -482,10 +482,25 @@ async fn test_prepared_statement_with_parameter_mismatch() {
 // DATABASE FILE ERROR TESTS
 // ============================================================================
 
+#[cfg(unix)]
 #[tokio::test]
 async fn test_create_db_invalid_permissions() {
-    // Test with path that's definitely invalid
+    // Test with path that's definitely invalid (Unix-specific: null bytes)
     let invalid_path = "\0invalid\0path.db"; // Null bytes in path
+
+    // Creating DB with invalid path should error, not panic
+    let result = Builder::new_local(invalid_path).build().await;
+
+    // This should error due to invalid path, or succeed silently
+    // The key is it doesn't panic
+    let _ = result;
+}
+
+#[cfg(windows)]
+#[tokio::test]
+async fn test_create_db_invalid_permissions() {
+    // Test with path that's definitely invalid (Windows-specific: invalid characters)
+    let invalid_path = "COM1"; // Reserved device name on Windows
 
     // Creating DB with invalid path should error, not panic
     let result = Builder::new_local(invalid_path).build().await;

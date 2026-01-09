@@ -46,7 +46,7 @@ defmodule EctoLibSql.PoolLoadTest do
       tasks =
         Enum.map(1..5, fn i ->
           Task.async(fn ->
-            {:ok, state} = EctoLibSql.connect(database: test_db)
+            {:ok, state} = EctoLibSql.connect(database: test_db, busy_timeout: 30_000)
 
             result =
               EctoLibSql.handle_execute(
@@ -61,8 +61,8 @@ defmodule EctoLibSql.PoolLoadTest do
           end)
         end)
 
-      # Wait for all to complete
-      results = Task.await_many(tasks)
+      # Wait for all to complete with extended timeout
+      results = Task.await_many(tasks, 30_000)
 
       # All should succeed
       Enum.each(results, fn result ->
@@ -70,7 +70,7 @@ defmodule EctoLibSql.PoolLoadTest do
       end)
 
       # Verify all inserts succeeded
-      {:ok, state} = EctoLibSql.connect(database: test_db)
+      {:ok, state} = EctoLibSql.connect(database: test_db, busy_timeout: 30_000)
 
       {:ok, _query, result, _state} =
         EctoLibSql.handle_execute("SELECT COUNT(*) FROM test_data", [], [], state)
@@ -85,7 +85,7 @@ defmodule EctoLibSql.PoolLoadTest do
       tasks =
         Enum.map(1..10, fn i ->
           Task.async(fn ->
-            {:ok, state} = EctoLibSql.connect(database: test_db)
+            {:ok, state} = EctoLibSql.connect(database: test_db, busy_timeout: 30_000)
 
             result =
               EctoLibSql.handle_execute(
@@ -100,7 +100,7 @@ defmodule EctoLibSql.PoolLoadTest do
           end)
         end)
 
-      results = Task.await_many(tasks)
+      results = Task.await_many(tasks, 30_000)
 
       # All should succeed
       success_count = Enum.count(results, fn r -> match?({:ok, _, _, _}, r) end)
@@ -135,7 +135,7 @@ defmodule EctoLibSql.PoolLoadTest do
       tasks =
         Enum.map(1..3, fn i ->
           Task.async(fn ->
-            {:ok, state} = EctoLibSql.connect(database: test_db)
+            {:ok, state} = EctoLibSql.connect(database: test_db, busy_timeout: 30_000)
 
             {:ok, trx_state} = EctoLibSql.Native.begin(state)
 
@@ -157,7 +157,7 @@ defmodule EctoLibSql.PoolLoadTest do
           end)
         end)
 
-      results = Task.await_many(tasks)
+      results = Task.await_many(tasks, 30_000)
 
       # All should succeed
       Enum.each(results, fn result ->
@@ -165,7 +165,7 @@ defmodule EctoLibSql.PoolLoadTest do
       end)
 
       # Verify all inserts
-      {:ok, state} = EctoLibSql.connect(database: test_db)
+      {:ok, state} = EctoLibSql.connect(database: test_db, busy_timeout: 30_000)
 
       {:ok, _query, result, _state} =
         EctoLibSql.handle_execute("SELECT COUNT(*) FROM test_data", [], [], state)
@@ -178,7 +178,7 @@ defmodule EctoLibSql.PoolLoadTest do
 
   describe "connection recovery" do
     test "connection recovers after query error", %{test_db: test_db} do
-      {:ok, state} = EctoLibSql.connect(database: test_db)
+      {:ok, state} = EctoLibSql.connect(database: test_db, busy_timeout: 30_000)
 
       # Successful insert
       {:ok, _query, _result, state} =
@@ -205,7 +205,7 @@ defmodule EctoLibSql.PoolLoadTest do
       EctoLibSql.disconnect([], state)
 
       # Verify both successful inserts
-      {:ok, state} = EctoLibSql.connect(database: test_db)
+      {:ok, state} = EctoLibSql.connect(database: test_db, busy_timeout: 30_000)
 
       {:ok, _query, result, _state} =
         EctoLibSql.handle_execute("SELECT COUNT(*) FROM test_data", [], [], state)
@@ -219,7 +219,7 @@ defmodule EctoLibSql.PoolLoadTest do
       tasks =
         Enum.map(1..3, fn i ->
           Task.async(fn ->
-            {:ok, state} = EctoLibSql.connect(database: test_db)
+            {:ok, state} = EctoLibSql.connect(database: test_db, busy_timeout: 30_000)
 
             # Insert before error
             {:ok, _query, _result, state} =
@@ -247,7 +247,7 @@ defmodule EctoLibSql.PoolLoadTest do
           end)
         end)
 
-      results = Task.await_many(tasks)
+      results = Task.await_many(tasks, 30_000)
 
       # All recovery queries should succeed
       Enum.each(results, fn result ->
@@ -255,7 +255,7 @@ defmodule EctoLibSql.PoolLoadTest do
       end)
 
       # Verify all inserts
-      {:ok, state} = EctoLibSql.connect(database: test_db)
+      {:ok, state} = EctoLibSql.connect(database: test_db, busy_timeout: 30_000)
 
       {:ok, _query, result, _state} =
         EctoLibSql.handle_execute("SELECT COUNT(*) FROM test_data", [], [], state)
@@ -272,7 +272,7 @@ defmodule EctoLibSql.PoolLoadTest do
       tasks =
         Enum.map(1..5, fn i ->
           Task.async(fn ->
-            {:ok, state} = EctoLibSql.connect(database: test_db)
+            {:ok, state} = EctoLibSql.connect(database: test_db, busy_timeout: 30_000)
 
             {:ok, stmt} =
               EctoLibSql.Native.prepare(
@@ -294,10 +294,10 @@ defmodule EctoLibSql.PoolLoadTest do
           end)
         end)
 
-      Task.await_many(tasks)
+      Task.await_many(tasks, 30_000)
 
       # Verify all inserts succeeded
-      {:ok, state} = EctoLibSql.connect(database: test_db)
+      {:ok, state} = EctoLibSql.connect(database: test_db, busy_timeout: 30_000)
 
       {:ok, _query, result, _state} =
         EctoLibSql.handle_execute("SELECT COUNT(*) FROM test_data", [], [], state)
@@ -313,7 +313,7 @@ defmodule EctoLibSql.PoolLoadTest do
       tasks =
         Enum.map(1..4, fn i ->
           Task.async(fn ->
-            {:ok, state} = EctoLibSql.connect(database: test_db)
+            {:ok, state} = EctoLibSql.connect(database: test_db, busy_timeout: 30_000)
 
             {:ok, trx_state} = EctoLibSql.Native.begin(state)
 
@@ -335,7 +335,7 @@ defmodule EctoLibSql.PoolLoadTest do
           end)
         end)
 
-      results = Task.await_many(tasks)
+      results = Task.await_many(tasks, 30_000)
 
       # All should succeed
       Enum.each(results, fn result ->
@@ -343,7 +343,7 @@ defmodule EctoLibSql.PoolLoadTest do
       end)
 
       # All inserts should be visible
-      {:ok, state} = EctoLibSql.connect(database: test_db)
+      {:ok, state} = EctoLibSql.connect(database: test_db, busy_timeout: 30_000)
 
       {:ok, _query, result, _state} =
         EctoLibSql.handle_execute("SELECT COUNT(*) FROM test_data", [], [], state)

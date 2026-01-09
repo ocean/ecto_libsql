@@ -26,101 +26,87 @@ defmodule EctoLibSql.CursorStreamingLargeTest do
         state
       )
 
+    on_exit(fn ->
+      EctoLibSql.disconnect([], state)
+    end)
+
     {:ok, state: state}
   end
 
   describe "cursor streaming with large datasets" do
     test "stream 1000 rows without loading all into memory", %{state: state} do
       # Insert 1000 test rows
-      insert_rows(state, 1, 1000, 1)
+      state = insert_rows(state, 1, 1000, 1)
+
+      query = %EctoLibSql.Query{statement: "SELECT * FROM large_data ORDER BY id"}
 
       # Declare cursor
-      {:ok, _query, cursor, state} =
-        EctoLibSql.handle_declare(
-          %EctoLibSql.Query{statement: "SELECT * FROM large_data ORDER BY id"},
-          [],
-          [],
-          state
-        )
+      {:ok, ^query, cursor, state} =
+        EctoLibSql.handle_declare(query, [], [], state)
 
       # Fetch all rows in batches
-      row_count = fetch_all_rows(state, cursor, max_rows: 500)
+      row_count = fetch_all_rows(state, cursor, query, max_rows: 500)
       assert row_count == 1000, "Should fetch exactly 1000 rows"
     end
 
     test "stream 10K rows with different batch sizes", %{state: state} do
-      insert_rows(state, 1, 10_000, 1)
+      state = insert_rows(state, 1, 10_000, 1)
 
-      {:ok, _query, cursor, state} =
-        EctoLibSql.handle_declare(
-          %EctoLibSql.Query{statement: "SELECT id, value FROM large_data ORDER BY id"},
-          [],
-          [],
-          state
-        )
+      query = %EctoLibSql.Query{statement: "SELECT id, value FROM large_data ORDER BY id"}
+
+      {:ok, ^query, cursor, state} =
+        EctoLibSql.handle_declare(query, [], [], state)
 
       # Fetch with batch size 1000
-      row_count = fetch_all_rows(state, cursor, max_rows: 1000)
+      row_count = fetch_all_rows(state, cursor, query, max_rows: 1000)
       assert row_count == 10_000, "Should fetch exactly 10K rows"
     end
 
     test "cursor respects max_rows batch size setting", %{state: state} do
-      insert_rows(state, 1, 5000, 1)
+      state = insert_rows(state, 1, 5000, 1)
 
-      {:ok, _query, cursor, state} =
-        EctoLibSql.handle_declare(
-          %EctoLibSql.Query{statement: "SELECT * FROM large_data ORDER BY id"},
-          [],
-          [],
-          state
-        )
+      query = %EctoLibSql.Query{statement: "SELECT * FROM large_data ORDER BY id"}
+
+      {:ok, ^query, cursor, state} =
+        EctoLibSql.handle_declare(query, [], [], state)
 
       # Track batch sizes
       {:cont, result, state} =
-        EctoLibSql.handle_fetch(
-          %EctoLibSql.Query{statement: "SELECT * FROM large_data ORDER BY id"},
-          cursor,
-          [max_rows: 100],
-          state
-        )
+        EctoLibSql.handle_fetch(query, cursor, [max_rows: 100], state)
 
       # First batch should be at most 100 rows
       assert result.num_rows <= 100, "First batch should respect max_rows=100"
 
-      row_count = result.num_rows + fetch_remaining_rows(state, cursor, max_rows: 100)
+      row_count = result.num_rows + fetch_remaining_rows(state, cursor, query, max_rows: 100)
       assert row_count == 5000
     end
 
     test "cursor with WHERE clause filters on large dataset", %{state: state} do
       # Insert rows with different batch_ids
-      insert_rows(state, 1, 5000, 1)
-      insert_rows(state, 5001, 10000, 2)
+      state = insert_rows(state, 1, 5000, 1)
+      state = insert_rows(state, 5001, 10000, 2)
 
-      {:ok, _query, cursor, state} =
-        EctoLibSql.handle_declare(
-          %EctoLibSql.Query{statement: "SELECT * FROM large_data WHERE batch_id = 2 ORDER BY id"},
-          [],
-          [],
-          state
-        )
+      query = %EctoLibSql.Query{
+        statement: "SELECT * FROM large_data WHERE batch_id = 2 ORDER BY id"
+      }
 
-      row_count = fetch_all_rows(state, cursor, max_rows: 500)
+      {:ok, ^query, cursor, state} =
+        EctoLibSql.handle_declare(query, [], [], state)
+
+      row_count = fetch_all_rows(state, cursor, query, max_rows: 500)
       assert row_count == 5000, "Should fetch exactly 5000 filtered rows"
     end
 
     test "cursor processes rows in order", %{state: state} do
-      insert_rows(state, 1, 1000, 1)
+      state = insert_rows(state, 1, 1000, 1)
 
-      {:ok, _query, cursor, state} =
-        EctoLibSql.handle_declare(
-          %EctoLibSql.Query{statement: "SELECT id FROM large_data ORDER BY id"},
-          [],
-          [],
-          state
-        )
+      query = %EctoLibSql.Query{statement: "SELECT id FROM large_data ORDER BY id"}
+
+      {:ok, ^query, cursor, state} =
+        EctoLibSql.handle_declare(query, [], [], state)
 
       # Collect all IDs and verify they're in order
-      ids = fetch_all_ids(state, cursor, max_rows: 100)
+      ids = fetch_all_ids(state, cursor, query, max_rows: 100)
       expected_ids = Enum.to_list(1..1000)
       assert ids == expected_ids, "Rows should be in order"
     end
@@ -156,16 +142,13 @@ defmodule EctoLibSql.CursorStreamingLargeTest do
           new_state
         end)
 
-      {:ok, _query, cursor, state} =
-        EctoLibSql.handle_declare(
-          %EctoLibSql.Query{statement: "SELECT id, data FROM binary_test ORDER BY id"},
-          [],
-          [],
-          state
-        )
+      query = %EctoLibSql.Query{statement: "SELECT id, data FROM binary_test ORDER BY id"}
+
+      {:ok, ^query, cursor, state} =
+        EctoLibSql.handle_declare(query, [], [], state)
 
       # Verify binary data is preserved
-      binary_rows = fetch_all_binary_rows(state, cursor, max_rows: 25)
+      binary_rows = fetch_all_binary_rows(state, cursor, query, max_rows: 25)
       assert length(binary_rows) == 100
 
       # Check first row's binary data
@@ -200,38 +183,32 @@ defmodule EctoLibSql.CursorStreamingLargeTest do
         )
 
       # Insert 5000 rows
-      insert_rows(state, 1, 5000, 1)
+      state = insert_rows(state, 1, 5000, 1)
 
-      {:ok, _query, cursor, state} =
-        EctoLibSql.handle_declare(
-          %EctoLibSql.Query{
-            statement:
-              "SELECT ld.id, ld.value, c.name FROM large_data ld LEFT JOIN categories c ON ld.batch_id = c.id ORDER BY ld.id"
-          },
-          [],
-          [],
-          state
-        )
+      query = %EctoLibSql.Query{
+        statement:
+          "SELECT ld.id, ld.value, c.name FROM large_data ld LEFT JOIN categories c ON ld.batch_id = c.id ORDER BY ld.id"
+      }
 
-      row_count = fetch_all_rows(state, cursor, max_rows: 500)
+      {:ok, ^query, cursor, state} =
+        EctoLibSql.handle_declare(query, [], [], state)
+
+      row_count = fetch_all_rows(state, cursor, query, max_rows: 500)
       assert row_count == 5000
     end
 
     test "cursor with computed/derived columns", %{state: state} do
-      insert_rows(state, 1, 1000, 1)
+      state = insert_rows(state, 1, 1000, 1)
 
-      {:ok, _query, cursor, state} =
-        EctoLibSql.handle_declare(
-          %EctoLibSql.Query{
-            statement:
-              "SELECT id, value, LENGTH(value) as value_length, batch_id * 10 as scaled_batch FROM large_data ORDER BY id"
-          },
-          [],
-          [],
-          state
-        )
+      query = %EctoLibSql.Query{
+        statement:
+          "SELECT id, value, LENGTH(value) as value_length, batch_id * 10 as scaled_batch FROM large_data ORDER BY id"
+      }
 
-      rows = fetch_all_computed_rows(state, cursor, max_rows: 100)
+      {:ok, ^query, cursor, state} =
+        EctoLibSql.handle_declare(query, [], [], state)
+
+      rows = fetch_all_computed_rows(state, cursor, query, max_rows: 100)
       assert length(rows) == 1000
 
       # Verify computed columns
@@ -244,41 +221,30 @@ defmodule EctoLibSql.CursorStreamingLargeTest do
     end
 
     test "cursor lifecycle: declare, fetch in batches, implicit close", %{state: state} do
-      insert_rows(state, 1, 1000, 1)
+      state = insert_rows(state, 1, 1000, 1)
 
-      {:ok, _query, cursor, state} =
-        EctoLibSql.handle_declare(
-          %EctoLibSql.Query{statement: "SELECT * FROM large_data ORDER BY id"},
-          [],
-          [],
-          state
-        )
+      query = %EctoLibSql.Query{statement: "SELECT * FROM large_data ORDER BY id"}
+
+      {:ok, ^query, cursor, state} =
+        EctoLibSql.handle_declare(query, [], [], state)
 
       # Fetch multiple batches
-      batch_count = count_batches(state, cursor, max_rows: 100)
+      batch_count = count_batches(state, cursor, query, max_rows: 100)
 
       # Should have multiple batches of 100 rows plus remainder
       assert batch_count >= 9, "Should have at least 9 batches for 1000 rows with batch size 100"
     end
 
     test "cursor with aggregation query", %{state: state} do
-      insert_rows(state, 1, 1000, 1)
+      state = insert_rows(state, 1, 1000, 1)
 
-      {:ok, _query, cursor, state} =
-        EctoLibSql.handle_declare(
-          %EctoLibSql.Query{statement: "SELECT COUNT(*) as count FROM large_data"},
-          [],
-          [],
-          state
-        )
+      query = %EctoLibSql.Query{statement: "SELECT COUNT(*) as count FROM large_data"}
+
+      {:ok, ^query, cursor, state} =
+        EctoLibSql.handle_declare(query, [], [], state)
 
       {:cont, result, _state} =
-        EctoLibSql.handle_fetch(
-          %EctoLibSql.Query{statement: "SELECT COUNT(*) as count FROM large_data"},
-          cursor,
-          [max_rows: 100],
-          state
-        )
+        EctoLibSql.handle_fetch(query, cursor, [max_rows: 100], state)
 
       [[count]] = result.rows
       assert count == 1000
@@ -286,22 +252,20 @@ defmodule EctoLibSql.CursorStreamingLargeTest do
 
     test "cursor with GROUP BY and aggregation", %{state: state} do
       # Insert rows with different batch_ids
-      for batch <- 1..5 do
-        insert_rows(state, (batch - 1) * 2000 + 1, batch * 2000, batch)
-      end
+      state =
+        Enum.reduce(1..5, state, fn batch, acc_state ->
+          insert_rows(acc_state, (batch - 1) * 2000 + 1, batch * 2000, batch)
+        end)
 
-      {:ok, _query, cursor, state} =
-        EctoLibSql.handle_declare(
-          %EctoLibSql.Query{
-            statement:
-              "SELECT batch_id, COUNT(*) as count FROM large_data GROUP BY batch_id ORDER BY batch_id"
-          },
-          [],
-          [],
-          state
-        )
+      query = %EctoLibSql.Query{
+        statement:
+          "SELECT batch_id, COUNT(*) as count FROM large_data GROUP BY batch_id ORDER BY batch_id"
+      }
 
-      rows = fetch_all_group_rows(state, cursor, max_rows: 10)
+      {:ok, ^query, cursor, state} =
+        EctoLibSql.handle_declare(query, [], [], state)
+
+      rows = fetch_all_group_rows(state, cursor, query, max_rows: 10)
 
       # Should have 5 groups
       assert length(rows) == 5
@@ -313,19 +277,16 @@ defmodule EctoLibSql.CursorStreamingLargeTest do
     end
 
     test "cursor with OFFSET/LIMIT", %{state: state} do
-      insert_rows(state, 1, 1000, 1)
+      state = insert_rows(state, 1, 1000, 1)
 
-      {:ok, _query, cursor, state} =
-        EctoLibSql.handle_declare(
-          %EctoLibSql.Query{
-            statement: "SELECT id FROM large_data ORDER BY id LIMIT 100 OFFSET 500"
-          },
-          [],
-          [],
-          state
-        )
+      query = %EctoLibSql.Query{
+        statement: "SELECT id FROM large_data ORDER BY id LIMIT 100 OFFSET 500"
+      }
 
-      ids = fetch_all_ids(state, cursor, max_rows: 50)
+      {:ok, ^query, cursor, state} =
+        EctoLibSql.handle_declare(query, [], [], state)
+
+      ids = fetch_all_ids(state, cursor, query, max_rows: 50)
 
       # Should get rows 501-600
       assert length(ids) == 100
@@ -342,17 +303,14 @@ defmodule EctoLibSql.CursorStreamingLargeTest do
       state = insert_rows(state, 401, 500, 2)
       state = insert_rows(state, 501, 600, 1)
 
-      {:ok, _query, cursor, state} =
-        EctoLibSql.handle_declare(
-          %EctoLibSql.Query{
-            statement: "SELECT DISTINCT batch_id FROM large_data ORDER BY batch_id"
-          },
-          [],
-          [],
-          state
-        )
+      query = %EctoLibSql.Query{
+        statement: "SELECT DISTINCT batch_id FROM large_data ORDER BY batch_id"
+      }
 
-      rows = fetch_all_distinct_rows(state, cursor, max_rows: 10)
+      {:ok, ^query, cursor, state} =
+        EctoLibSql.handle_declare(query, [], [], state)
+
+      rows = fetch_all_distinct_rows(state, cursor, query, max_rows: 10)
 
       # Should have 3 distinct batch_ids: 1, 2, 3
       assert length(rows) == 3
@@ -380,129 +338,81 @@ defmodule EctoLibSql.CursorStreamingLargeTest do
     end)
   end
 
-  defp fetch_all_rows(state, cursor, opts) do
-    case EctoLibSql.handle_fetch(
-           %EctoLibSql.Query{statement: "SELECT * FROM large_data ORDER BY id"},
-           cursor,
-           opts,
-           state
-         ) do
+  defp fetch_all_rows(state, cursor, query, opts) do
+    case EctoLibSql.handle_fetch(query, cursor, opts, state) do
       {:cont, result, next_state} ->
-        result.num_rows + fetch_all_rows(next_state, cursor, opts)
+        result.num_rows + fetch_all_rows(next_state, cursor, query, opts)
 
       {:halt, result, _state} ->
         result.num_rows
     end
   end
 
-  defp fetch_remaining_rows(state, cursor, opts) do
-    case EctoLibSql.handle_fetch(
-           %EctoLibSql.Query{statement: "SELECT * FROM large_data ORDER BY id"},
-           cursor,
-           opts,
-           state
-         ) do
+  defp fetch_remaining_rows(state, cursor, query, opts) do
+    case EctoLibSql.handle_fetch(query, cursor, opts, state) do
       {:cont, result, next_state} ->
-        result.num_rows + fetch_remaining_rows(next_state, cursor, opts)
+        result.num_rows + fetch_remaining_rows(next_state, cursor, query, opts)
 
       {:halt, result, _state} ->
         result.num_rows
     end
   end
 
-  defp fetch_all_ids(state, cursor, opts) do
-    case EctoLibSql.handle_fetch(
-           %EctoLibSql.Query{statement: "SELECT id FROM large_data ORDER BY id"},
-           cursor,
-           opts,
-           state
-         ) do
+  defp fetch_all_ids(state, cursor, query, opts) do
+    case EctoLibSql.handle_fetch(query, cursor, opts, state) do
       {:cont, result, next_state} ->
         ids = Enum.map(result.rows, fn [id] -> id end)
-        ids ++ fetch_all_ids(next_state, cursor, opts)
+        ids ++ fetch_all_ids(next_state, cursor, query, opts)
 
       {:halt, result, _state} ->
         Enum.map(result.rows, fn [id] -> id end)
     end
   end
 
-  defp fetch_all_binary_rows(state, cursor, opts) do
-    case EctoLibSql.handle_fetch(
-           %EctoLibSql.Query{statement: "SELECT id, data FROM binary_test ORDER BY id"},
-           cursor,
-           opts,
-           state
-         ) do
+  defp fetch_all_binary_rows(state, cursor, query, opts) do
+    case EctoLibSql.handle_fetch(query, cursor, opts, state) do
       {:cont, result, next_state} ->
-        result.rows ++ fetch_all_binary_rows(next_state, cursor, opts)
+        result.rows ++ fetch_all_binary_rows(next_state, cursor, query, opts)
 
       {:halt, result, _state} ->
         result.rows
     end
   end
 
-  defp fetch_all_computed_rows(state, cursor, opts) do
-    case EctoLibSql.handle_fetch(
-           %EctoLibSql.Query{
-             statement:
-               "SELECT id, value, LENGTH(value) as value_length, batch_id * 10 as scaled_batch FROM large_data ORDER BY id"
-           },
-           cursor,
-           opts,
-           state
-         ) do
+  defp fetch_all_computed_rows(state, cursor, query, opts) do
+    case EctoLibSql.handle_fetch(query, cursor, opts, state) do
       {:cont, result, next_state} ->
-        result.rows ++ fetch_all_computed_rows(next_state, cursor, opts)
+        result.rows ++ fetch_all_computed_rows(next_state, cursor, query, opts)
 
       {:halt, result, _state} ->
         result.rows
     end
   end
 
-  defp count_batches(state, cursor, opts) do
-    case EctoLibSql.handle_fetch(
-           %EctoLibSql.Query{statement: "SELECT * FROM large_data ORDER BY id"},
-           cursor,
-           opts,
-           state
-         ) do
+  defp count_batches(state, cursor, query, opts) do
+    case EctoLibSql.handle_fetch(query, cursor, opts, state) do
       {:cont, _result, next_state} ->
-        1 + count_batches(next_state, cursor, opts)
+        1 + count_batches(next_state, cursor, query, opts)
 
       {:halt, _result, _state} ->
         1
     end
   end
 
-  defp fetch_all_group_rows(state, cursor, opts) do
-    case EctoLibSql.handle_fetch(
-           %EctoLibSql.Query{
-             statement:
-               "SELECT batch_id, COUNT(*) as count FROM large_data GROUP BY batch_id ORDER BY batch_id"
-           },
-           cursor,
-           opts,
-           state
-         ) do
+  defp fetch_all_group_rows(state, cursor, query, opts) do
+    case EctoLibSql.handle_fetch(query, cursor, opts, state) do
       {:cont, result, next_state} ->
-        result.rows ++ fetch_all_group_rows(next_state, cursor, opts)
+        result.rows ++ fetch_all_group_rows(next_state, cursor, query, opts)
 
       {:halt, result, _state} ->
         result.rows
     end
   end
 
-  defp fetch_all_distinct_rows(state, cursor, opts) do
-    case EctoLibSql.handle_fetch(
-           %EctoLibSql.Query{
-             statement: "SELECT DISTINCT batch_id FROM large_data ORDER BY batch_id"
-           },
-           cursor,
-           opts,
-           state
-         ) do
+  defp fetch_all_distinct_rows(state, cursor, query, opts) do
+    case EctoLibSql.handle_fetch(query, cursor, opts, state) do
       {:cont, result, next_state} ->
-        result.rows ++ fetch_all_distinct_rows(next_state, cursor, opts)
+        result.rows ++ fetch_all_distinct_rows(next_state, cursor, query, opts)
 
       {:halt, result, _state} ->
         result.rows
