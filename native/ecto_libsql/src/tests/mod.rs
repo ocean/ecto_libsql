@@ -7,4 +7,5 @@ mod constants_tests;
 mod error_handling_tests;
 mod integration_tests;
 mod proptest_tests;
+mod test_utils;
 mod utils_tests;

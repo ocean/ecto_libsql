@@ -16,46 +16,7 @@
 #![allow(clippy::unwrap_used)]
 
 use libsql::{Builder, Value};
-use std::fs;
-use std::path::PathBuf;
-use uuid::Uuid;
-
-/// RAII guard that ensures database and associated SQLite files are cleaned up
-/// after all database handles (conn, db) are dropped.
-///
-/// This guard must be declared FIRST in tests so its Drop impl runs LAST,
-/// ensuring files are deleted only after the db connection is fully closed.
-/// This prevents Windows file-lock issues with .db, .db-wal, and .db-shm files.
-struct TestDbGuard {
-    db_path: PathBuf,
-}
-
-impl TestDbGuard {
-    fn new(db_path: PathBuf) -> Self {
-        TestDbGuard { db_path }
-    }
-}
-
-impl Drop for TestDbGuard {
-    fn drop(&mut self) {
-        // Remove main database file
-        let _ = fs::remove_file(&self.db_path);
-
-        // Remove WAL (Write-Ahead Log) file
-        let wal_path = format!("{}-wal", self.db_path.display());
-        let _ = fs::remove_file(&wal_path);
-
-        // Remove SHM (Shared Memory) file
-        let shm_path = format!("{}-shm", self.db_path.display());
-        let _ = fs::remove_file(&shm_path);
-    }
-}
-
-fn setup_test_db() -> PathBuf {
-    let temp_dir = std::env::temp_dir();
-    let db_name = format!("z_ecto_libsql_test-errors-{}.db", Uuid::new_v4());
-    temp_dir.join(db_name)
-}
+use super::test_utils::{setup_test_db_with_prefix, TestDbGuard};
 
 // ============================================================================
 // CONSTRAINT VIOLATION TESTS
@@ -63,7 +24,7 @@ fn setup_test_db() -> PathBuf {
 
 #[tokio::test]
 async fn test_not_null_constraint_violation() {
-    let db_path = setup_test_db();
+    let db_path = setup_test_db_with_prefix("errors");
     let _guard = TestDbGuard::new(db_path.clone());
 
     let db = Builder::new_local(db_path.to_str().unwrap())
@@ -95,7 +56,7 @@ async fn test_not_null_constraint_violation() {
 
 #[tokio::test]
 async fn test_unique_constraint_violation() {
-    let db_path = setup_test_db();
+    let db_path = setup_test_db_with_prefix("errors");
     let _guard = TestDbGuard::new(db_path.clone());
 
     let db = Builder::new_local(db_path.to_str().unwrap())
@@ -141,7 +102,7 @@ async fn test_unique_constraint_violation() {
 
 #[tokio::test]
 async fn test_primary_key_constraint_violation() {
-    let db_path = setup_test_db();
+    let db_path = setup_test_db_with_prefix("errors");
     let _guard = TestDbGuard::new(db_path.clone());
 
     let db = Builder::new_local(db_path.to_str().unwrap())
@@ -178,7 +139,7 @@ async fn test_primary_key_constraint_violation() {
 
 #[tokio::test]
 async fn test_check_constraint_violation() {
-    let db_path = setup_test_db();
+    let db_path = setup_test_db_with_prefix("errors");
     let _guard = TestDbGuard::new(db_path.clone());
 
     let db = Builder::new_local(db_path.to_str().unwrap())
@@ -222,7 +183,7 @@ async fn test_check_constraint_violation() {
 
 #[tokio::test]
 async fn test_invalid_sql_syntax() {
-    let db_path = setup_test_db();
+    let db_path = setup_test_db_with_prefix("errors");
     let _guard = TestDbGuard::new(db_path.clone());
 
     let db = Builder::new_local(db_path.to_str().unwrap())
@@ -241,7 +202,7 @@ async fn test_invalid_sql_syntax() {
 
 #[tokio::test]
 async fn test_nonexistent_table() {
-    let db_path = setup_test_db();
+    let db_path = setup_test_db_with_prefix("errors");
     let _guard = TestDbGuard::new(db_path.clone());
 
     let db = Builder::new_local(db_path.to_str().unwrap())
@@ -258,7 +219,7 @@ async fn test_nonexistent_table() {
 
 #[tokio::test]
 async fn test_nonexistent_column() {
-    let db_path = setup_test_db();
+    let db_path = setup_test_db_with_prefix("errors");
     let _guard = TestDbGuard::new(db_path.clone());
 
     let db = Builder::new_local(db_path.to_str().unwrap())
@@ -279,7 +240,7 @@ async fn test_nonexistent_column() {
 
 #[tokio::test]
 async fn test_malformed_sql() {
-    let db_path = setup_test_db();
+    let db_path = setup_test_db_with_prefix("errors");
     let _guard = TestDbGuard::new(db_path.clone());
 
     let db = Builder::new_local(db_path.to_str().unwrap())
@@ -300,7 +261,7 @@ async fn test_malformed_sql() {
 
 #[tokio::test]
 async fn test_parameter_count_mismatch_missing() {
-    let db_path = setup_test_db();
+    let db_path = setup_test_db_with_prefix("errors");
     let _guard = TestDbGuard::new(db_path.clone());
 
     let db = Builder::new_local(db_path.to_str().unwrap())
@@ -328,7 +289,7 @@ async fn test_parameter_count_mismatch_missing() {
 
 #[tokio::test]
 async fn test_parameter_count_mismatch_excess() {
-    let db_path = setup_test_db();
+    let db_path = setup_test_db_with_prefix("errors");
     let _guard = TestDbGuard::new(db_path.clone());
 
     let db = Builder::new_local(db_path.to_str().unwrap())
@@ -359,7 +320,7 @@ async fn test_parameter_count_mismatch_excess() {
 
 #[tokio::test]
 async fn test_type_coercion_integer_to_text() {
-    let db_path = setup_test_db();
+    let db_path = setup_test_db_with_prefix("errors");
     let _guard = TestDbGuard::new(db_path.clone());
 
     let db = Builder::new_local(db_path.to_str().unwrap())
@@ -393,7 +354,7 @@ async fn test_type_coercion_integer_to_text() {
 
 #[tokio::test]
 async fn test_double_commit() {
-    let db_path = setup_test_db();
+    let db_path = setup_test_db_with_prefix("errors");
     let _guard = TestDbGuard::new(db_path.clone());
 
     let db = Builder::new_local(db_path.to_str().unwrap())
@@ -426,7 +387,7 @@ async fn test_double_commit() {
 
 #[tokio::test]
 async fn test_double_rollback() {
-    let db_path = setup_test_db();
+    let db_path = setup_test_db_with_prefix("errors");
     let _guard = TestDbGuard::new(db_path.clone());
 
     let db = Builder::new_local(db_path.to_str().unwrap())
@@ -459,7 +420,7 @@ async fn test_double_rollback() {
 
 #[tokio::test]
 async fn test_commit_after_rollback() {
-    let db_path = setup_test_db();
+    let db_path = setup_test_db_with_prefix("errors");
     let _guard = TestDbGuard::new(db_path.clone());
 
     let db = Builder::new_local(db_path.to_str().unwrap())
@@ -489,7 +450,7 @@ async fn test_commit_after_rollback() {
 
 #[tokio::test]
 async fn test_query_after_rollback() {
-    let db_path = setup_test_db();
+    let db_path = setup_test_db_with_prefix("errors");
     let _guard = TestDbGuard::new(db_path.clone());
 
     let db = Builder::new_local(db_path.to_str().unwrap())
@@ -524,7 +485,7 @@ async fn test_query_after_rollback() {
 
 #[tokio::test]
 async fn test_prepare_invalid_sql() {
-    let db_path = setup_test_db();
+    let db_path = setup_test_db_with_prefix("errors");
     let _guard = TestDbGuard::new(db_path.clone());
 
     let db = Builder::new_local(db_path.to_str().unwrap())
@@ -543,7 +504,7 @@ async fn test_prepare_invalid_sql() {
 
 #[tokio::test]
 async fn test_prepared_statement_with_parameter_mismatch() {
-    let db_path = setup_test_db();
+    let db_path = setup_test_db_with_prefix("errors");
     let _guard = TestDbGuard::new(db_path.clone());
 
     let db = Builder::new_local(db_path.to_str().unwrap())
@@ -609,7 +570,7 @@ async fn test_create_db_invalid_permissions() {
 
 #[tokio::test]
 async fn test_database_persistence_and_reopen() {
-    let db_path = setup_test_db();
+    let db_path = setup_test_db_with_prefix("errors");
     let _guard = TestDbGuard::new(db_path.clone());
 
     let db_path_str = db_path.to_str().unwrap();
@@ -659,7 +620,7 @@ async fn test_database_persistence_and_reopen() {
 
 #[tokio::test]
 async fn test_empty_sql_statement() {
-    let db_path = setup_test_db();
+    let db_path = setup_test_db_with_prefix("errors");
     let _guard = TestDbGuard::new(db_path.clone());
 
     let db = Builder::new_local(db_path.to_str().unwrap())
@@ -676,7 +637,7 @@ async fn test_empty_sql_statement() {
 
 #[tokio::test]
 async fn test_whitespace_only_sql() {
-    let db_path = setup_test_db();
+    let db_path = setup_test_db_with_prefix("errors");
     let _guard = TestDbGuard::new(db_path.clone());
 
     let db = Builder::new_local(db_path.to_str().unwrap())
@@ -693,7 +654,7 @@ async fn test_whitespace_only_sql() {
 
 #[tokio::test]
 async fn test_very_long_sql_query() {
-    let db_path = setup_test_db();
+    let db_path = setup_test_db_with_prefix("errors");
     let _guard = TestDbGuard::new(db_path.clone());
 
     let db = Builder::new_local(db_path.to_str().unwrap())
@@ -719,7 +680,7 @@ async fn test_very_long_sql_query() {
 
 #[tokio::test]
 async fn test_unicode_in_sql() {
-    let db_path = setup_test_db();
+    let db_path = setup_test_db_with_prefix("errors");
     let _guard = TestDbGuard::new(db_path.clone());
 
     let db = Builder::new_local(db_path.to_str().unwrap())
@@ -760,7 +721,7 @@ async fn test_unicode_in_sql() {
 
 #[tokio::test]
 async fn test_sql_injection_attempt() {
-    let db_path = setup_test_db();
+    let db_path = setup_test_db_with_prefix("errors");
     let _guard = TestDbGuard::new(db_path.clone());
 
     let db = Builder::new_local(db_path.to_str().unwrap())

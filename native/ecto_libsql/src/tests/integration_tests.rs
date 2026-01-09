@@ -8,61 +8,7 @@
 #![allow(clippy::unwrap_used)]
 
 use libsql::{Builder, Value};
-use std::fs;
-use std::path::PathBuf;
-use uuid::Uuid;
-
-/// RAII guard that ensures database and associated SQLite files are cleaned up
-/// after all database handles (conn, db) are dropped.
-///
-/// This guard must be declared FIRST in tests so its Drop impl runs LAST,
-/// ensuring files are deleted only after the db connection is fully closed.
-/// This prevents Windows file-lock issues with .db, .db-wal, .db-shm, and other
-/// SQLite auxiliary files. Removes all five file types for parity with Elixir's
-/// cleanup_db_files/1 helper:
-/// - .db (main database file)
-/// - .db-wal (Write-Ahead Log)
-/// - .db-shm (Shared Memory)
-/// - .db-journal (Journal file)
-/// - .db-info (Info file for replication metadata)
-struct TestDbGuard {
-    db_path: PathBuf,
-}
-
-impl TestDbGuard {
-    fn new(db_path: PathBuf) -> Self {
-        TestDbGuard { db_path }
-    }
-}
-
-impl Drop for TestDbGuard {
-    fn drop(&mut self) {
-        // Remove main database file
-        let _ = fs::remove_file(&self.db_path);
-
-        // Remove WAL (Write-Ahead Log) file
-        let wal_path = format!("{}-wal", self.db_path.display());
-        let _ = fs::remove_file(&wal_path);
-
-        // Remove SHM (Shared Memory) file
-        let shm_path = format!("{}-shm", self.db_path.display());
-        let _ = fs::remove_file(&shm_path);
-
-        // Remove JOURNAL file (SQLite rollback journal)
-        let journal_path = format!("{}-journal", self.db_path.display());
-        let _ = fs::remove_file(&journal_path);
-
-        // Remove INFO file (replication metadata for remote replicas)
-        let info_path = format!("{}-info", self.db_path.display());
-        let _ = fs::remove_file(&info_path);
-    }
-}
-
-fn setup_test_db() -> PathBuf {
-    let temp_dir = std::env::temp_dir();
-    let db_name = format!("z_ecto_libsql_test-{}.db", Uuid::new_v4());
-    temp_dir.join(db_name)
-}
+use super::test_utils::{setup_test_db, TestDbGuard};
 
 #[tokio::test]
 async fn test_create_local_database() {
