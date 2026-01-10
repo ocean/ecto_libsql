@@ -303,8 +303,9 @@ defmodule EctoLibSql.PoolLoadTest do
       EctoLibSql.disconnect([], state2)
 
       # Should retrieve some of the Unicode values
-      # (exact count depends on LIKE behavior with Unicode)
-      assert length(verify_result.rows) > 0
+      # (exact count depends on LIKE behaviour with Unicode)
+      [[count]] = verify_result.rows
+      assert count > 0
     end
   end
 
@@ -1293,7 +1294,7 @@ defmodule EctoLibSql.PoolLoadTest do
                 )
 
               case result do
-                {:error, _query, _reason, trx_state} ->
+                {:error, _reason, trx_state} ->
                   # Expected: constraint violation
                   EctoLibSql.Native.rollback(trx_state)
                   {:ok, :correctly_rolled_back}

@@ -491,7 +491,7 @@ defmodule EctoLibSql.CursorStreamingLargeTest do
     end
   end
 
-  describe "cursor transaction behavior" do
+  describe "cursor transaction behaviour" do
     test "cursor declared in transaction fails after rollback", %{state: state} do
       state = insert_rows(state, 1, 100, 1)
 
