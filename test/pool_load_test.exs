@@ -651,27 +651,35 @@ defmodule EctoLibSql.PoolLoadTest do
                   "INSERT INTO test_data (value) VALUES (?)"
                 )
 
-              # Execute prepared statement with edge-case data
-              edge_values = generate_edge_case_values(task_num)
+              try do
+                # Execute prepared statement with edge-case data
+                edge_values = generate_edge_case_values(task_num)
 
-              execute_results =
-                Enum.map(edge_values, fn value ->
-                  EctoLibSql.Native.execute_stmt(
-                    state,
-                    stmt,
-                    "INSERT INTO test_data (value) VALUES (?)",
-                    [value]
-                  )
-                end)
+                execute_results =
+                  Enum.map(edge_values, fn value ->
+                    EctoLibSql.Native.execute_stmt(
+                      state,
+                      stmt,
+                      "INSERT INTO test_data (value) VALUES (?)",
+                      [value]
+                    )
+                  end)
 
-              # All executions should succeed
-              all_ok = Enum.all?(execute_results, fn r -> match?({:ok, _}, r) end)
+                # All executions should succeed
+                all_ok = Enum.all?(execute_results, fn r -> match?({:ok, _}, r) end)
 
-              if all_ok do
-                :ok = EctoLibSql.Native.close_stmt(stmt)
-                {:ok, :prepared_with_edge_cases}
-              else
-                {:error, :some_edge_case_inserts_failed}
+                if all_ok do
+                  {:ok, :prepared_with_edge_cases}
+                else
+                  {:error, :some_edge_case_inserts_failed}
+                end
+              after
+                # Always close the prepared statement, ignore errors
+                try do
+                  EctoLibSql.Native.close_stmt(stmt)
+                rescue
+                  _ -> :ok
+                end
               end
             after
               EctoLibSql.disconnect([], state)
