@@ -24,7 +24,7 @@ defmodule EctoLibSql.SavepointReplicationTest do
     test_table = "test_users_#{unique_id}"
 
     {:ok, state} =
-      if not (is_nil(@turso_uri) or is_nil(@turso_token)) do
+      if not (is_nil(@turso_uri) || is_nil(@turso_token)) do
         # Connect with replica mode for replication
         EctoLibSql.connect(
           database: test_db,
@@ -47,25 +47,21 @@ defmodule EctoLibSql.SavepointReplicationTest do
       )
 
     on_exit(fn ->
-      # Drop remote table to clean up Turso database
-      try do
-        EctoLibSql.handle_execute(
-          "DROP TABLE IF EXISTS #{test_table}",
-          [],
-          [],
-          state
-        )
-      rescue
-        _ -> :ok
+      # Cleanup: drop remote table, disconnect, and remove local files
+      # Errors are ignored to ensure cleanup never blocks
+      for cleanup_fn <- [
+            fn ->
+              EctoLibSql.handle_execute("DROP TABLE IF EXISTS #{test_table}", [], [], state)
+            end,
+            fn -> EctoLibSql.disconnect([], state) end,
+            fn -> EctoLibSql.TestHelpers.cleanup_db_files(test_db) end
+          ] do
+        try do
+          cleanup_fn.()
+        rescue
+          _ -> :ok
+        end
       end
-
-      try do
-        EctoLibSql.disconnect([], state)
-      rescue
-        _ -> :ok
-      end
-
-      EctoLibSql.TestHelpers.cleanup_db_files(test_db)
     end)
 
     {:ok, state: state, table: test_table}
@@ -92,9 +88,13 @@ defmodule EctoLibSql.SavepointReplicationTest do
 
       # Release and commit (which syncs to remote)
       :ok = EctoLibSql.Native.release_savepoint_by_name(trx_state, "sp1")
-      {:ok, _state} = EctoLibSql.Native.commit(trx_state)
+      {:ok, committed_state} = EctoLibSql.Native.commit(trx_state)
 
-      # Verify data persisted
+      # Verify sync occurred by checking replication frame number advanced
+      {:ok, frame_number} = EctoLibSql.Native.max_write_replication_index(committed_state)
+      assert is_integer(frame_number) && frame_number > 0
+
+      # Verify data persisted locally
       {:ok, _query, result, _state} =
         EctoLibSql.handle_execute(
           "SELECT COUNT(*) FROM #{table}",
@@ -135,7 +135,11 @@ defmodule EctoLibSql.SavepointReplicationTest do
       :ok = EctoLibSql.Native.rollback_to_savepoint_by_name(trx_state, "sp1")
 
       # Commit (syncs to remote)
-      {:ok, _state} = EctoLibSql.Native.commit(trx_state)
+      {:ok, committed_state} = EctoLibSql.Native.commit(trx_state)
+
+      # Verify sync occurred
+      {:ok, frame_number} = EctoLibSql.Native.max_write_replication_index(committed_state)
+      assert is_integer(frame_number) && frame_number > 0
 
       # Only Alice should exist
       {:ok, _query, result, _state} =
@@ -187,7 +191,11 @@ defmodule EctoLibSql.SavepointReplicationTest do
       :ok = EctoLibSql.Native.rollback_to_savepoint_by_name(trx_state, "sp2")
 
       # Commit (syncs to remote)
-      {:ok, _state} = EctoLibSql.Native.commit(trx_state)
+      {:ok, committed_state} = EctoLibSql.Native.commit(trx_state)
+
+      # Verify sync occurred
+      {:ok, frame_number} = EctoLibSql.Native.max_write_replication_index(committed_state)
+      assert is_integer(frame_number) && frame_number > 0
 
       # Alice and Bob should exist
       {:ok, _query, result, _state} =
@@ -221,7 +229,7 @@ defmodule EctoLibSql.SavepointReplicationTest do
 
       :ok = EctoLibSql.Native.create_savepoint(trx_state, "sp1")
 
-      # Try to insert duplicate (will fail)
+      # Try to insert duplicate (will fail with PRIMARY KEY constraint violation)
       result =
         EctoLibSql.handle_execute(
           "INSERT INTO #{table} (id, name) VALUES (?, ?)",
@@ -231,7 +239,9 @@ defmodule EctoLibSql.SavepointReplicationTest do
         )
 
       # Rebind trx_state - error tuple contains updated transaction state needed for recovery
-      assert {:error, _reason, trx_state} = result
+      # Assert the error is specifically a constraint violation (UNIQUE or PRIMARY KEY)
+      assert {:error, reason, trx_state} = result
+      assert reason =~ "UNIQUE constraint failed" || reason =~ "PRIMARY KEY"
 
       # Rollback savepoint to recover
       :ok = EctoLibSql.Native.rollback_to_savepoint_by_name(trx_state, "sp1")
@@ -246,7 +256,11 @@ defmodule EctoLibSql.SavepointReplicationTest do
         )
 
       # Commit (syncs to remote)
-      {:ok, _state} = EctoLibSql.Native.commit(trx_state)
+      {:ok, committed_state} = EctoLibSql.Native.commit(trx_state)
+
+      # Verify sync occurred
+      {:ok, frame_number} = EctoLibSql.Native.max_write_replication_index(committed_state)
+      assert is_integer(frame_number) && frame_number > 0
 
       # Both original and new should exist
       {:ok, _query, result, _state} =
