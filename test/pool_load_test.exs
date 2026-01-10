@@ -288,24 +288,22 @@ defmodule EctoLibSql.PoolLoadTest do
 
       assert [[25]] = result.rows
 
-      # Verify that we can retrieve the data back (simple verification)
+      # Verify Unicode characters are correctly preserved by reading back specific values
       {:ok, state2} = EctoLibSql.connect(database: test_db, busy_timeout: 30_000)
 
-      # Simple verification: check that the data is still there
-      {:ok, _query, verify_result, _state} =
-        EctoLibSql.handle_execute(
-          "SELECT COUNT(*) FROM test_data WHERE value LIKE '%café%' OR value LIKE '%中%' OR value LIKE '%العربية%' OR value LIKE '%😀%'",
-          [],
-          [],
-          state2
-        )
+      {:ok, _query, all_rows_result, _state} =
+        EctoLibSql.handle_execute("SELECT value FROM test_data", [], [], state2)
 
       EctoLibSql.disconnect([], state2)
 
-      # Should retrieve some of the Unicode values
-      # (exact count depends on LIKE behaviour with Unicode)
-      [[count]] = verify_result.rows
-      assert count > 0
+      values = Enum.map(all_rows_result.rows, fn [v] -> v end)
+
+      # Verify specific Unicode patterns are preserved (5 tasks, each pattern appears 5 times)
+      assert Enum.count(values, &String.contains?(&1, "café")) == 5
+      assert Enum.count(values, &String.contains?(&1, "中文")) == 5
+      assert Enum.count(values, &String.contains?(&1, "العربية")) == 5
+      assert Enum.count(values, &String.contains?(&1, "😀🎉❤️")) == 5
+      assert Enum.count(values, &String.contains?(&1, "mixed_")) == 5
     end
   end
 
@@ -814,17 +812,14 @@ defmodule EctoLibSql.PoolLoadTest do
             try do
               {:ok, trx_state} = EctoLibSql.Native.begin(state)
 
-              # Insert edge-case values within transaction
+              # Insert edge-case values within transaction, threading state through
               edge_values = generate_edge_case_values(task_num)
 
-              insert_results =
-                Enum.map(edge_values, fn value ->
-                  {:ok, _query, _result, new_state} = insert_edge_case_value(trx_state, value)
+              final_trx_state =
+                Enum.reduce(edge_values, trx_state, fn value, acc_state ->
+                  {:ok, _query, _result, new_state} = insert_edge_case_value(acc_state, value)
                   new_state
                 end)
-
-              # Use final state after all inserts
-              final_trx_state = List.last(insert_results) || trx_state
 
               # Slight delay to increase overlap with other transactions
               Process.sleep(10)
@@ -1345,16 +1340,17 @@ defmodule EctoLibSql.PoolLoadTest do
             try do
               {:ok, trx_state} = EctoLibSql.Native.begin(state)
 
-              # Insert edge-case values in transaction
+              # Insert edge-case values in transaction, threading state through
               edge_values = generate_edge_case_values(task_num)
 
-              _insert_results =
-                Enum.map(edge_values, fn value ->
-                  insert_edge_case_value(trx_state, value)
+              final_trx_state =
+                Enum.reduce(edge_values, trx_state, fn value, acc_state ->
+                  {:ok, _query, _result, new_state} = insert_edge_case_value(acc_state, value)
+                  new_state
                 end)
 
               # Always rollback - edge-case data should not persist
-              case EctoLibSql.Native.rollback(trx_state) do
+              case EctoLibSql.Native.rollback(final_trx_state) do
                 {:ok, _state} ->
                   {:ok, :edge_cases_rolled_back}
 
