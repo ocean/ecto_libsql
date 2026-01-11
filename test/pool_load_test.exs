@@ -13,6 +13,7 @@ defmodule EctoLibSql.PoolLoadTest do
   concurrent access patterns and verify robustness.
   """
   use ExUnit.Case
+  require Logger
 
   alias EctoLibSql
 
@@ -598,11 +599,27 @@ defmodule EctoLibSql.PoolLoadTest do
 
                 {:ok, :prepared_and_cleaned}
               after
-                # Always close the prepared statement, ignore errors
+                # Always close the prepared statement, catching only expected errors
                 try do
                   EctoLibSql.Native.close_stmt(stmt)
                 rescue
-                  _ -> :ok
+                  e ->
+                    case e do
+                      %ArgumentError{} ->
+                        # Expected exception from close_stmt - log and continue
+                        Logger.debug("Expected error closing prepared statement: #{inspect(e)}")
+                        :ok
+
+                      %RuntimeError{} ->
+                        # Expected exception from close_stmt - log and continue
+                        Logger.debug("Expected error closing prepared statement: #{inspect(e)}")
+                        :ok
+
+                      _ ->
+                        # Unexpected exception - re-raise for debugging
+                        Logger.error("Unexpected error closing prepared statement: #{inspect(e)}")
+                        raise e
+                    end
                 end
               end
             after
@@ -678,26 +695,42 @@ defmodule EctoLibSql.PoolLoadTest do
                   {:error, :some_edge_case_inserts_failed}
                 end
               after
-                # Always close the prepared statement, ignore errors
+                # Always close the prepared statement, catching only expected errors
                 try do
                   EctoLibSql.Native.close_stmt(stmt)
                 rescue
-                  _ -> :ok
+                  e ->
+                    case e do
+                      %ArgumentError{} ->
+                        # Expected exception from close_stmt - log and continue
+                        Logger.debug("Expected error closing prepared statement: #{inspect(e)}")
+                        :ok
+
+                      %RuntimeError{} ->
+                        # Expected exception from close_stmt - log and continue
+                        Logger.debug("Expected error closing prepared statement: #{inspect(e)}")
+                        :ok
+
+                      _ ->
+                        # Unexpected exception - re-raise for debugging
+                        Logger.error("Unexpected error closing prepared statement: #{inspect(e)}")
+                        raise e
+                    end
                 end
               end
-            after
+              after
               EctoLibSql.disconnect([], state)
-            end
-          end)
-        end)
+              end
+              end)
+              end)
 
-      results = Task.await_many(tasks, 30_000)
+              results = Task.await_many(tasks, 30_000)
 
-      # Verify all prepared statement operations succeeded
-      Enum.each(results, fn result ->
-        case result do
-          {:ok, :prepared_with_edge_cases} ->
-            :ok
+              # Verify all prepared statement operations succeeded
+              Enum.each(results, fn result ->
+              case result do
+              {:ok, :prepared_with_edge_cases} ->
+              :ok
 
           {:error, reason} ->
             flunk("Prepared statement with edge-case data failed: #{inspect(reason)}")
@@ -812,22 +845,37 @@ defmodule EctoLibSql.PoolLoadTest do
               # Insert edge-case values within transaction, threading state through
               edge_values = generate_edge_case_values(task_num)
 
-              final_trx_state =
-                Enum.reduce(edge_values, trx_state, fn value, acc_state ->
-                  {:ok, _query, _result, new_state} = insert_edge_case_value(acc_state, value)
-                  new_state
-                end)
+              # Reduce with explicit error handling to surface failures clearly
+              with {:ok, final_trx_state} <-
+                     Enum.reduce_while(edge_values, {:ok, trx_state}, fn value, acc ->
+                       case acc do
+                         {:ok, acc_state} ->
+                           case insert_edge_case_value(acc_state, value) do
+                             {:ok, _query, _result, new_state} ->
+                               {:cont, {:ok, new_state}}
 
-              # Slight delay to increase overlap with other transactions
-              Process.sleep(10)
+                             {:error, _query, reason, _state} ->
+                               {:halt, {:error, {:insert_failed, reason}}}
+                           end
 
-              # Commit the transaction containing all edge-case values
-              case EctoLibSql.Native.commit(final_trx_state) do
-                {:ok, _committed_state} ->
-                  {:ok, :committed_with_edge_cases}
+                         error ->
+                           {:halt, error}
+                       end
+                     end) do
+                # Slight delay to increase overlap with other transactions
+                Process.sleep(10)
 
+                # Commit the transaction containing all edge-case values
+                case EctoLibSql.Native.commit(final_trx_state) do
+                  {:ok, _committed_state} ->
+                    {:ok, :committed_with_edge_cases}
+
+                  {:error, reason} ->
+                    {:error, {:commit_failed, reason}}
+                end
+              else
                 {:error, reason} ->
-                  {:error, {:commit_failed, reason}}
+                  {:error, reason}
               end
             after
               EctoLibSql.disconnect([], state)
