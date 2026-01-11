@@ -34,7 +34,7 @@ defmodule EctoLibSql.PoolLoadTest do
     conn_id = state.conn_id
 
     on_exit(fn ->
-      EctoLibSql.disconnect([], %{conn_id: conn_id})
+      EctoLibSql.disconnect([], %EctoLibSql.State{conn_id: conn_id})
       EctoLibSql.TestHelpers.cleanup_db_files(test_db)
     end)
 

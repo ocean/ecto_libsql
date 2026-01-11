@@ -29,7 +29,7 @@ defmodule EctoLibSql.CursorStreamingLargeTest do
 
     on_exit(fn ->
       # Use conn_id to ensure we disconnect the correct connection
-      EctoLibSql.disconnect([], %{conn_id: conn_id})
+      EctoLibSql.disconnect([], %EctoLibSql.State{conn_id: conn_id})
     end)
 
     {:ok, state: state}
@@ -737,10 +737,10 @@ defmodule EctoLibSql.CursorStreamingLargeTest do
 
   defp fetch_all_ids(state, cursor, query, opts) do
     # Use accumulator to avoid O(n²) list concatenation.
-    # Collect batches in reverse order, then flatten with nested reverses for correctness.
+    # Collect batches in reverse order, then concat for single-level flattening.
     fetch_all_ids_acc(state, cursor, query, opts, [])
     |> Enum.reverse()
-    |> List.flatten()
+    |> Enum.concat()
   end
 
   defp fetch_all_ids_acc(state, cursor, query, opts, acc) do
@@ -764,7 +764,7 @@ defmodule EctoLibSql.CursorStreamingLargeTest do
   defp fetch_all_cursor_rows(state, cursor, query, opts) do
     fetch_all_cursor_rows_acc(state, cursor, query, opts, [])
     |> Enum.reverse()
-    |> List.flatten()
+    |> Enum.concat()
   end
 
   defp fetch_all_cursor_rows_acc(state, cursor, query, opts, acc) do
