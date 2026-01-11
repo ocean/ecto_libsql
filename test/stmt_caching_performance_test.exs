@@ -1,4 +1,11 @@
-defmodule EctoLibSql.StatementCachingBenchmarkTest do
+defmodule EctoLibSql.StatementCachingPerformanceTest do
+  @moduledoc """
+  Performance tests for prepared statement caching.
+
+  These tests verify that prepared statements maintain good performance
+  characteristics when reused. The timing information is for visibility
+  and documentation - tests always pass regardless of timing.
+  """
   use ExUnit.Case, async: false
 
   alias EctoLibSql.Native
@@ -25,9 +32,7 @@ defmodule EctoLibSql.StatementCachingBenchmarkTest do
 
     on_exit(fn ->
       Native.close(state.conn_id, :conn_id)
-      File.rm(db_file)
-      File.rm(db_file <> "-shm")
-      File.rm(db_file <> "-wal")
+      EctoLibSql.TestHelpers.cleanup_db_files(db_file)
     end)
 
     {:ok, state: state}

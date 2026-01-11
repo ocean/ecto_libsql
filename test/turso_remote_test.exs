@@ -33,11 +33,7 @@ defmodule TursoRemoteTest do
   # Helper function to clean up local database files created by tests
   # SQLite creates multiple files: .db, .db-wal, .db-shm, and Turso creates .db-info
   defp cleanup_local_db(db_path) do
-    File.rm(db_path)
-    File.rm("#{db_path}-wal")
-    File.rm("#{db_path}-shm")
-    File.rm("#{db_path}-info")
-    :ok
+    EctoLibSql.TestHelpers.cleanup_db_files(db_path)
   end
 
   # Helper function to wait for replica sync to complete

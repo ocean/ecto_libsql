@@ -35,10 +35,7 @@ defmodule EctoLibSql.FuzzTest do
         _ -> :ok
       end
 
-      File.rm(db_path)
-      File.rm(db_path <> "-shm")
-      File.rm(db_path <> "-wal")
-      File.rm(db_path <> "-journal")
+      EctoLibSql.TestHelpers.cleanup_db_files(db_path)
     end)
 
     {:ok, state: state, db_path: db_path}

@@ -10,7 +10,11 @@
 ## Quick Rules
 
 - **British/Australian English** for all code, comments, and documentation (except SQL keywords and compatibility requirements)
-- **ALWAYS format before committing**: `mix format --check-formatted` and `cargo fmt`
+- **⚠️ CRITICAL: ALWAYS check formatting BEFORE committing**:
+  1. Run formatters: `mix format && cd native/ecto_libsql && cargo fmt`
+  2. Verify checks pass: `mix format --check-formatted && cargo fmt --check`
+  3. **Only then** commit: `git commit -m "..."`
+  - Formatting issues caught at check time, not after commit
 - **NEVER use `.unwrap()` in production Rust code** - use `safe_lock` helpers (see [Error Handling](#error-handling-patterns))
 - **Tests MAY use `.unwrap()`** for simplicity
 
@@ -46,6 +50,7 @@
 - [Architecture](#architecture)
 - [Code Structure](#code-structure)
 - [Development Workflow](#development-workflow)
+- [Issue Tracking with Beads](#issue-tracking-with-beads)
 - [Error Handling Patterns](#error-handling-patterns)
 - [Testing](#testing)
 - [Common Tasks](#common-tasks)
@@ -258,7 +263,7 @@ This project uses **Beads** (`bd` command) for issue tracking across sessions. B
 - **Beads**: Multi-session work, dependencies between tasks, discovered work that needs tracking
 - **TodoWrite**: Simple single-session task execution
 
-When in doubt, prefer Beads—persistence you don't need beats lost context.
+When in doubt, prefer Beads — persistence you don't need beats lost context.
 
 **Essential commands:**
 ```bash
@@ -293,6 +298,14 @@ bd close <id1> <id2> ...           # Close completed issues
 bd sync --from-main                # Pull latest beads
 git add . && git commit -m "..."   # Commit changes
 ```
+
+#### Best Practices
+
+- Check `bd ready` at session start to find available work
+- Update status as you work (in_progress → closed)
+- Create new issues with `bd create` when you discover tasks
+- Use descriptive titles and set appropriate priority/type
+- Always `bd sync` before ending session
 
 ### Adding a New NIF Function
 
@@ -455,6 +468,45 @@ mix test --exclude turso_remote             # Skip Turso tests
 - Type conversions (Elixir ↔ SQLite)
 - Concurrent operations
 
+### Test Variable Naming Conventions
+
+For state threading in tests, use consistent variable names and patterns:
+
+**Variable Naming by Scope**:
+```elixir
+state      # Connection scope
+trx_state  # Transaction scope  
+cursor     # Cursor scope
+stmt_id    # Prepared statement ID scope
+```
+
+**Error Handling Pattern**: 
+
+When an error operation returns updated state, you must decide if that state is needed next:
+
+```elixir
+# ✅ If state IS needed for subsequent operations → Rebind
+result = EctoLibSql.handle_execute(sql, params, [], trx_state)
+assert {:error, _reason, trx_state} = result  # Rebind - reuse updated state
+:ok = EctoLibSql.Native.rollback_to_savepoint_by_name(trx_state, "sp1")
+
+# ✅ If state is NOT needed → Discard with underscore
+result = EctoLibSql.handle_execute(sql, params, [], trx_state)
+assert {:error, _reason, _state} = result  # Discard - not reused
+:ok = EctoLibSql.Native.rollback_to_savepoint_by_name(trx_state, "sp1")
+
+# ✅ For terminal operations → Use underscore variable name
+assert {:error, %EctoLibSql.Error{}, _conn} = EctoLibSql.handle_execute(...)
+```
+
+**Add clarifying comments** when rebinding state:
+```elixir
+# Rebind trx_state - error tuple contains updated transaction state needed for recovery
+assert {:error, _reason, trx_state} = result
+```
+
+See [TEST_STATE_VARIABLE_CONVENTIONS.md](TEST_STATE_VARIABLE_CONVENTIONS.md) for detailed guidance.
+
 ### Turso Remote Tests
 
 ⚠️ **Cost Warning**: Creates real cloud databases. Only run when developing remote/replica functionality.
@@ -549,13 +601,26 @@ for i in {1..10}; do mix test test/file.exs:42; done # Race conditions
 
 ### Pre-Commit Checklist
 
+**STRICT ORDER (do NOT skip steps or reorder)**:
+
 ```bash
-mix format && cd native/ecto_libsql && cargo fmt    # Format
-mix test && cd native/ecto_libsql && cargo test     # Test
-mix format --check-formatted                        # Verify format
-cd native/ecto_libsql && cargo clippy               # Lint (optional)
+# 1. Format code (must come FIRST)
+mix format && cd native/ecto_libsql && cargo fmt
+
+# 2. Run tests (catch logic errors)
+mix test && cd native/ecto_libsql && cargo test
+
+# 3. Verify formatting checks (MUST PASS before commit)
+mix format --check-formatted && cd native/ecto_libsql && cargo fmt --check
+
+# 4. Lint checks (optional but recommended)
+cd native/ecto_libsql && cargo clippy
+
+# 5. Only commit if all checks above passed
 git commit -m "feat: descriptive message"
 ```
+
+**⚠️ Critical**: If ANY check fails, fix it and re-run that check before proceeding. Never commit with failing checks.
 
 ### Release Process
 

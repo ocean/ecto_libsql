@@ -12,9 +12,7 @@ defmodule Ecto.RTreeTest do
 
   setup_all do
     # Clean up any existing test database files
-    File.rm(@test_db)
-    File.rm(@test_db <> "-shm")
-    File.rm(@test_db <> "-wal")
+    EctoLibSql.TestHelpers.cleanup_db_files(@test_db)
 
     # Start the test repo
     {:ok, _} = TestRepo.start_link(database: @test_db)
@@ -27,9 +25,7 @@ defmodule Ecto.RTreeTest do
         _, _ -> nil
       end
 
-      File.rm(@test_db)
-      File.rm(@test_db <> "-shm")
-      File.rm(@test_db <> "-wal")
+      EctoLibSql.TestHelpers.cleanup_db_files(@test_db)
     end)
 
     :ok

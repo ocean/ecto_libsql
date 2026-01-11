@@ -20,12 +20,8 @@ defmodule EctoLibSql.StatementOwnershipTest do
     on_exit(fn ->
       Native.close(conn_id1, :conn_id)
       Native.close(conn_id2, :conn_id)
-      File.rm(db_file1)
-      File.rm(db_file1 <> "-shm")
-      File.rm(db_file1 <> "-wal")
-      File.rm(db_file2)
-      File.rm(db_file2 <> "-shm")
-      File.rm(db_file2 <> "-wal")
+      EctoLibSql.TestHelpers.cleanup_db_files(db_file1)
+      EctoLibSql.TestHelpers.cleanup_db_files(db_file2)
     end)
 
     {:ok, state1: state1, state2: state2, conn_id1: conn_id1, conn_id2: conn_id2}

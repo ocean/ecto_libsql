@@ -71,9 +71,7 @@ defmodule EctoLibSql.EctoStreamCompatTest do
     """)
 
     on_exit(fn ->
-      File.rm(@test_db)
-      File.rm(@test_db <> "-wal")
-      File.rm(@test_db <> "-shm")
+      EctoLibSql.TestHelpers.cleanup_db_files(@test_db)
     end)
 
     :ok
