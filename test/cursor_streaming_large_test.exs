@@ -755,21 +755,21 @@ defmodule EctoLibSql.CursorStreamingLargeTest do
   end
 
   # Generic helper to collect all rows from a cursor by repeatedly fetching batches
-  # Uses accumulator to avoid O(n²) list concatenation with ++
+  # Uses nested list pattern to avoid O(n²) list concatenation with ++
   defp fetch_all_cursor_rows(state, cursor, query, opts) do
     fetch_all_cursor_rows_acc(state, cursor, query, opts, [])
     |> Enum.reverse()
+    |> List.flatten()
   end
 
   defp fetch_all_cursor_rows_acc(state, cursor, query, opts, acc) do
     case EctoLibSql.handle_fetch(query, cursor, opts, state) do
       {:cont, result, next_state} ->
-        # Prepend reversed batch to accumulator to maintain order
-        new_acc = Enum.reverse(result.rows) ++ acc
-        fetch_all_cursor_rows_acc(next_state, cursor, query, opts, new_acc)
+        # Collect batches as nested lists to avoid intermediate reversals
+        fetch_all_cursor_rows_acc(next_state, cursor, query, opts, [result.rows | acc])
 
       {:halt, result, _state} ->
-        Enum.reverse(result.rows) ++ acc
+        [result.rows | acc]
     end
   end
 

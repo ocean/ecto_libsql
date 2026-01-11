@@ -241,7 +241,10 @@ defmodule EctoLibSql.PoolLoadTest do
     } do
       # Clean the table first (other tests may have added data)
       {:ok, state} = EctoLibSql.connect(database: test_db, busy_timeout: 30_000)
-      EctoLibSql.handle_execute("DELETE FROM test_data", [], [], state)
+
+      {:ok, _, _, state} =
+        EctoLibSql.handle_execute("DELETE FROM test_data", [], [], state)
+
       EctoLibSql.disconnect([], state)
 
       # Spawn 5 concurrent connections, each inserting Unicode values
