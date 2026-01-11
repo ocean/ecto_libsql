@@ -83,11 +83,9 @@ defmodule EctoLibSql.EctoSqlCompatibilityTest do
       assert hd(result) == datetime
     end
 
-    @tag :skip
+    # SQLite doesn't preserve type information in schemaless queries like PostgreSQL does
+    @tag :sqlite_limitation
     test "fragmented schemaless types" do
-      # NOTE: This test is skipped because schemaless type() queries don't work
-      # the same way in LibSQL as they do in PostgreSQL.
-      # In SQLite, type information is not preserved in schemaless queries.
       TestRepo.insert!(%Post{visits: 123})
 
       result =

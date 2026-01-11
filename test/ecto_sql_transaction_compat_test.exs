@@ -215,8 +215,8 @@ defmodule EctoLibSql.EctoSqlTransactionCompatTest do
   end
 
   describe "transaction isolation" do
-    @tag :skip
-    @tag :sqlite_concurrency_limitation
+    # SQLite uses file-level locking, not PostgreSQL-style row-level locking
+    @tag :sqlite_limitation
     test "rollback is per repository connection" do
       message = "cannot call rollback outside of transaction"
 
@@ -225,8 +225,8 @@ defmodule EctoLibSql.EctoSqlTransactionCompatTest do
       end
     end
 
-    @tag :skip
-    @tag :sqlite_concurrency_limitation
+    # SQLite uses file-level locking, not PostgreSQL-style row-level locking
+    @tag :sqlite_limitation
     test "transactions are not shared across processes" do
       pid = self()
 
