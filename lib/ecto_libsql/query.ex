@@ -38,8 +38,24 @@ defmodule EctoLibSql.Query do
 
     def describe(query, _opts), do: query
 
+    # Convert Elixir types to SQLite-compatible values before sending to NIF.
+    # Rustler cannot automatically serialise complex Elixir structs like DateTime,
+    # so we convert them to ISO8601 strings that SQLite can handle.
+    def encode(_query, params, _opts) when is_list(params) do
+      Enum.map(params, &encode_param/1)
+    end
+
     def encode(_query, params, _opts), do: params
 
+    defp encode_param(%DateTime{} = dt), do: DateTime.to_iso8601(dt)
+    defp encode_param(%NaiveDateTime{} = dt), do: NaiveDateTime.to_iso8601(dt)
+    defp encode_param(%Date{} = d), do: Date.to_iso8601(d)
+    defp encode_param(%Time{} = t), do: Time.to_iso8601(t)
+    defp encode_param(%Decimal{} = d), do: Decimal.to_string(d)
+    defp encode_param(value), do: value
+
+    # Pass through results from Native.ex unchanged.
+    # Native.ex already handles proper normalisation of columns and rows.
     def decode(_query, result, _opts), do: result
   end
 
