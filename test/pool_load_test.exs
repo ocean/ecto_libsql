@@ -1096,10 +1096,10 @@ defmodule EctoLibSql.PoolLoadTest do
                   [],
                   state
                 ),
-                # Large integer
+                # Large integer (using 1.0e307 instead of near-max Float64 to avoid platform-specific rounding)
                 EctoLibSql.handle_execute(
                   "INSERT INTO typed_data (int_val, float_val, text_val, timestamp_val) VALUES (?, ?, ?, ?)",
-                  [9_223_372_036_854_775_807, 1.7976931348623157e308, "max_#{task_num}", now],
+                  [9_223_372_036_854_775_807, 1.0e307, "max_#{task_num}", now],
                   [],
                   state
                 )
@@ -1377,19 +1377,34 @@ defmodule EctoLibSql.PoolLoadTest do
               # Insert edge-case values in transaction, threading state through
               edge_values = generate_edge_case_values(task_num)
 
-              final_trx_state =
-                Enum.reduce(edge_values, trx_state, fn value, acc_state ->
-                  {:ok, _query, _result, new_state} = insert_edge_case_value(acc_state, value)
-                  new_state
-                end)
+              # Use reduce_while to defensively handle insert failures
+              with {:ok, final_trx_state} <-
+                     Enum.reduce_while(edge_values, {:ok, trx_state}, fn value, acc ->
+                       case acc do
+                         {:ok, acc_state} ->
+                           case insert_edge_case_value(acc_state, value) do
+                             {:ok, _query, _result, new_state} ->
+                               {:cont, {:ok, new_state}}
 
-              # Always rollback - edge-case data should not persist
-              case EctoLibSql.Native.rollback(final_trx_state) do
-                {:ok, _state} ->
-                  {:ok, :edge_cases_rolled_back}
+                             {:error, reason, _state} ->
+                               {:halt, {:error, {:insert_failed, value, reason}}}
+                           end
 
+                         error ->
+                           {:halt, error}
+                       end
+                     end) do
+                # Always rollback - edge-case data should not persist
+                case EctoLibSql.Native.rollback(final_trx_state) do
+                  {:ok, _state} ->
+                    {:ok, :edge_cases_rolled_back}
+
+                  {:error, reason} ->
+                    {:error, {:rollback_failed, reason}}
+                end
+              else
                 {:error, reason} ->
-                  {:error, {:rollback_failed, reason}}
+                  {:error, {:edge_case_insertion_failed, reason}}
               end
             after
               EctoLibSql.disconnect([], state)
