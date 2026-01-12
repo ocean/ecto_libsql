@@ -718,19 +718,19 @@ defmodule EctoLibSql.PoolLoadTest do
                     end
                 end
               end
-              after
+            after
               EctoLibSql.disconnect([], state)
-              end
-              end)
-              end)
+            end
+          end)
+        end)
 
-              results = Task.await_many(tasks, 30_000)
+      results = Task.await_many(tasks, 30_000)
 
-              # Verify all prepared statement operations succeeded
-              Enum.each(results, fn result ->
-              case result do
-              {:ok, :prepared_with_edge_cases} ->
-              :ok
+      # Verify all prepared statement operations succeeded
+      Enum.each(results, fn result ->
+        case result do
+          {:ok, :prepared_with_edge_cases} ->
+            :ok
 
           {:error, reason} ->
             flunk("Prepared statement with edge-case data failed: #{inspect(reason)}")
