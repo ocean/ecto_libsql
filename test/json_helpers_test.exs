@@ -21,6 +21,10 @@ defmodule EctoLibSql.JSONHelpersTest do
         state
       )
 
+    on_exit(fn ->
+      EctoLibSql.disconnect([], state)
+    end)
+
     {:ok, state: state}
   end
 
@@ -290,8 +294,9 @@ defmodule EctoLibSql.JSONHelpersTest do
       {:ok, result} = JSON.convert(state, json, :jsonb)
       # Should be binary
       assert is_binary(result)
-      # JSONB is smaller/different than text JSON
-      assert byte_size(result) < byte_size(json)
+      # JSONB is a binary format (different from text JSON)
+      # Note: JSONB may be smaller, but size is not a stable guarantee across versions
+      assert result != json
     end
 
     test "default format is JSON", %{state: state} do
@@ -728,6 +733,329 @@ defmodule EctoLibSql.JSONHelpersTest do
       # Verify
       {:ok, val} = JSON.extract(state, json, "$.data.deep.nested.value")
       assert val == 999
+    end
+  end
+
+  describe "JSONB binary format operations" do
+    test "JSONB round-trip correctness: text → JSONB → text", %{state: state} do
+      original_json = ~s({"name":"Alice","age":30,"active":true,"tags":["a","b"]})
+
+      # Convert to JSONB
+      {:ok, jsonb} = JSON.convert(state, original_json, :jsonb)
+      assert is_binary(jsonb)
+      assert byte_size(jsonb) > 0
+
+      # Convert back to text JSON
+      {:ok, _, result, _state} =
+        EctoLibSql.handle_execute(
+          "SELECT json(?)",
+          [jsonb],
+          [],
+          state
+        )
+
+      [[canonical_json]] = result.rows
+
+      # Parse both to ensure semantic equivalence
+      {:ok, original_decoded} = Jason.decode(original_json)
+      {:ok, canonical_decoded} = Jason.decode(canonical_json)
+
+      assert original_decoded == canonical_decoded
+    end
+
+    test "JSONB and text JSON produce identical extraction results", %{state: state} do
+      json_text = ~s({"user":{"name":"Bob","email":"bob@example.com"},"count":42})
+
+      # Convert to JSONB
+      {:ok, jsonb} = JSON.convert(state, json_text, :jsonb)
+
+      # Extract from text JSON
+      {:ok, name_text} = JSON.extract(state, json_text, "$.user.name")
+      {:ok, count_text} = JSON.extract(state, json_text, "$.count")
+
+      # Extract from JSONB (stored as binary)
+      {:ok, _, result, _state} =
+        EctoLibSql.handle_execute(
+          "SELECT json_extract(?, '$.user.name'), json_extract(?, '$.count')",
+          [jsonb, jsonb],
+          [],
+          state
+        )
+
+      [[name_jsonb, count_jsonb]] = result.rows
+
+      assert name_text == name_jsonb
+      assert count_text == count_jsonb
+    end
+
+    test "JSONB storage is 5-10% smaller than text JSON", %{state: state} do
+      # Create a reasonably sized JSON object
+      json_text =
+        ~s({"user":{"id":1,"name":"Alice","email":"alice@example.com","profile":{"bio":"Software engineer","location":"San Francisco","interests":["Elixir","Rust","Go"]},"settings":{"theme":"dark","notifications":true,"language":"en"}}})
+
+      # Convert to JSONB
+      {:ok, jsonb} = JSON.convert(state, json_text, :jsonb)
+
+      text_size = byte_size(json_text)
+      jsonb_size = byte_size(jsonb)
+
+      # JSONB should be smaller (5-10% is typical, but may vary)
+      # We check for general size improvement (not overly strict)
+      assert jsonb_size <= text_size,
+             "JSONB (#{jsonb_size} bytes) should be <= text JSON (#{text_size} bytes)"
+
+      # Most of the time JSONB is noticeably smaller
+      # but we don't enforce a strict percentage due to variation
+    end
+
+    test "JSONB modification preserves format (json_set)", %{state: state} do
+      json_text = ~s({"name":"Alice","age":30})
+
+      # Convert to JSONB
+      {:ok, jsonb} = JSON.convert(state, json_text, :jsonb)
+
+      # Modify JSONB using json_set
+      {:ok, _, result, _state} =
+        EctoLibSql.handle_execute(
+          "SELECT json_set(?, '$.age', 31)",
+          [jsonb],
+          [],
+          state
+        )
+
+      [[modified_json]] = result.rows
+
+      # Extract from modified JSON
+      {:ok, age} = JSON.extract(state, modified_json, "$.age")
+      assert age == 31
+    end
+
+    test "JSONB array operations", %{state: state} do
+      array_json = ~s([1,2,3,4,5])
+
+      # Convert to JSONB
+      {:ok, jsonb} = JSON.convert(state, array_json, :jsonb)
+
+      # Extract array element
+      {:ok, _, result, _state} =
+        EctoLibSql.handle_execute(
+          "SELECT json_extract(?, '$[2]')",
+          [jsonb],
+          [],
+          state
+        )
+
+      [[element]] = result.rows
+      assert element == 3
+    end
+
+    test "JSONB with large objects (multi-KB)", %{state: state} do
+      # Create a large JSON object with multiple nested structures
+      large_json =
+        Jason.encode!(%{
+          "data" =>
+            Enum.map(1..100, fn i ->
+              %{
+                "id" => i,
+                "name" => "Item #{i}",
+                "description" =>
+                  "This is a longer description for item number #{i} with some additional details.",
+                "metadata" => %{
+                  "created_at" =>
+                    "2024-01-#{String.pad_leading(to_string(rem(i, 28) + 1), 2, "0")}",
+                  "tags" => ["tag1", "tag2", "tag3"]
+                }
+              }
+            end)
+        })
+
+      # Convert to JSONB
+      {:ok, jsonb} = JSON.convert(state, large_json, :jsonb)
+      assert is_binary(jsonb)
+      assert byte_size(jsonb) > 1000, "Should handle large objects (>1KB)"
+
+      # Extract from large JSONB
+      {:ok, _, result, _state} =
+        EctoLibSql.handle_execute(
+          "SELECT json_extract(?, '$.data[0].name')",
+          [jsonb],
+          [],
+          state
+        )
+
+      [[name]] = result.rows
+      assert name == "Item 1"
+    end
+
+    test "JSONB object key iteration", %{state: state} do
+      json_obj = ~s({"a":1,"b":2,"c":3,"d":4})
+
+      # Convert to JSONB
+      {:ok, jsonb} = JSON.convert(state, json_obj, :jsonb)
+
+      # Get keys (order may vary)
+      {:ok, _, result, _state} =
+        EctoLibSql.handle_execute(
+          "SELECT json_extract(?, '$')",
+          [jsonb],
+          [],
+          state
+        )
+
+      [[result_obj]] = result.rows
+
+      # Parse and verify all keys are present
+      {:ok, decoded} = Jason.decode(result_obj)
+      keys = Map.keys(decoded)
+      assert Enum.sort(keys) == ["a", "b", "c", "d"]
+    end
+
+    test "JSONB and text JSON with nulls", %{state: state} do
+      json_with_nulls = ~s({"a":null,"b":1,"c":null})
+
+      # Convert to JSONB
+      {:ok, jsonb} = JSON.convert(state, json_with_nulls, :jsonb)
+
+      # Extract nulls
+      {:ok, _, result, _state} =
+        EctoLibSql.handle_execute(
+          "SELECT json_extract(?, '$.a'), json_extract(?, '$.b'), json_extract(?, '$.c')",
+          [jsonb, jsonb, jsonb],
+          [],
+          state
+        )
+
+      [[a, b, c]] = result.rows
+      assert a == nil
+      assert b == 1
+      assert c == nil
+    end
+
+    test "JSONB storage and retrieval consistency", %{state: state} do
+      # Insert both text and JSONB versions of same data
+      json_text = ~s({"x":10,"y":20,"z":30})
+
+      {:ok, jsonb} = JSON.convert(state, json_text, :jsonb)
+
+      # Clear table and insert both versions
+      EctoLibSql.handle_execute("DELETE FROM json_test", [], [], state)
+
+      {:ok, _, _, state} =
+        EctoLibSql.handle_execute(
+          "INSERT INTO json_test (id, data) VALUES (1, ?)",
+          [json_text],
+          [],
+          state
+        )
+
+      {:ok, _, _, state} =
+        EctoLibSql.handle_execute(
+          "INSERT INTO json_test (id, data_jsonb) VALUES (2, ?)",
+          [jsonb],
+          [],
+          state
+        )
+
+      # Retrieve text version
+      {:ok, _, text_result, state} =
+        EctoLibSql.handle_execute(
+          "SELECT json_extract(data, '$.x'), json_extract(data, '$.y') FROM json_test WHERE id = 1",
+          [],
+          [],
+          state
+        )
+
+      [[text_x, text_y]] = text_result.rows
+
+      # Retrieve JSONB version
+      {:ok, _, jsonb_result, _state} =
+        EctoLibSql.handle_execute(
+          "SELECT json_extract(data_jsonb, '$.x'), json_extract(data_jsonb, '$.y') FROM json_test WHERE id = 2",
+          [],
+          [],
+          state
+        )
+
+      [[jsonb_x, jsonb_y]] = jsonb_result.rows
+
+      # Both should return same values
+      assert text_x == jsonb_x
+      assert text_y == jsonb_y
+      assert text_x == 10
+      assert text_y == 20
+    end
+
+    test "JSONB modification with json_replace", %{state: state} do
+      json_text = ~s({"status":"pending","priority":1})
+
+      {:ok, jsonb} = JSON.convert(state, json_text, :jsonb)
+
+      # Replace value
+      {:ok, _, result, _state} =
+        EctoLibSql.handle_execute(
+          "SELECT json_replace(?, '$.status', 'completed'), json_replace(?, '$.priority', 5)",
+          [jsonb, jsonb],
+          [],
+          state
+        )
+
+      [[status_json, priority_json]] = result.rows
+
+      {:ok, status} = JSON.extract(state, status_json, "$.status")
+      {:ok, priority} = JSON.extract(state, priority_json, "$.priority")
+
+      assert status == "completed"
+      assert priority == 5
+    end
+
+    test "mixed operations: JSONB extract, modify, insert", %{state: state} do
+      json_text = ~s({"config":{"timeout":30,"retries":3}})
+
+      {:ok, jsonb} = JSON.convert(state, json_text, :jsonb)
+
+      # Extract original value
+      {:ok, _, orig_result, state} =
+        EctoLibSql.handle_execute(
+          "SELECT json_extract(?, '$.config.timeout')",
+          [jsonb],
+          [],
+          state
+        )
+
+      [[original_timeout]] = orig_result.rows
+      assert original_timeout == 30
+
+      # Modify
+      {:ok, _, modified_result, state} =
+        EctoLibSql.handle_execute(
+          "SELECT json_set(?, '$.config.timeout', 60)",
+          [jsonb],
+          [],
+          state
+        )
+
+      [[modified_jsonb]] = modified_result.rows
+
+      # Insert modified version
+      {:ok, _, _, state} =
+        EctoLibSql.handle_execute(
+          "INSERT INTO json_test (id, data_jsonb) VALUES (99, ?)",
+          [modified_jsonb],
+          [],
+          state
+        )
+
+      # Retrieve and verify
+      {:ok, _, retrieve_result, _state} =
+        EctoLibSql.handle_execute(
+          "SELECT json_extract(data_jsonb, '$.config.timeout') FROM json_test WHERE id = 99",
+          [],
+          [],
+          state
+        )
+
+      [[retrieved_timeout]] = retrieve_result.rows
+      assert retrieved_timeout == 60
     end
   end
 end

@@ -1,0 +1,166 @@
+defmodule EctoLibSqlSmokeTest do
+  @moduledoc """
+  Basic smoke tests for EctoLibSql.
+
+  These are minimal sanity checks to verify core functionality works.
+  More comprehensive tests are in specialized test files:
+  - prepared_statement_test.exs - Prepared statements
+  - vector_geospatial_test.exs - Vector and R*Tree features
+  - savepoint_test.exs - Transactions and savepoints
+  - ecto_migration_test.exs - Migrations
+  """
+  use ExUnit.Case
+  doctest EctoLibSql
+
+  setup_all do
+    # Clean up any existing test database from previous runs
+    EctoLibSql.TestHelpers.cleanup_db_files("z_ecto_libsql_test-smoke.db")
+
+    on_exit(fn ->
+      # Clean up at end of all tests too
+      EctoLibSql.TestHelpers.cleanup_db_files("z_ecto_libsql_test-smoke.db")
+    end)
+
+    :ok
+  end
+
+  setup do
+    # Create a unique database file for each test to ensure isolation
+    test_db = "z_ecto_libsql_test-#{:erlang.unique_integer([:positive])}.db"
+
+    opts = [
+      uri: System.get_env("LIBSQL_URI"),
+      auth_token: System.get_env("LIBSQL_TOKEN"),
+      database: test_db,
+      sync: true
+    ]
+
+    # Clean up database file after test completes
+    on_exit(fn ->
+      EctoLibSql.TestHelpers.cleanup_db_files(test_db)
+    end)
+
+    {:ok, opts: opts}
+  end
+
+  describe "basic connectivity" do
+    test "can connect to database", state do
+      assert {:ok, _conn} = EctoLibSql.connect(state[:opts])
+    end
+
+    test "can ping connection", state do
+      {:ok, conn} = EctoLibSql.connect(state[:opts])
+      assert {:ok, _conn} = EctoLibSql.ping(conn)
+    end
+
+    test "can disconnect", state do
+      {:ok, conn} = EctoLibSql.connect(state[:opts])
+      assert :ok = EctoLibSql.disconnect([], conn)
+    end
+  end
+
+  describe "basic queries" do
+    test "can execute a simple select", state do
+      {:ok, conn} = EctoLibSql.connect(state[:opts])
+      query = %EctoLibSql.Query{statement: "SELECT 1 + 1"}
+      assert {:ok, _query, _result, _conn} = EctoLibSql.handle_execute(query, [], [], conn)
+    end
+
+    test "handles invalid SQL with error", state do
+      {:ok, conn} = EctoLibSql.connect(state[:opts])
+      query = %EctoLibSql.Query{statement: "SELECT * FROM not_existing_table"}
+
+      assert {:error, %EctoLibSql.Error{}, _conn} =
+               EctoLibSql.handle_execute(query, [], [], conn)
+    end
+
+    test "can execute multiple statements", state do
+      {:ok, conn} = EctoLibSql.connect(state[:opts])
+
+      # Create table first
+      create_table = %EctoLibSql.Query{
+        statement:
+          "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, email TEXT)"
+      }
+
+      {:ok, _query, _result, conn} = EctoLibSql.handle_execute(create_table, [], [], conn)
+
+      # Multiple statements in one execution
+      multi_stmt = %EctoLibSql.Query{
+        statement: """
+        INSERT INTO users (name, email) VALUES ('test', 'test@mail.com');
+        SELECT * FROM users WHERE name = 'test';
+        """
+      }
+
+      assert {:ok, _query, _result, _conn} = EctoLibSql.handle_execute(multi_stmt, [], [], conn)
+    end
+  end
+
+  describe "basic transaction" do
+    test "can begin, execute, and commit", state do
+      {:ok, conn} = EctoLibSql.connect(state[:opts])
+
+      # Create table first
+      create = %EctoLibSql.Query{
+        statement:
+          "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, email TEXT)"
+      }
+
+      {:ok, _query, _result, conn} = EctoLibSql.handle_execute(create, [], [], conn)
+
+      # Begin transaction
+      {:ok, _begin_result, conn} = EctoLibSql.handle_begin([], conn)
+
+      # Insert data
+      insert = %EctoLibSql.Query{statement: "INSERT INTO users (name, email) VALUES (?, ?)"}
+
+      {:ok, _query, _result, conn} =
+        EctoLibSql.handle_execute(insert, ["Alice", "alice@example.com"], [], conn)
+
+      # Commit
+      assert {:ok, _commit_result, _conn} = EctoLibSql.handle_commit([], conn)
+    end
+
+    test "can begin, execute, and rollback", state do
+      {:ok, conn} = EctoLibSql.connect(state[:opts])
+
+      # Create table first
+      create = %EctoLibSql.Query{
+        statement:
+          "CREATE TABLE IF NOT EXISTS users (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT, email TEXT)"
+      }
+
+      {:ok, _query, _result, conn} = EctoLibSql.handle_execute(create, [], [], conn)
+
+      # Insert initial data to verify rollback doesn't affect pre-transaction data
+      insert_initial = %EctoLibSql.Query{
+        statement: "INSERT INTO users (name, email) VALUES (?, ?)"
+      }
+
+      {:ok, _query, _result, conn} =
+        EctoLibSql.handle_execute(insert_initial, ["Bob", "bob@example.com"], [], conn)
+
+      # Begin transaction
+      {:ok, _begin_result, conn} = EctoLibSql.handle_begin([], conn)
+
+      # Insert data in transaction
+      insert_txn = %EctoLibSql.Query{
+        statement: "INSERT INTO users (name, email) VALUES (?, ?)"
+      }
+
+      {:ok, _query, _result, conn} =
+        EctoLibSql.handle_execute(insert_txn, ["Charlie", "charlie@example.com"], [], conn)
+
+      # Rollback transaction
+      {:ok, _rollback_result, conn} = EctoLibSql.handle_rollback([], conn)
+
+      # Verify only initial data exists (rollback worked)
+      select = %EctoLibSql.Query{statement: "SELECT COUNT(*) FROM users"}
+      {:ok, _query, result, _conn} = EctoLibSql.handle_execute(select, [], [], conn)
+
+      # Should have only 1 row (Bob), not 2 (Bob and Charlie)
+      assert [[1]] = result.rows
+    end
+  end
+end

@@ -35,9 +35,7 @@ defmodule EctoLibSql.SavepointTest do
 
     on_exit(fn ->
       Native.close(state.conn_id, :conn_id)
-      File.rm(db_file)
-      File.rm(db_file <> "-shm")
-      File.rm(db_file <> "-wal")
+      EctoLibSql.TestHelpers.cleanup_db_files(db_file)
     end)
 
     {:ok, state: state}
@@ -341,6 +339,7 @@ defmodule EctoLibSql.SavepointTest do
           "Bob"
         ])
 
+      # Discard error state - next operation uses original trx_state
       assert {:error, _reason, _state} = result
 
       # Rollback savepoint to recover

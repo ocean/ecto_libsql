@@ -717,6 +717,77 @@ jobs:
    - Use unique IDs/names (UUIDs)
    - Clean up properly between tests
 
+### Edge-Case Testing Guide
+
+EctoLibSql includes comprehensive edge-case testing under concurrent load. These tests verify that the library handles unusual data correctly even when multiple processes are accessing the database simultaneously.
+
+#### What Edge-Cases Are Tested
+
+The test suite covers:
+
+1. **NULL Values**: Ensure NULL is properly handled in concurrent inserts and transactions
+2. **Empty Strings**: Verify empty strings aren't converted to NULL or corrupted
+3. **Large Strings**: Test 1KB strings under concurrent load for truncation or corruption
+4. **Special Characters**: Verify parameterised queries safely handle special characters (`!@#$%^&*()`)
+5. **Recovery After Errors**: Confirm connection recovers after query errors without losing edge-case data
+6. **Resource Cleanup**: Verify prepared statements with edge-case data are cleaned up correctly
+
+#### Test Locations
+
+- **Pool Load Tests**: `test/pool_load_test.exs`
+  - `test "concurrent connections with edge-case data"` - 5 concurrent connections, 5 edge-case values each
+  - `test "connection recovery with edge-case data"` - Error handling with NULL/empty/large strings
+  - `test "prepared statements with edge-case data"` - Statement cleanup under concurrent load with edge cases
+
+- **Transaction Isolation Tests**: `test/pool_load_test.exs`
+  - `test "concurrent transactions with edge-case data maintain isolation"` - 4 transactions, edge-case values
+
+#### Helper Functions
+
+The test suite provides reusable helpers for edge-case testing:
+
+```elixir
+# Generate edge-case values for testing
+defp generate_edge_case_values(task_num) do
+  [
+    "normal_value_#{task_num}",                       # Normal string
+    nil,                                              # NULL value
+    "",                                                # Empty string
+    String.duplicate("x", 1000),                      # Large string (1KB)
+    "special_chars_!@#$%^&*()_+-=[]{};"               # Special characters
+  ]
+end
+
+# Insert edge-case value and return result
+defp insert_edge_case_value(state, value) do
+  EctoLibSql.handle_execute(
+    "INSERT INTO test_data (value) VALUES (?)",
+    [value],
+    [],
+    state
+  )
+end
+```
+
+#### When to Use Edge-Case Tests
+
+Add edge-case tests when:
+- Testing concurrent operations
+- Adding support for new data types
+- Changing query execution paths
+- Modifying transaction handling
+- Improving connection pooling
+
+#### Expected Coverage
+
+Edge-case tests should verify:
+- Data integrity (no corruption, truncation, or loss)
+- NULL value preservation
+- String encoding correctness
+- Parameter binding safety
+- Error recovery without data loss
+- Resource cleanup (statements, cursors, connections)
+
 ### Known Test Limitations
 
 1. **Remote/Replica Mode Testing:**

@@ -34,10 +34,7 @@ defmodule EctoLibSql.NamedParametersExecutionTest do
       )
 
     on_exit(fn ->
-      File.rm(db_name)
-      File.rm(db_name <> "-wal")
-      File.rm(db_name <> "-shm")
-      File.rm(db_name <> "-journal")
+      EctoLibSql.TestHelpers.cleanup_db_files(db_name)
     end)
 
     {:ok, state: state, db_name: db_name}

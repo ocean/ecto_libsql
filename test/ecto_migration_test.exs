@@ -25,10 +25,7 @@ defmodule Ecto.Adapters.LibSql.MigrationTest do
       # Small delay to ensure file handles are released.
       Process.sleep(10)
 
-      File.rm(test_db)
-      File.rm(test_db <> "-shm")
-      File.rm(test_db <> "-wal")
-      File.rm(test_db <> "-journal")
+      EctoLibSql.TestHelpers.cleanup_db_files(test_db)
     end)
 
     # Foreign keys are disabled by default in SQLite - tests that need them will enable them explicitly.

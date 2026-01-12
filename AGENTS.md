@@ -1783,7 +1783,7 @@ settings = ~s({"theme":"dark","notifications":true,"language":"es"})
 
 #### Comparison: Set vs Replace vs Insert vs Patch
 
-The modification functions have different behaviors:
+The modification functions have different behaviours:
 
 ```elixir
 json = ~s({"a":1,"b":2})

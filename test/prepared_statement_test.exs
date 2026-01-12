@@ -29,9 +29,7 @@ defmodule EctoLibSql.PreparedStatementTest do
 
     on_exit(fn ->
       Native.close(state.conn_id, :conn_id)
-      File.rm(db_file)
-      File.rm(db_file <> "-shm")
-      File.rm(db_file <> "-wal")
+      EctoLibSql.TestHelpers.cleanup_db_files(db_file)
     end)
 
     {:ok, state: state}
@@ -310,6 +308,281 @@ defmodule EctoLibSql.PreparedStatementTest do
     end
   end
 
+  describe "statement reset and caching" do
+    test "reset statement for reuse without re-prepare", %{state: state} do
+      # Create logs table
+      {:ok, _query, _result, state} =
+        exec_sql(state, "CREATE TABLE logs (id INTEGER PRIMARY KEY AUTOINCREMENT, message TEXT)")
+
+      # Prepare statement once
+      {:ok, stmt_id} = Native.prepare(state, "INSERT INTO logs (message) VALUES (?)")
+
+      # Execute multiple times - statement caching handles reset automatically
+      for i <- 1..5 do
+        {:ok, _rows} =
+          Native.execute_stmt(
+            state,
+            stmt_id,
+            "INSERT INTO logs (message) VALUES (?)",
+            ["Log #{i}"]
+          )
+      end
+
+      # Verify all inserts succeeded
+      {:ok, _query, result, _state} = exec_sql(state, "SELECT COUNT(*) FROM logs")
+      assert [[5]] = result.rows
+
+      # Cleanup
+      Native.close_stmt(stmt_id)
+    end
+
+    test "reset clears parameter bindings", %{state: state} do
+      {:ok, stmt_id} = Native.prepare(state, "INSERT INTO users VALUES (?, ?, ?)")
+
+      # Execute with parameters - automatic reset between calls
+      {:ok, _} =
+        Native.execute_stmt(state, stmt_id, "INSERT INTO users VALUES (?, ?, ?)", [
+          1,
+          "Alice",
+          "alice@example.com"
+        ])
+
+      # Execute with different parameters - no manual reset needed
+      {:ok, _} =
+        Native.execute_stmt(state, stmt_id, "INSERT INTO users VALUES (?, ?, ?)", [
+          2,
+          "Bob",
+          "bob@example.com"
+        ])
+
+      # Verify both inserts
+      {:ok, _query, result, _state} = exec_sql(state, "SELECT name FROM users ORDER BY id")
+      assert [["Alice"], ["Bob"]] = result.rows
+
+      Native.close_stmt(stmt_id)
+    end
+  end
+
+  describe "statement reset - explicit reset" do
+    test "reset_stmt clears statement state explicitly", %{state: state} do
+      {:ok, stmt_id} = Native.prepare(state, "INSERT INTO users VALUES (?, ?, ?)")
+
+      # Execute first insertion
+      {:ok, _} =
+        Native.execute_stmt(state, stmt_id, "INSERT INTO users VALUES (?, ?, ?)", [
+          1,
+          "Alice",
+          "alice@example.com"
+        ])
+
+      # Explicitly reset the statement
+      assert :ok = Native.reset_stmt(state, stmt_id)
+
+      # Execute second insertion after reset
+      {:ok, _} =
+        Native.execute_stmt(state, stmt_id, "INSERT INTO users VALUES (?, ?, ?)", [
+          2,
+          "Bob",
+          "bob@example.com"
+        ])
+
+      # Verify both inserts succeeded
+      {:ok, _query, result, _state} = exec_sql(state, "SELECT name FROM users ORDER BY id")
+      assert [["Alice"], ["Bob"]] = result.rows
+
+      Native.close_stmt(stmt_id)
+    end
+
+    test "reset_stmt can be called multiple times", %{state: state} do
+      {:ok, stmt_id} = Native.prepare(state, "INSERT INTO users VALUES (?, ?, ?)")
+
+      # Execute and reset multiple times
+      for i <- 1..5 do
+        {:ok, _} =
+          Native.execute_stmt(state, stmt_id, "INSERT INTO users VALUES (?, ?, ?)", [
+            i,
+            "User#{i}",
+            "user#{i}@example.com"
+          ])
+
+        # Explicit reset
+        assert :ok = Native.reset_stmt(state, stmt_id)
+      end
+
+      # Verify all inserts
+      {:ok, _query, result, _state} = exec_sql(state, "SELECT COUNT(*) FROM users")
+      assert [[5]] = result.rows
+
+      Native.close_stmt(stmt_id)
+    end
+
+    test "reset_stmt returns error for invalid statement", %{state: state} do
+      # Try to reset non-existent statement
+      assert {:error, _reason} = Native.reset_stmt(state, "invalid_stmt_id")
+    end
+  end
+
+  describe "statement get_stmt_columns - full metadata" do
+    test "get_stmt_columns returns column metadata", %{state: state} do
+      {:ok, stmt_id} = Native.prepare(state, "SELECT * FROM users WHERE id = ?")
+
+      # Get full column metadata
+      {:ok, columns} = Native.get_stmt_columns(state, stmt_id)
+
+      # Should return list of tuples: {name, origin_name, decl_type}
+      assert is_list(columns)
+      assert length(columns) == 3
+
+      # Verify column metadata structure
+      [
+        {col1_name, col1_origin, col1_type},
+        {col2_name, col2_origin, col2_type},
+        {col3_name, col3_origin, col3_type}
+      ] = columns
+
+      # Check column 1 (id)
+      assert col1_name == "id"
+      assert col1_origin == "id"
+      assert col1_type == "INTEGER"
+
+      # Check column 2 (name)
+      assert col2_name == "name"
+      assert col2_origin == "name"
+      assert col2_type == "TEXT"
+
+      # Check column 3 (email)
+      assert col3_name == "email"
+      assert col3_origin == "email"
+      assert col3_type == "TEXT"
+
+      Native.close_stmt(stmt_id)
+    end
+
+    test "get_stmt_columns works with aliased columns", %{state: state} do
+      {:ok, stmt_id} =
+        Native.prepare(
+          state,
+          "SELECT id as user_id, name as full_name, email as mail FROM users"
+        )
+
+      {:ok, columns} = Native.get_stmt_columns(state, stmt_id)
+
+      assert length(columns) == 3
+
+      # Check aliased column names
+      [{col1_name, _, _}, {col2_name, _, _}, {col3_name, _, _}] = columns
+
+      assert col1_name == "user_id"
+      assert col2_name == "full_name"
+      assert col3_name == "mail"
+
+      Native.close_stmt(stmt_id)
+    end
+
+    test "get_stmt_columns works with expressions", %{state: state} do
+      {:ok, stmt_id} =
+        Native.prepare(
+          state,
+          "SELECT COUNT(*) as total, MAX(id) as max_id FROM users"
+        )
+
+      {:ok, columns} = Native.get_stmt_columns(state, stmt_id)
+
+      assert length(columns) == 2
+
+      [{col1_name, _, _}, {col2_name, _, _}] = columns
+
+      assert col1_name == "total"
+      assert col2_name == "max_id"
+
+      Native.close_stmt(stmt_id)
+    end
+
+    test "get_stmt_columns returns error for invalid statement", %{state: state} do
+      # Try to get columns for non-existent statement
+      assert {:error, _reason} = Native.get_stmt_columns(state, "invalid_stmt_id")
+    end
+  end
+
+  describe "statement parameter introspection" do
+    test "parameter_count with named parameters", %{state: state} do
+      # Test with colon-style named parameters (:name)
+      {:ok, stmt_id} =
+        Native.prepare(
+          state,
+          "INSERT INTO users (id, name, email) VALUES (:id, :name, :email)"
+        )
+
+      # Get parameter names (note: SQLite uses 1-based indexing)
+      {:ok, param1} = Native.stmt_parameter_name(state, stmt_id, 1)
+      assert param1 == ":id"
+
+      {:ok, param2} = Native.stmt_parameter_name(state, stmt_id, 2)
+      assert param2 == ":name"
+
+      {:ok, param3} = Native.stmt_parameter_name(state, stmt_id, 3)
+      assert param3 == ":email"
+
+      Native.close_stmt(stmt_id)
+    end
+
+    test "parameter_name returns nil for positional parameters", %{state: state} do
+      {:ok, stmt_id} =
+        Native.prepare(state, "SELECT * FROM users WHERE name = ? AND email = ?")
+
+      # Positional parameters should return nil
+      {:ok, param1} = Native.stmt_parameter_name(state, stmt_id, 1)
+      assert param1 == nil
+
+      {:ok, param2} = Native.stmt_parameter_name(state, stmt_id, 2)
+      assert param2 == nil
+
+      Native.close_stmt(stmt_id)
+    end
+
+    test "parameter_name supports dollar-style parameters", %{state: state} do
+      # Test with dollar-style named parameters ($name)
+      {:ok, stmt_id} =
+        Native.prepare(state, "SELECT * FROM users WHERE id = $id AND name = $name")
+
+      {:ok, param1} = Native.stmt_parameter_name(state, stmt_id, 1)
+      assert param1 == "$id"
+
+      {:ok, param2} = Native.stmt_parameter_name(state, stmt_id, 2)
+      assert param2 == "$name"
+
+      Native.close_stmt(stmt_id)
+    end
+
+    test "parameter_name supports at-style parameters", %{state: state} do
+      # Test with at-style named parameters (@name)
+      {:ok, stmt_id} =
+        Native.prepare(state, "SELECT * FROM users WHERE id = @id AND name = @name")
+
+      {:ok, param1} = Native.stmt_parameter_name(state, stmt_id, 1)
+      assert param1 == "@id"
+
+      {:ok, param2} = Native.stmt_parameter_name(state, stmt_id, 2)
+      assert param2 == "@name"
+
+      Native.close_stmt(stmt_id)
+    end
+
+    test "parameter_name handles mixed positional and named parameters", %{state: state} do
+      # SQLite allows mixing positional and named parameters
+      {:ok, stmt_id} =
+        Native.prepare(state, "SELECT * FROM users WHERE id = :id AND name = ?")
+
+      {:ok, param1} = Native.stmt_parameter_name(state, stmt_id, 1)
+      assert param1 == ":id"
+
+      {:ok, param2} = Native.stmt_parameter_name(state, stmt_id, 2)
+      assert param2 == nil
+
+      Native.close_stmt(stmt_id)
+    end
+  end
+
   describe "statement binding behaviour (ported from ecto_sql)" do
     test "prepared statement auto-reset of bindings between executions", %{state: state} do
       # Source: ecto_sql prepared statement tests
@@ -456,9 +729,246 @@ defmodule EctoLibSql.PreparedStatementTest do
       end)
 
       # No assertions on memory (platform-dependent)
-      # This test documents expected behavior and can catch memory leaks in manual testing
+      # This test documents expected behaviour and can catch memory leaks in manual testing
 
       :ok = Native.close_stmt(stmt_id)
+    end
+  end
+
+  describe "concurrent prepared statement usage" do
+    test "multiple processes can use different prepared statements concurrently", %{
+      state: state
+    } do
+      # Setup: Insert test data
+      Enum.each(1..10, fn i ->
+        {:ok, _query, _result, _} =
+          exec_sql(state, "INSERT INTO users (id, name, email) VALUES (?, ?, ?)", [
+            i,
+            "User#{i}",
+            "user#{i}@example.com"
+          ])
+      end)
+
+      # Prepare multiple statements
+      {:ok, stmt_select_id} = Native.prepare(state, "SELECT * FROM users WHERE id = ?")
+      {:ok, stmt_select_name} = Native.prepare(state, "SELECT * FROM users WHERE name = ?")
+
+      # Create multiple tasks executing different prepared statements concurrently
+      tasks =
+        Enum.map(1..5, fn i ->
+          Task.async(fn ->
+            # Each task executes SELECT by ID
+            {:ok, result_id} = Native.query_stmt(state, stmt_select_id, [i])
+            assert length(result_id.rows) == 1
+
+            # Each task executes SELECT by name
+            {:ok, result_name} = Native.query_stmt(state, stmt_select_name, ["User#{i}"])
+            assert length(result_name.rows) == 1
+
+            # Verify both queries return same data
+            assert hd(result_id.rows) == hd(result_name.rows)
+
+            :ok
+          end)
+        end)
+
+      # Wait for all tasks to complete successfully
+      results = Task.await_many(tasks, 5000)
+      assert Enum.all?(results, &(&1 == :ok))
+
+      # Cleanup
+      Native.close_stmt(stmt_select_id)
+      Native.close_stmt(stmt_select_name)
+    end
+
+    test "single prepared statement can be safely used by multiple processes", %{state: state} do
+      # Setup: Insert test data
+      Enum.each(1..20, fn i ->
+        {:ok, _query, _result, _} =
+          exec_sql(state, "INSERT INTO users (id, name, email) VALUES (?, ?, ?)", [
+            i,
+            "User#{i}",
+            "user#{i}@example.com"
+          ])
+      end)
+
+      # Prepare a single statement to be shared across tasks
+      {:ok, stmt_id} = Native.prepare(state, "SELECT * FROM users WHERE id = ?")
+
+      # Create multiple concurrent tasks using the same prepared statement
+      tasks =
+        Enum.map(1..10, fn task_num ->
+          Task.async(fn ->
+            # Each task queries a different ID with the same prepared statement
+            {:ok, result} = Native.query_stmt(state, stmt_id, [task_num])
+            assert length(result.rows) == 1
+
+            [id, name, email] = hd(result.rows)
+            assert id == task_num
+            assert name == "User#{task_num}"
+            assert String.contains?(email, "@example.com")
+
+            # Simulate some work
+            Process.sleep(10)
+
+            :ok
+          end)
+        end)
+
+      # Wait for all tasks to complete successfully
+      results = Task.await_many(tasks, 5000)
+      assert Enum.all?(results, &(&1 == :ok))
+
+      # Verify data integrity - statement should work correctly after concurrent access
+      {:ok, final_result} = Native.query_stmt(state, stmt_id, [5])
+      assert hd(final_result.rows) == [5, "User5", "user5@example.com"]
+
+      # Cleanup
+      Native.close_stmt(stmt_id)
+    end
+
+    test "concurrent writes with prepared statements maintain consistency", %{state: state} do
+      # Setup: Create initial user
+      {:ok, _query, _result, _} =
+        exec_sql(state, "INSERT INTO users (id, name, email) VALUES (?, ?, ?)", [
+          1,
+          "Initial",
+          "initial@example.com"
+        ])
+
+      # Prepare statements for reading and writing
+      {:ok, stmt_select} = Native.prepare(state, "SELECT COUNT(*) FROM users")
+
+      {:ok, stmt_insert} =
+        Native.prepare(state, "INSERT INTO users (id, name, email) VALUES (?, ?, ?)")
+
+      # Create tasks that concurrently write data
+      tasks =
+        Enum.map(2..6, fn user_id ->
+          Task.async(fn ->
+            # Each task inserts a new user using the prepared statement
+            {:ok, _rows} =
+              Native.execute_stmt(
+                state,
+                stmt_insert,
+                "INSERT INTO users (id, name, email) VALUES (?, ?, ?)",
+                [user_id, "User#{user_id}", "user#{user_id}@example.com"]
+              )
+
+            :ok
+          end)
+        end)
+
+      # Wait for all writes to complete
+      Task.await_many(tasks, 5000)
+
+      # Verify final count (initial + 5 new users)
+      {:ok, count_result} = Native.query_stmt(state, stmt_select, [])
+      assert hd(hd(count_result.rows)) == 6
+
+      # Cleanup
+      Native.close_stmt(stmt_select)
+      Native.close_stmt(stmt_insert)
+    end
+
+    test "prepared statements handle parameter isolation across concurrent tasks", %{
+      state: state
+    } do
+      # Setup: Create test data
+      Enum.each(1..5, fn i ->
+        {:ok, _query, _result, _} =
+          exec_sql(state, "INSERT INTO users (id, name, email) VALUES (?, ?, ?)", [
+            i,
+            "User#{i}",
+            "user#{i}@example.com"
+          ])
+      end)
+
+      {:ok, stmt_id} = Native.prepare(state, "SELECT ? as param_test, id FROM users WHERE id = ?")
+
+      # Create tasks with different parameter combinations
+      tasks =
+        Enum.map(1..5, fn task_id ->
+          Task.async(fn ->
+            # Each task uses different parameters
+            {:ok, result} = Native.query_stmt(state, stmt_id, ["Task#{task_id}", task_id])
+            assert length(result.rows) == 1
+
+            [param_value, id] = hd(result.rows)
+            # Verify the parameter was not contaminated from another task
+            assert param_value == "Task#{task_id}",
+                   "Parameter #{param_value} should be Task#{task_id}"
+
+            assert id == task_id
+
+            :ok
+          end)
+        end)
+
+      # Wait for all tasks to complete successfully
+      results = Task.await_many(tasks, 5000)
+      assert Enum.all?(results, &(&1 == :ok))
+
+      # Cleanup
+      Native.close_stmt(stmt_id)
+    end
+
+    test "prepared statements maintain isolation when reset concurrently", %{state: state} do
+      # Setup: Create test data (IDs 1-10)
+      Enum.each(1..10, fn i ->
+        {:ok, _query, _result, _} =
+          exec_sql(state, "INSERT INTO users (id, name, email) VALUES (?, ?, ?)", [
+            i,
+            "User#{i}",
+            "user#{i}@example.com"
+          ])
+      end)
+
+      {:ok, stmt_id} = Native.prepare(state, "SELECT * FROM users WHERE id = ?")
+
+      # Create multiple tasks that will reset the statement concurrently
+      tasks =
+        Enum.map(1..5, fn task_num ->
+          Task.async(fn ->
+            # Each task executes and resets the statement
+            {:ok, result} = Native.query_stmt(state, stmt_id, [task_num])
+            assert length(result.rows) == 1
+
+            [id, name, email] = hd(result.rows)
+            assert id == task_num
+            assert name == "User#{task_num}"
+            assert email == "user#{task_num}@example.com"
+
+            # Explicitly reset statement to clear bindings
+            :ok = Native.reset_stmt(state, stmt_id)
+
+            # Execute again after reset - should query IDs 6-10
+            {:ok, result2} = Native.query_stmt(state, stmt_id, [task_num + 5])
+
+            # After reset, prepared statement must return the correct row
+            assert length(result2.rows) == 1, "Should get exactly one row after reset"
+
+            [new_id, new_name, new_email] = hd(result2.rows)
+
+            assert new_id == task_num + 5,
+                   "ID should be #{task_num + 5}, got #{new_id}"
+
+            assert new_name == "User#{task_num + 5}",
+                   "Name should be User#{task_num + 5}, got #{new_name}"
+
+            assert new_email == "user#{task_num + 5}@example.com",
+                   "Email should be user#{task_num + 5}@example.com, got #{new_email}"
+
+            :ok
+          end)
+        end)
+
+      # Wait for all tasks to complete successfully
+      results = Task.await_many(tasks, 5000)
+      assert Enum.all?(results, &(&1 == :ok))
+
+      # Cleanup
+      Native.close_stmt(stmt_id)
     end
   end
 end
