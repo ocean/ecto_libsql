@@ -15,8 +15,6 @@ defmodule EctoLibSql.PoolLoadTest do
   use ExUnit.Case, async: false
   require Logger
 
-  alias EctoLibSql
-
   setup do
     test_db = "z_ecto_libsql_test-pool_#{:erlang.unique_integer([:positive])}.db"
 
