@@ -404,4 +404,308 @@ defmodule EctoLibSql.TypeEncodingImplementationTest do
       assert count >= 1
     end
   end
+
+  describe "string encoding edge cases" do
+    defmodule StringTestTypes do
+      use Ecto.Schema
+
+      schema "test_types" do
+        field(:text_col, :string)
+        field(:blob_col, :binary)
+        field(:int_col, :integer)
+        field(:real_col, :float)
+      end
+    end
+
+    setup do
+      SQL.query!(TestRepo, """
+      CREATE TABLE IF NOT EXISTS test_types (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        text_col TEXT,
+        blob_col BLOB,
+        int_col INTEGER,
+        real_col REAL
+      )
+      """)
+
+      on_exit(fn ->
+        SQL.query!(TestRepo, "DROP TABLE IF EXISTS test_types")
+      end)
+
+      :ok
+    end
+
+    test "empty string encoding" do
+      result = SQL.query!(TestRepo, "INSERT INTO test_types (text_col) VALUES (?)", [""])
+      assert result.num_rows == 1
+
+      result = SQL.query!(TestRepo, "SELECT text_col FROM test_types WHERE text_col = ?", [""])
+      assert [[""]] = result.rows
+    end
+
+    test "special characters in string - quotes and escapes" do
+      special = "Test: 'single' \"double\" and \\ backslash"
+
+      result = SQL.query!(TestRepo, "INSERT INTO test_types (text_col) VALUES (?)", [special])
+      assert result.num_rows == 1
+
+      result = SQL.query!(TestRepo, "SELECT text_col FROM test_types ORDER BY id DESC LIMIT 1")
+      [[stored]] = result.rows
+      assert stored == special
+    end
+
+    test "unicode characters in string" do
+      unicode = "Unicode: 你好 مرحبا 🎉 🚀"
+
+      result = SQL.query!(TestRepo, "INSERT INTO test_types (text_col) VALUES (?)", [unicode])
+      assert result.num_rows == 1
+
+      result = SQL.query!(TestRepo, "SELECT text_col FROM test_types ORDER BY id DESC LIMIT 1")
+      [[stored]] = result.rows
+      assert stored == unicode
+    end
+
+    test "newlines and whitespace in string" do
+      whitespace = "Line 1\nLine 2\tTabbed\r\nWindows line"
+
+      result = SQL.query!(TestRepo, "INSERT INTO test_types (text_col) VALUES (?)", [whitespace])
+      assert result.num_rows == 1
+
+      result = SQL.query!(TestRepo, "SELECT text_col FROM test_types ORDER BY id DESC LIMIT 1")
+      [[stored]] = result.rows
+      assert stored == whitespace
+    end
+  end
+
+  describe "binary encoding edge cases" do
+    defmodule BinaryTestTypes do
+      use Ecto.Schema
+
+      schema "test_types" do
+        field(:blob_col, :binary)
+      end
+    end
+
+    setup do
+      SQL.query!(TestRepo, """
+      CREATE TABLE IF NOT EXISTS test_types (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        blob_col BLOB
+      )
+      """)
+
+      on_exit(fn ->
+        SQL.query!(TestRepo, "DROP TABLE IF EXISTS test_types")
+      end)
+
+      :ok
+    end
+
+    test "binary data with null bytes preserved" do
+      binary = <<0, 1, 2, 255, 254, 253>>
+
+      result = SQL.query!(TestRepo, "INSERT INTO test_types (blob_col) VALUES (?)", [binary])
+      assert result.num_rows == 1
+
+      result = SQL.query!(TestRepo, "SELECT blob_col FROM test_types ORDER BY id DESC LIMIT 1")
+      assert [[^binary]] = result.rows
+    end
+
+    test "large binary data" do
+      binary = :crypto.strong_rand_bytes(125)
+
+      result = SQL.query!(TestRepo, "INSERT INTO test_types (blob_col) VALUES (?)", [binary])
+      assert result.num_rows == 1
+
+      result = SQL.query!(TestRepo, "SELECT blob_col FROM test_types ORDER BY id DESC LIMIT 1")
+      [[stored]] = result.rows
+      assert is_binary(stored)
+      assert byte_size(stored) == byte_size(binary)
+    end
+
+    test "binary with mixed bytes" do
+      binary = :crypto.strong_rand_bytes(256)
+
+      result = SQL.query!(TestRepo, "INSERT INTO test_types (blob_col) VALUES (?)", [binary])
+      assert result.num_rows == 1
+
+      result = SQL.query!(TestRepo, "SELECT blob_col FROM test_types ORDER BY id DESC LIMIT 1")
+      assert [[^binary]] = result.rows
+    end
+  end
+
+  describe "numeric encoding edge cases" do
+    defmodule NumericTestTypes do
+      use Ecto.Schema
+
+      schema "test_types" do
+        field(:int_col, :integer)
+        field(:real_col, :float)
+        field(:text_col, :string)
+      end
+    end
+
+    setup do
+      SQL.query!(TestRepo, """
+      CREATE TABLE IF NOT EXISTS test_types (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        int_col INTEGER,
+        real_col REAL,
+        text_col TEXT
+      )
+      """)
+
+      on_exit(fn ->
+        SQL.query!(TestRepo, "DROP TABLE IF EXISTS test_types")
+      end)
+
+      :ok
+    end
+
+    test "very large integer" do
+      large_int = 9_223_372_036_854_775_807
+
+      result = SQL.query!(TestRepo, "INSERT INTO test_types (int_col) VALUES (?)", [large_int])
+      assert result.num_rows == 1
+
+      result = SQL.query!(TestRepo, "SELECT int_col FROM test_types ORDER BY id DESC LIMIT 1")
+      assert [[^large_int]] = result.rows
+    end
+
+    test "negative large integer" do
+      large_negative = -9_223_372_036_854_775_808
+
+      result =
+        SQL.query!(TestRepo, "INSERT INTO test_types (int_col) VALUES (?)", [large_negative])
+
+      assert result.num_rows == 1
+
+      result = SQL.query!(TestRepo, "SELECT int_col FROM test_types ORDER BY id DESC LIMIT 1")
+      assert [[^large_negative]] = result.rows
+    end
+
+    test "zero values" do
+      SQL.query!(TestRepo, "INSERT INTO test_types (int_col) VALUES (?)", [0])
+      SQL.query!(TestRepo, "INSERT INTO test_types (real_col) VALUES (?)", [0.0])
+
+      result =
+        SQL.query!(TestRepo, "SELECT int_col, real_col FROM test_types ORDER BY id DESC LIMIT 2")
+
+      rows = result.rows
+      assert length(rows) == 2
+    end
+
+    test "Decimal parameter encoding" do
+      decimal = Decimal.new("123.45")
+
+      result = SQL.query!(TestRepo, "INSERT INTO test_types (text_col) VALUES (?)", [decimal])
+      assert result.num_rows == 1
+
+      decimal_str = Decimal.to_string(decimal)
+
+      result =
+        SQL.query!(TestRepo, "SELECT text_col FROM test_types WHERE text_col = ?", [decimal_str])
+
+      assert result.rows != []
+      [[stored]] = result.rows
+      assert stored == decimal_str
+    end
+
+    test "Negative Decimal" do
+      decimal = Decimal.new("-456.789")
+
+      result = SQL.query!(TestRepo, "INSERT INTO test_types (text_col) VALUES (?)", [decimal])
+      assert result.num_rows == 1
+
+      decimal_str = Decimal.to_string(decimal)
+
+      result =
+        SQL.query!(TestRepo, "SELECT text_col FROM test_types WHERE text_col = ?", [decimal_str])
+
+      assert result.rows != []
+      [[stored]] = result.rows
+      assert stored == decimal_str
+    end
+  end
+
+  describe "temporal type encoding" do
+    defmodule TemporalTestTypes do
+      use Ecto.Schema
+
+      schema "test_types" do
+        field(:text_col, :string)
+      end
+    end
+
+    setup do
+      SQL.query!(TestRepo, """
+      CREATE TABLE IF NOT EXISTS test_types (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        text_col TEXT
+      )
+      """)
+
+      on_exit(fn ->
+        SQL.query!(TestRepo, "DROP TABLE IF EXISTS test_types")
+      end)
+
+      :ok
+    end
+
+    test "DateTime parameter encoding" do
+      dt = DateTime.utc_now()
+
+      result = SQL.query!(TestRepo, "INSERT INTO test_types (text_col) VALUES (?)", [dt])
+      assert result.num_rows == 1
+
+      result =
+        SQL.query!(TestRepo, "SELECT COUNT(*) FROM test_types WHERE text_col LIKE ?", ["202%"])
+
+      assert [[count]] = result.rows
+      assert count >= 1
+    end
+
+    test "NaiveDateTime parameter encoding" do
+      dt = NaiveDateTime.utc_now()
+
+      result = SQL.query!(TestRepo, "INSERT INTO test_types (text_col) VALUES (?)", [dt])
+      assert result.num_rows == 1
+
+      result =
+        SQL.query!(TestRepo, "SELECT COUNT(*) FROM test_types WHERE text_col LIKE ?", ["202%"])
+
+      assert [[count]] = result.rows
+      assert count >= 1
+    end
+
+    test "Date parameter encoding" do
+      date = Date.utc_today()
+
+      result = SQL.query!(TestRepo, "INSERT INTO test_types (text_col) VALUES (?)", [date])
+      assert result.num_rows == 1
+
+      result =
+        SQL.query!(TestRepo, "SELECT COUNT(*) FROM test_types WHERE text_col LIKE ?", [
+          "____-__-__%"
+        ])
+
+      assert [[count]] = result.rows
+      assert count >= 1
+    end
+
+    test "Time parameter encoding" do
+      time = Time.new!(14, 30, 45)
+
+      result = SQL.query!(TestRepo, "INSERT INTO test_types (text_col) VALUES (?)", [time])
+      assert result.num_rows == 1
+
+      result =
+        SQL.query!(TestRepo, "SELECT COUNT(*) FROM test_types WHERE text_col LIKE ?", [
+          "__:__:__%"
+        ])
+
+      assert [[count]] = result.rows
+      assert count >= 1
+    end
+  end
 end
