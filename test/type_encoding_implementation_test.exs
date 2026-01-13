@@ -969,8 +969,8 @@ defmodule EctoLibSql.TypeEncodingImplementationTest do
 
       result = SQL.query!(TestRepo, "SELECT text_col FROM test_types")
       [[stored]] = result.rows
-      # SQLite stores it, but type depends on what was passed
-      assert stored == 123 or stored == "123"
+      # Integer stored in TEXT column is converted to string representation
+      assert stored == "123"
     end
 
     test "float precision in arithmetic" do
