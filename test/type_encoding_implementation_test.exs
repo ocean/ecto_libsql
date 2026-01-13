@@ -144,8 +144,8 @@ defmodule EctoLibSql.TypeEncodingImplementationTest do
         from(u in User, where: u.active == ^true)
         |> TestRepo.all()
 
-      assert length(active_users) >= 1
-      assert Enum.all?(active_users, & &1.active)
+      assert length(active_users) == 1
+      assert hd(active_users).name == "Dave"
     end
   end
 
@@ -234,13 +234,13 @@ defmodule EctoLibSql.TypeEncodingImplementationTest do
       assert [[nil]] = result.rows
     end
 
-    test "querying with :null atom for IS NULL" do
+    test "nil inserted value can be queried with IS NULL" do
       SQL.query!(TestRepo, "DELETE FROM users")
 
       # Insert NULL value
       SQL.query!(TestRepo, "INSERT INTO users (name, uuid) VALUES (?, ?)", ["Alice", nil])
 
-      # Query with :null should find it
+      # Query with IS NULL should find it
       result =
         SQL.query!(TestRepo, "SELECT COUNT(*) FROM users WHERE uuid IS NULL AND name = ?", [
           "Alice"
@@ -317,7 +317,7 @@ defmodule EctoLibSql.TypeEncodingImplementationTest do
       # Verify all were inserted
       result = SQL.query!(TestRepo, "SELECT COUNT(*) FROM users")
       assert [[count]] = result.rows
-      assert count >= 3
+      assert count == 3
     end
 
     test "Ecto query with multiple encoded types" do
@@ -562,10 +562,15 @@ defmodule EctoLibSql.TypeEncodingImplementationTest do
       SQL.query!(TestRepo, "INSERT INTO test_types (real_col) VALUES (?)", [0.0])
 
       result =
-        SQL.query!(TestRepo, "SELECT int_col, real_col FROM test_types ORDER BY id DESC LIMIT 2")
+        SQL.query!(TestRepo, "SELECT int_col FROM test_types WHERE int_col = ?", [0])
+      assert [[0]] = result.rows
 
-      rows = result.rows
-      assert length(rows) == 2
+      result =
+        SQL.query!(TestRepo, "SELECT real_col FROM test_types WHERE real_col = ?", [0.0])
+      
+      [[stored_real]] = result.rows
+      # Float comparison: allow for +0.0 vs -0.0 representation
+      assert stored_real == +0.0 or stored_real == -0.0
     end
 
     test "Decimal parameter encoding" do
@@ -977,7 +982,7 @@ defmodule EctoLibSql.TypeEncodingImplementationTest do
 
       # Due to floating point precision, this might return 0 or 1 rows
       # depending on exact arithmetic
-      assert is_list(result.rows)
+      assert length(result.rows) in [0, 1]
     end
 
     test "division by zero handling" do
@@ -992,13 +997,13 @@ defmodule EctoLibSql.TypeEncodingImplementationTest do
       SQL.query!(TestRepo, "INSERT INTO test_types (text_col) VALUES (?)", ["100"])
       SQL.query!(TestRepo, "INSERT INTO test_types (text_col) VALUES (?)", ["20"])
 
-      # String comparison: "100" < "20" (lexicographic)
+      # String comparison: "100" < "50" (true), "20" < "50" (true) → 2 matches
       result =
         SQL.query!(TestRepo, "SELECT COUNT(*) FROM test_types WHERE text_col < ?", ["50"])
 
       assert [[count]] = result.rows
-      # Result depends on string vs numeric comparison
-      assert is_integer(count)
+      # Lexicographic: "100" < "50" (true), "20" < "50" (true) → 2 matches
+      assert count == 2
     end
   end
 end
