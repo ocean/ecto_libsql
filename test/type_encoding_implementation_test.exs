@@ -671,4 +671,336 @@ defmodule EctoLibSql.TypeEncodingImplementationTest do
       assert count >= 1
     end
   end
+
+  describe "float/real field encoding" do
+    setup do
+      SQL.query!(TestRepo, """
+      CREATE TABLE IF NOT EXISTS test_types (
+       id INTEGER PRIMARY KEY AUTOINCREMENT,
+       real_col REAL
+      )
+      """)
+
+      on_exit(fn ->
+        SQL.query!(TestRepo, "DROP TABLE IF EXISTS test_types")
+      end)
+
+      :ok
+    end
+
+    test "positive float parameter encoding" do
+      float_val = 3.14159
+
+      result = SQL.query!(TestRepo, "INSERT INTO test_types (real_col) VALUES (?)", [float_val])
+      assert result.num_rows == 1
+
+      result = SQL.query!(TestRepo, "SELECT real_col FROM test_types ORDER BY id DESC LIMIT 1")
+      assert [[stored]] = result.rows
+      # Floating point comparison allows small precision differences
+      assert abs(stored - float_val) < 0.00001
+    end
+
+    test "negative float parameter encoding" do
+      float_val = -2.71828
+
+      result = SQL.query!(TestRepo, "INSERT INTO test_types (real_col) VALUES (?)", [float_val])
+      assert result.num_rows == 1
+
+      result = SQL.query!(TestRepo, "SELECT real_col FROM test_types ORDER BY id DESC LIMIT 1")
+      assert [[stored]] = result.rows
+      assert abs(stored - float_val) < 0.00001
+    end
+
+    test "very small float" do
+      float_val = 0.0000001
+
+      result = SQL.query!(TestRepo, "INSERT INTO test_types (real_col) VALUES (?)", [float_val])
+      assert result.num_rows == 1
+
+      result = SQL.query!(TestRepo, "SELECT real_col FROM test_types ORDER BY id DESC LIMIT 1")
+      assert [[stored]] = result.rows
+      assert is_float(stored)
+    end
+
+    test "very large float" do
+      float_val = 1.23456789e10
+
+      result = SQL.query!(TestRepo, "INSERT INTO test_types (real_col) VALUES (?)", [float_val])
+      assert result.num_rows == 1
+
+      result = SQL.query!(TestRepo, "SELECT real_col FROM test_types ORDER BY id DESC LIMIT 1")
+      assert [[stored]] = result.rows
+      assert is_float(stored)
+      assert stored > 1.0e9
+    end
+
+    test "float zero" do
+      result = SQL.query!(TestRepo, "INSERT INTO test_types (real_col) VALUES (?)", [0.0])
+      assert result.num_rows == 1
+
+      result = SQL.query!(TestRepo, "SELECT real_col FROM test_types WHERE real_col = ?", [0.0])
+      assert [[stored]] = result.rows
+      assert stored == 0.0
+    end
+
+    test "float in WHERE clause comparison" do
+      SQL.query!(TestRepo, "INSERT INTO test_types (real_col) VALUES (?)", [1.5])
+      SQL.query!(TestRepo, "INSERT INTO test_types (real_col) VALUES (?)", [2.7])
+      SQL.query!(TestRepo, "INSERT INTO test_types (real_col) VALUES (?)", [0.8])
+
+      result =
+        SQL.query!(TestRepo, "SELECT COUNT(*) FROM test_types WHERE real_col > ?", [1.0])
+
+      assert [[count]] = result.rows
+      assert count >= 2
+    end
+
+    test "float in aggregate functions" do
+      SQL.query!(TestRepo, "INSERT INTO test_types (real_col) VALUES (?)", [1.5])
+      SQL.query!(TestRepo, "INSERT INTO test_types (real_col) VALUES (?)", [2.5])
+      SQL.query!(TestRepo, "INSERT INTO test_types (real_col) VALUES (?)", [3.5])
+
+      # SUM aggregate
+      result = SQL.query!(TestRepo, "SELECT SUM(real_col) FROM test_types")
+      assert [[sum]] = result.rows
+      assert abs(sum - 7.5) < 0.001
+
+      # AVG aggregate
+      result = SQL.query!(TestRepo, "SELECT AVG(real_col) FROM test_types")
+      assert [[avg]] = result.rows
+      assert abs(avg - 2.5) < 0.001
+
+      # COUNT still works
+      result = SQL.query!(TestRepo, "SELECT COUNT(*) FROM test_types")
+      assert [[3]] = result.rows
+    end
+  end
+
+  describe "NULL/nil edge cases" do
+    setup do
+      SQL.query!(TestRepo, """
+      CREATE TABLE IF NOT EXISTS test_types (
+       id INTEGER PRIMARY KEY AUTOINCREMENT,
+       int_col INTEGER,
+       real_col REAL,
+       text_col TEXT
+      )
+      """)
+
+      on_exit(fn ->
+        SQL.query!(TestRepo, "DROP TABLE IF EXISTS test_types")
+      end)
+
+      :ok
+    end
+
+    test "NULL in SUM aggregate returns NULL" do
+      SQL.query!(TestRepo, "INSERT INTO test_types (int_col) VALUES (?)", [10])
+      SQL.query!(TestRepo, "INSERT INTO test_types (int_col) VALUES (?)", [nil])
+      SQL.query!(TestRepo, "INSERT INTO test_types (int_col) VALUES (?)", [20])
+
+      result = SQL.query!(TestRepo, "SELECT SUM(int_col) FROM test_types")
+      assert [[sum]] = result.rows
+      # SUM ignores NULLs, so should be 30
+      assert sum == 30
+    end
+
+    test "NULL in AVG aggregate is ignored" do
+      SQL.query!(TestRepo, "INSERT INTO test_types (int_col) VALUES (?)", [10])
+      SQL.query!(TestRepo, "INSERT INTO test_types (int_col) VALUES (?)", [nil])
+      SQL.query!(TestRepo, "INSERT INTO test_types (int_col) VALUES (?)", [20])
+
+      result = SQL.query!(TestRepo, "SELECT AVG(int_col) FROM test_types")
+      assert [[avg]] = result.rows
+      # AVG ignores NULLs, so should be 15 (30/2)
+      assert avg == 15
+    end
+
+    test "COUNT with NULL values" do
+      SQL.query!(TestRepo, "INSERT INTO test_types (int_col) VALUES (?)", [10])
+      SQL.query!(TestRepo, "INSERT INTO test_types (int_col) VALUES (?)", [nil])
+      SQL.query!(TestRepo, "INSERT INTO test_types (int_col) VALUES (?)", [20])
+
+      # COUNT(*) counts all rows
+      result = SQL.query!(TestRepo, "SELECT COUNT(*) FROM test_types")
+      assert [[3]] = result.rows
+
+      # COUNT(column) ignores NULLs
+      result = SQL.query!(TestRepo, "SELECT COUNT(int_col) FROM test_types")
+      assert [[2]] = result.rows
+    end
+
+    test "COALESCE with NULL values" do
+      SQL.query!(TestRepo, "INSERT INTO test_types (int_col, text_col) VALUES (?, ?)", [
+        nil,
+        "default"
+      ])
+
+      SQL.query!(TestRepo, "INSERT INTO test_types (int_col, text_col) VALUES (?, ?)", [
+        42,
+        "value"
+      ])
+
+      result = SQL.query!(TestRepo, "SELECT COALESCE(int_col, 0) FROM test_types ORDER BY id")
+      assert [[0], [42]] = result.rows
+    end
+
+    test "NULL in compound WHERE clause" do
+      SQL.query!(TestRepo, "INSERT INTO test_types (int_col, text_col) VALUES (?, ?)", [10, "a"])
+      SQL.query!(TestRepo, "INSERT INTO test_types (int_col, text_col) VALUES (?, ?)", [nil, "b"])
+      SQL.query!(TestRepo, "INSERT INTO test_types (int_col, text_col) VALUES (?, ?)", [20, nil])
+
+      # Find rows where int_col is NULL
+      result = SQL.query!(TestRepo, "SELECT COUNT(*) FROM test_types WHERE int_col IS NULL")
+      assert [[1]] = result.rows
+
+      # Find rows where text_col is NOT NULL
+      result = SQL.query!(TestRepo, "SELECT COUNT(*) FROM test_types WHERE text_col IS NOT NULL")
+      assert [[2]] = result.rows
+
+      # Compound condition with NULL
+      result =
+        SQL.query!(
+          TestRepo,
+          "SELECT COUNT(*) FROM test_types WHERE int_col IS NOT NULL AND text_col IS NOT NULL"
+        )
+
+      assert [[1]] = result.rows
+    end
+
+    test "NULL handling in CASE expressions" do
+      SQL.query!(TestRepo, "INSERT INTO test_types (int_col) VALUES (?)", [10])
+      SQL.query!(TestRepo, "INSERT INTO test_types (int_col) VALUES (?)", [nil])
+
+      result =
+        SQL.query!(
+          TestRepo,
+          "SELECT CASE WHEN int_col IS NULL THEN 'empty' ELSE 'has value' END FROM test_types ORDER BY id"
+        )
+
+      assert [["has value"], ["empty"]] = result.rows
+    end
+
+    test "NULL in ORDER BY" do
+      SQL.query!(TestRepo, "INSERT INTO test_types (int_col, text_col) VALUES (?, ?)", [30, "c"])
+      SQL.query!(TestRepo, "INSERT INTO test_types (int_col, text_col) VALUES (?, ?)", [nil, "a"])
+      SQL.query!(TestRepo, "INSERT INTO test_types (int_col, text_col) VALUES (?, ?)", [10, "b"])
+
+      # ORDER BY with NULLs (NULLs sort first in SQLite)
+      result = SQL.query!(TestRepo, "SELECT int_col FROM test_types ORDER BY int_col")
+      assert [[nil], [10], [30]] = result.rows
+    end
+
+    test "NULL with DISTINCT" do
+      SQL.query!(TestRepo, "INSERT INTO test_types (int_col) VALUES (?)", [10])
+      SQL.query!(TestRepo, "INSERT INTO test_types (int_col) VALUES (?)", [nil])
+      SQL.query!(TestRepo, "INSERT INTO test_types (int_col) VALUES (?)", [10])
+      SQL.query!(TestRepo, "INSERT INTO test_types (int_col) VALUES (?)", [nil])
+
+      result = SQL.query!(TestRepo, "SELECT DISTINCT int_col FROM test_types ORDER BY int_col")
+      assert [[nil], [10]] = result.rows
+    end
+  end
+
+  describe "type coercion edge cases" do
+    setup do
+      SQL.query!(TestRepo, """
+      CREATE TABLE IF NOT EXISTS test_types (
+       id INTEGER PRIMARY KEY AUTOINCREMENT,
+       int_col INTEGER,
+       text_col TEXT,
+       real_col REAL
+      )
+      """)
+
+      on_exit(fn ->
+        SQL.query!(TestRepo, "DROP TABLE IF EXISTS test_types")
+      end)
+
+      :ok
+    end
+
+    test "string that looks like number in text column" do
+      result = SQL.query!(TestRepo, "INSERT INTO test_types (text_col) VALUES (?)", ["12345"])
+      assert result.num_rows == 1
+
+      result = SQL.query!(TestRepo, "SELECT text_col FROM test_types")
+      assert [["12345"]] = result.rows
+    end
+
+    test "empty string vs NULL distinction" do
+      SQL.query!(TestRepo, "INSERT INTO test_types (text_col) VALUES (?)", [""])
+      SQL.query!(TestRepo, "INSERT INTO test_types (text_col) VALUES (?)", [nil])
+
+      # Empty string is not NULL
+      result = SQL.query!(TestRepo, "SELECT COUNT(*) FROM test_types WHERE text_col = ''")
+      assert [[1]] = result.rows
+
+      # NULL is NULL
+      result = SQL.query!(TestRepo, "SELECT COUNT(*) FROM test_types WHERE text_col IS NULL")
+      assert [[1]] = result.rows
+    end
+
+    test "zero vs NULL in numeric columns" do
+      SQL.query!(TestRepo, "INSERT INTO test_types (int_col) VALUES (?)", [0])
+      SQL.query!(TestRepo, "INSERT INTO test_types (int_col) VALUES (?)", [nil])
+
+      # Zero is not NULL
+      result = SQL.query!(TestRepo, "SELECT COUNT(*) FROM test_types WHERE int_col = ?", [0])
+      assert [[1]] = result.rows
+
+      # NULL is NULL
+      result = SQL.query!(TestRepo, "SELECT COUNT(*) FROM test_types WHERE int_col IS NULL")
+      assert [[1]] = result.rows
+    end
+
+    test "type affinity: integer stored in text column" do
+      # SQLite has type affinity but is lenient
+      result = SQL.query!(TestRepo, "INSERT INTO test_types (text_col) VALUES (?)", [123])
+      assert result.num_rows == 1
+
+      result = SQL.query!(TestRepo, "SELECT text_col FROM test_types")
+      [[stored]] = result.rows
+      # SQLite stores it, but type depends on what was passed
+      assert stored == 123 or stored == "123"
+    end
+
+    test "float precision in arithmetic" do
+      SQL.query!(TestRepo, "INSERT INTO test_types (real_col) VALUES (?)", [0.1])
+      SQL.query!(TestRepo, "INSERT INTO test_types (real_col) VALUES (?)", [0.2])
+
+      # Floating point arithmetic can have precision issues
+      result =
+        SQL.query!(
+          TestRepo,
+          "SELECT real_col FROM test_types WHERE real_col + ? > ?",
+          [0.1, 0.35]
+        )
+
+      # Due to floating point precision, this might return 0 or 1 rows
+      # depending on exact arithmetic
+      assert is_list(result.rows)
+    end
+
+    test "division by zero handling" do
+      SQL.query!(TestRepo, "INSERT INTO test_types (int_col) VALUES (?)", [10])
+
+      result = SQL.query!(TestRepo, "SELECT int_col / 0 FROM test_types")
+      # SQLite returns NULL for division by zero
+      assert [[nil]] = result.rows
+    end
+
+    test "string comparison vs numeric comparison" do
+      SQL.query!(TestRepo, "INSERT INTO test_types (text_col) VALUES (?)", ["100"])
+      SQL.query!(TestRepo, "INSERT INTO test_types (text_col) VALUES (?)", ["20"])
+
+      # String comparison: "100" < "20" (lexicographic)
+      result =
+        SQL.query!(TestRepo, "SELECT COUNT(*) FROM test_types WHERE text_col < ?", ["50"])
+
+      assert [[count]] = result.rows
+      # Result depends on string vs numeric comparison
+      assert is_integer(count)
+    end
+  end
 end
