@@ -406,17 +406,6 @@ defmodule EctoLibSql.TypeEncodingImplementationTest do
   end
 
   describe "string encoding edge cases" do
-    defmodule StringTestTypes do
-      use Ecto.Schema
-
-      schema "test_types" do
-        field(:text_col, :string)
-        field(:blob_col, :binary)
-        field(:int_col, :integer)
-        field(:real_col, :float)
-      end
-    end
-
     setup do
       SQL.query!(TestRepo, """
       CREATE TABLE IF NOT EXISTS test_types (
@@ -478,14 +467,6 @@ defmodule EctoLibSql.TypeEncodingImplementationTest do
   end
 
   describe "binary encoding edge cases" do
-    defmodule BinaryTestTypes do
-      use Ecto.Schema
-
-      schema "test_types" do
-        field(:blob_col, :binary)
-      end
-    end
-
     setup do
       SQL.query!(TestRepo, """
       CREATE TABLE IF NOT EXISTS test_types (
@@ -535,16 +516,6 @@ defmodule EctoLibSql.TypeEncodingImplementationTest do
   end
 
   describe "numeric encoding edge cases" do
-    defmodule NumericTestTypes do
-      use Ecto.Schema
-
-      schema "test_types" do
-        field(:int_col, :integer)
-        field(:real_col, :float)
-        field(:text_col, :string)
-      end
-    end
-
     setup do
       SQL.query!(TestRepo, """
       CREATE TABLE IF NOT EXISTS test_types (
@@ -629,14 +600,6 @@ defmodule EctoLibSql.TypeEncodingImplementationTest do
   end
 
   describe "temporal type encoding" do
-    defmodule TemporalTestTypes do
-      use Ecto.Schema
-
-      schema "test_types" do
-        field(:text_col, :string)
-      end
-    end
-
     setup do
       SQL.query!(TestRepo, """
       CREATE TABLE IF NOT EXISTS test_types (
