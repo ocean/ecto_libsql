@@ -2640,6 +2640,17 @@ SQL.query!(Repo, "INSERT INTO events (event_date) VALUES (?)", [date])
 time = Time.new!(14, 30, 45)
 SQL.query!(Repo, "INSERT INTO events (event_time) VALUES (?)", [time])
 # Stored as: "14:30:45.000000"
+
+# Relative dates (compute absolute date first, then pass)
+tomorrow = Date.add(Date.utc_today(), 1)  # Becomes a Date struct
+SQL.query!(Repo, "INSERT INTO events (event_date) VALUES (?)", [tomorrow])
+
+# Third-party date types (Timex, etc.) - pre-convert to standard types
+# ❌ NOT SUPPORTED: Timex.DateTime or custom structs
+# ✅ DO THIS: Convert to native DateTime first
+timex_dt = Timex.now()
+native_dt = Timex.to_datetime(timex_dt)  # Convert to DateTime
+SQL.query!(Repo, "INSERT INTO events (created_at) VALUES (?)", [native_dt])
 ```
 
 ##### Boolean Values
