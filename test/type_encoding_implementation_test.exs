@@ -262,12 +262,12 @@ defmodule EctoLibSql.TypeEncodingImplementationTest do
       # Count non-NULL values
       result = SQL.query!(TestRepo, "SELECT COUNT(*) FROM users WHERE uuid IS NOT NULL")
       assert [[count]] = result.rows
-      assert count >= 1
+      assert count == 1
 
       # Count NULL values
       result = SQL.query!(TestRepo, "SELECT COUNT(*) FROM users WHERE uuid IS NULL")
       assert [[count]] = result.rows
-      assert count >= 1
+      assert count == 1
     end
   end
 
@@ -336,7 +336,7 @@ defmodule EctoLibSql.TypeEncodingImplementationTest do
         from(u in User, where: u.active == ^true and u.uuid == ^uuid)
         |> TestRepo.all()
 
-      assert length(users) >= 1
+      assert length(users) == 1
       assert Enum.all?(users, fn u -> u.active == true and u.uuid == uuid end)
     end
   end
@@ -351,17 +351,17 @@ defmodule EctoLibSql.TypeEncodingImplementationTest do
       # Count active
       result = SQL.query!(TestRepo, "SELECT COUNT(*) FROM users WHERE active = ?", [true])
       assert [[count]] = result.rows
-      assert count >= 1
+      assert count == 1
 
       # Count inactive
       result = SQL.query!(TestRepo, "SELECT COUNT(*) FROM users WHERE active = ?", [false])
       assert [[count]] = result.rows
-      assert count >= 1
+      assert count == 1
 
       # Count with NOT
       result = SQL.query!(TestRepo, "SELECT COUNT(*) FROM users WHERE active != ?", [true])
       assert [[count]] = result.rows
-      assert count >= 1
+      assert count == 1
     end
 
     test "UUID in aggregation queries" do
@@ -382,7 +382,7 @@ defmodule EctoLibSql.TypeEncodingImplementationTest do
         SQL.query!(TestRepo, "SELECT COUNT(*) FROM users WHERE uuid = ?", [uuid])
 
       assert [[count]] = result.rows
-      assert count >= 2
+      assert count == 2
     end
 
     test ":null with IS NULL and NOT NULL operators" do
@@ -398,12 +398,12 @@ defmodule EctoLibSql.TypeEncodingImplementationTest do
       # IS NULL should work
       result = SQL.query!(TestRepo, "SELECT COUNT(*) FROM users WHERE uuid IS NULL")
       assert [[count]] = result.rows
-      assert count >= 1
+      assert count == 1
 
       # NOT NULL should work
       result = SQL.query!(TestRepo, "SELECT COUNT(*) FROM users WHERE uuid IS NOT NULL")
       assert [[count]] = result.rows
-      assert count >= 1
+      assert count == 1
     end
   end
 
