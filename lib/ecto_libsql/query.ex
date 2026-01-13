@@ -73,8 +73,21 @@ defmodule EctoLibSql.Query do
     defp encode_param(:null), do: nil
 
     # Map encoding: plain maps (not structs) are encoded to JSON
+    # Maps must contain only JSON-serializable values (strings, numbers, booleans,
+    # nil, lists, and nested maps). PIDs, functions, references, and other special
+    # Elixir types are not serializable and will raise a descriptive error.
     defp encode_param(value) when is_map(value) and not is_struct(value) do
-      Jason.encode!(value)
+      case Jason.encode(value) do
+        {:ok, json} ->
+          json
+
+        {:error, %Jason.EncodeError{message: msg}} ->
+          raise ArgumentError,
+            message:
+              "Cannot encode map parameter to JSON. Map contains non-JSON-serializable value. " <>
+                "Maps can only contain strings, numbers, booleans, nil, lists, and nested maps. " <>
+                "Reason: #{msg}. Map: #{inspect(value)}"
+      end
     end
 
     # Pass through all other values unchanged
