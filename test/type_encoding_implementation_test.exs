@@ -6,6 +6,7 @@ defmodule EctoLibSql.TypeEncodingImplementationTest do
   # - UUID encoding (binary → string if needed)
   # - :null atom encoding (:null → nil)
 
+  import Ecto.Query
   alias Ecto.Adapters.SQL
 
   defmodule TestRepo do
@@ -138,8 +139,6 @@ defmodule EctoLibSql.TypeEncodingImplementationTest do
       TestRepo.insert!(%User{name: "Eve", email: "eve@example.com", active: false})
 
       # Query with boolean parameter
-      import Ecto.Query
-
       active_users = TestRepo.all(from(u in User, where: u.active == ^true))
 
       assert length(active_users) == 1
@@ -206,8 +205,6 @@ defmodule EctoLibSql.TypeEncodingImplementationTest do
       TestRepo.insert!(%User{name: "Dave", email: "dave@example.com", uuid: uuid})
 
       # Query with UUID parameter
-      import Ecto.Query
-
       users = TestRepo.all(from(u in User, where: u.uuid == ^uuid))
 
       assert length(users) == 1
@@ -327,8 +324,6 @@ defmodule EctoLibSql.TypeEncodingImplementationTest do
       TestRepo.insert!(%User{name: "Eve", email: "eve@example.com", active: false, uuid: nil})
 
       # Query with multiple encoded types
-      import Ecto.Query
-
       users = TestRepo.all(from(u in User, where: u.active == ^true and u.uuid == ^uuid))
 
       assert length(users) == 1
@@ -404,8 +399,10 @@ defmodule EctoLibSql.TypeEncodingImplementationTest do
 
   describe "string encoding edge cases" do
     setup do
+      SQL.query!(TestRepo, "DROP TABLE IF EXISTS test_types")
+
       SQL.query!(TestRepo, """
-      CREATE TABLE IF NOT EXISTS test_types (
+      CREATE TABLE test_types (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         text_col TEXT,
         blob_col BLOB,
@@ -465,8 +462,10 @@ defmodule EctoLibSql.TypeEncodingImplementationTest do
 
   describe "binary encoding edge cases" do
     setup do
+      SQL.query!(TestRepo, "DROP TABLE IF EXISTS test_types")
+
       SQL.query!(TestRepo, """
-      CREATE TABLE IF NOT EXISTS test_types (
+      CREATE TABLE test_types (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         blob_col BLOB
       )
@@ -514,8 +513,10 @@ defmodule EctoLibSql.TypeEncodingImplementationTest do
 
   describe "numeric encoding edge cases" do
     setup do
+      SQL.query!(TestRepo, "DROP TABLE IF EXISTS test_types")
+
       SQL.query!(TestRepo, """
-      CREATE TABLE IF NOT EXISTS test_types (
+      CREATE TABLE test_types (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         int_col INTEGER,
         real_col REAL,
@@ -565,8 +566,8 @@ defmodule EctoLibSql.TypeEncodingImplementationTest do
         SQL.query!(TestRepo, "SELECT real_col FROM test_types WHERE real_col = ?", [0.0])
 
       [[stored_real]] = result.rows
-      # Float comparison: allow for +0.0 vs -0.0 representation
-      assert stored_real == +0.0 or stored_real == -0.0
+      # Float comparison: +0.0 == -0.0 in Elixir
+      assert stored_real == 0.0
     end
 
     test "Decimal parameter encoding" do
@@ -604,8 +605,10 @@ defmodule EctoLibSql.TypeEncodingImplementationTest do
 
   describe "temporal type encoding" do
     setup do
+      SQL.query!(TestRepo, "DROP TABLE IF EXISTS test_types")
+
       SQL.query!(TestRepo, """
-      CREATE TABLE IF NOT EXISTS test_types (
+      CREATE TABLE test_types (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         text_col TEXT
       )
@@ -673,8 +676,10 @@ defmodule EctoLibSql.TypeEncodingImplementationTest do
 
   describe "float/real field encoding" do
     setup do
+      SQL.query!(TestRepo, "DROP TABLE IF EXISTS test_types")
+
       SQL.query!(TestRepo, """
-      CREATE TABLE IF NOT EXISTS test_types (
+      CREATE TABLE test_types (
        id INTEGER PRIMARY KEY AUTOINCREMENT,
        real_col REAL
       )
@@ -777,8 +782,10 @@ defmodule EctoLibSql.TypeEncodingImplementationTest do
 
   describe "NULL/nil edge cases" do
     setup do
+      SQL.query!(TestRepo, "DROP TABLE IF EXISTS test_types")
+
       SQL.query!(TestRepo, """
-      CREATE TABLE IF NOT EXISTS test_types (
+      CREATE TABLE test_types (
        id INTEGER PRIMARY KEY AUTOINCREMENT,
        int_col INTEGER,
        real_col REAL,
@@ -903,8 +910,10 @@ defmodule EctoLibSql.TypeEncodingImplementationTest do
 
   describe "type coercion edge cases" do
     setup do
+      SQL.query!(TestRepo, "DROP TABLE IF EXISTS test_types")
+
       SQL.query!(TestRepo, """
-      CREATE TABLE IF NOT EXISTS test_types (
+      CREATE TABLE test_types (
        id INTEGER PRIMARY KEY AUTOINCREMENT,
        int_col INTEGER,
        text_col TEXT,
@@ -965,20 +974,21 @@ defmodule EctoLibSql.TypeEncodingImplementationTest do
     end
 
     test "float precision in arithmetic" do
-      SQL.query!(TestRepo, "INSERT INTO test_types (real_col) VALUES (?)", [0.1])
-      SQL.query!(TestRepo, "INSERT INTO test_types (real_col) VALUES (?)", [0.2])
+      SQL.query!(TestRepo, "INSERT INTO test_types (real_col) VALUES (?)", [0.5])
+      SQL.query!(TestRepo, "INSERT INTO test_types (real_col) VALUES (?)", [1.5])
 
-      # Floating point arithmetic can have precision issues
+      # Use integer-representable values to ensure deterministic results
+      # 0.5 + 0.5 = 1.0, which equals 1.0 (match)
+      # 1.5 + 0.5 = 2.0, which is > 1.0 (match)
       result =
         SQL.query!(
           TestRepo,
-          "SELECT real_col FROM test_types WHERE real_col + ? > ?",
-          [0.1, 0.35]
+          "SELECT real_col FROM test_types WHERE real_col + ? >= ?",
+          [0.5, 1.0]
         )
 
-      # Due to floating point precision, this might return 0 or 1 rows
-      # depending on exact arithmetic
-      assert length(result.rows) in [0, 1]
+      # Exactly 2 rows match: 0.5 + 0.5 >= 1.0 and 1.5 + 0.5 >= 1.0
+      assert length(result.rows) == 2
     end
 
     test "division by zero handling" do
