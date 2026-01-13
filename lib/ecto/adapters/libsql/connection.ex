@@ -422,6 +422,8 @@ defmodule Ecto.Adapters.LibSql.Connection do
   defp column_default(value) when is_binary(value), do: " DEFAULT '#{escape_string(value)}'"
   defp column_default(value) when is_number(value), do: " DEFAULT #{value}"
   defp column_default({:fragment, expr}), do: " DEFAULT #{expr}"
+  # Handle any other unexpected types (e.g., empty maps)
+  defp column_default(_), do: ""
 
   defp table_options(table, columns) do
     # Validate mutually exclusive options (per libSQL specification)

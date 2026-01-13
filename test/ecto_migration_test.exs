@@ -877,4 +877,103 @@ defmodule Ecto.Adapters.LibSql.MigrationTest do
                    end
     end
   end
+
+  describe "column_default edge cases" do
+    test "handles nil default" do
+      table = %Table{name: :users, prefix: nil}
+      columns = [{:add, :name, :string, [default: nil]}]
+
+      [sql] = Connection.execute_ddl({:create, table, columns})
+
+      # nil should result in no DEFAULT clause
+      refute sql =~ "DEFAULT"
+    end
+
+    test "handles boolean defaults" do
+      table = %Table{name: :users, prefix: nil}
+
+      columns = [
+        {:add, :active, :boolean, [default: true]},
+        {:add, :deleted, :boolean, [default: false]}
+      ]
+
+      [sql] = Connection.execute_ddl({:create, table, columns})
+
+      # Booleans should map to 1/0
+      assert sql =~ ~r/"active".*INTEGER DEFAULT 1/
+      assert sql =~ ~r/"deleted".*INTEGER DEFAULT 0/
+    end
+
+    test "handles string defaults" do
+      table = %Table{name: :users, prefix: nil}
+      columns = [{:add, :status, :string, [default: "pending"]}]
+
+      [sql] = Connection.execute_ddl({:create, table, columns})
+
+      assert sql =~ "DEFAULT 'pending'"
+    end
+
+    test "handles numeric defaults" do
+      table = %Table{name: :users, prefix: nil}
+
+      columns = [
+        {:add, :count, :integer, [default: 0]},
+        {:add, :rating, :float, [default: 5.0]}
+      ]
+
+      [sql] = Connection.execute_ddl({:create, table, columns})
+
+      assert sql =~ ~r/"count".*INTEGER DEFAULT 0/
+      assert sql =~ ~r/"rating".*REAL DEFAULT 5\.0/
+    end
+
+    test "handles fragment defaults" do
+      table = %Table{name: :users, prefix: nil}
+      columns = [{:add, :created_at, :string, [default: {:fragment, "datetime('now')"}]}]
+
+      [sql] = Connection.execute_ddl({:create, table, columns})
+
+      assert sql =~ "DEFAULT datetime('now')"
+    end
+
+    test "handles unexpected types gracefully (empty map)" do
+      # This test verifies the catch-all clause for unexpected types.
+      # Empty maps can come from Oban migrations or other third-party code.
+      table = %Table{name: :users, prefix: nil}
+      columns = [{:add, :metadata, :string, [default: %{}]}]
+
+      # Should not raise FunctionClauseError.
+      [sql] = Connection.execute_ddl({:create, table, columns})
+
+      # Empty map should be treated as no default.
+      assert sql =~ ~r/"metadata".*TEXT/
+      refute sql =~ ~r/"metadata".*DEFAULT/
+    end
+
+    test "handles unexpected types gracefully (list)" do
+      # Lists are another unexpected type that might appear.
+      table = %Table{name: :users, prefix: nil}
+      columns = [{:add, :tags, :string, [default: []]}]
+
+      # Should not raise FunctionClauseError.
+      [sql] = Connection.execute_ddl({:create, table, columns})
+
+      # Empty list should be treated as no default.
+      assert sql =~ ~r/"tags".*TEXT/
+      refute sql =~ ~r/"tags".*DEFAULT/
+    end
+
+    test "handles unexpected types gracefully (atom)" do
+      # Atoms other than booleans might appear as defaults.
+      table = %Table{name: :users, prefix: nil}
+      columns = [{:add, :status, :string, [default: :unknown]}]
+
+      # Should not raise FunctionClauseError.
+      [sql] = Connection.execute_ddl({:create, table, columns})
+
+      # Unexpected atom should be treated as no default.
+      assert sql =~ ~r/"status".*TEXT/
+      refute sql =~ ~r/"status".*DEFAULT/
+    end
+  end
 end
