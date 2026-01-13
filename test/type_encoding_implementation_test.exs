@@ -96,7 +96,8 @@ defmodule EctoLibSql.TypeEncodingImplementationTest do
       # Query with boolean parameter true (should match 1)
       result = SQL.query!(TestRepo, "SELECT COUNT(*) FROM users WHERE active = ?", [true])
       assert [[count]] = result.rows
-      assert count >= 1
+      # Exact count: one row with active=1 matches boolean true
+      assert count == 1
     end
 
     test "boolean false in WHERE clause" do
@@ -107,7 +108,8 @@ defmodule EctoLibSql.TypeEncodingImplementationTest do
       # Query with boolean parameter false (should match 0)
       result = SQL.query!(TestRepo, "SELECT COUNT(*) FROM users WHERE active = ?", [false])
       assert [[count]] = result.rows
-      assert count >= 1
+      # Exact count: one row with active=0 matches boolean false
+      assert count == 1
     end
 
     test "Ecto schema with boolean field uses encoding" do
@@ -493,15 +495,15 @@ defmodule EctoLibSql.TypeEncodingImplementationTest do
     end
 
     test "large binary data" do
-      binary = :crypto.strong_rand_bytes(125)
+      # Test with 1MB binary to meaningfully test large data handling
+      binary = :crypto.strong_rand_bytes(1024 * 1024)
 
       result = SQL.query!(TestRepo, "INSERT INTO test_types (blob_col) VALUES (?)", [binary])
       assert result.num_rows == 1
 
       result = SQL.query!(TestRepo, "SELECT blob_col FROM test_types ORDER BY id DESC LIMIT 1")
-      [[stored]] = result.rows
-      assert is_binary(stored)
-      assert byte_size(stored) == byte_size(binary)
+      # Use exact pin matching to verify data integrity, not just size
+      assert [[^binary]] = result.rows
     end
 
     test "binary with mixed bytes" do
@@ -617,58 +619,54 @@ defmodule EctoLibSql.TypeEncodingImplementationTest do
 
     test "DateTime parameter encoding" do
       dt = DateTime.utc_now()
+      expected_iso8601 = DateTime.to_iso8601(dt)
 
       result = SQL.query!(TestRepo, "INSERT INTO test_types (text_col) VALUES (?)", [dt])
       assert result.num_rows == 1
 
-      result =
-        SQL.query!(TestRepo, "SELECT COUNT(*) FROM test_types WHERE text_col LIKE ?", ["202%"])
-
-      assert [[count]] = result.rows
-      assert count >= 1
+      result = SQL.query!(TestRepo, "SELECT text_col FROM test_types ORDER BY id DESC LIMIT 1")
+      assert [[stored]] = result.rows
+      # Verify exact ISO8601 format, not just LIKE pattern
+      assert stored == expected_iso8601
     end
 
     test "NaiveDateTime parameter encoding" do
       dt = NaiveDateTime.utc_now()
+      expected_iso8601 = NaiveDateTime.to_iso8601(dt)
 
       result = SQL.query!(TestRepo, "INSERT INTO test_types (text_col) VALUES (?)", [dt])
       assert result.num_rows == 1
 
-      result =
-        SQL.query!(TestRepo, "SELECT COUNT(*) FROM test_types WHERE text_col LIKE ?", ["202%"])
-
-      assert [[count]] = result.rows
-      assert count >= 1
+      result = SQL.query!(TestRepo, "SELECT text_col FROM test_types ORDER BY id DESC LIMIT 1")
+      assert [[stored]] = result.rows
+      # Verify exact ISO8601 format, not just LIKE pattern
+      assert stored == expected_iso8601
     end
 
     test "Date parameter encoding" do
       date = Date.utc_today()
+      expected_iso8601 = Date.to_iso8601(date)
 
       result = SQL.query!(TestRepo, "INSERT INTO test_types (text_col) VALUES (?)", [date])
       assert result.num_rows == 1
 
-      result =
-        SQL.query!(TestRepo, "SELECT COUNT(*) FROM test_types WHERE text_col LIKE ?", [
-          "____-__-__%"
-        ])
-
-      assert [[count]] = result.rows
-      assert count >= 1
+      result = SQL.query!(TestRepo, "SELECT text_col FROM test_types ORDER BY id DESC LIMIT 1")
+      assert [[stored]] = result.rows
+      # Verify exact ISO8601 format (YYYY-MM-DD), not just LIKE pattern
+      assert stored == expected_iso8601
     end
 
     test "Time parameter encoding" do
       time = Time.new!(14, 30, 45)
+      expected_iso8601 = Time.to_iso8601(time)
 
       result = SQL.query!(TestRepo, "INSERT INTO test_types (text_col) VALUES (?)", [time])
       assert result.num_rows == 1
 
-      result =
-        SQL.query!(TestRepo, "SELECT COUNT(*) FROM test_types WHERE text_col LIKE ?", [
-          "__:__:__%"
-        ])
-
-      assert [[count]] = result.rows
-      assert count >= 1
+      result = SQL.query!(TestRepo, "SELECT text_col FROM test_types ORDER BY id DESC LIMIT 1")
+      assert [[stored]] = result.rows
+      # Verify exact ISO8601 format (HH:MM:SS.ffffff), not just LIKE pattern
+      assert stored == expected_iso8601
     end
   end
 
