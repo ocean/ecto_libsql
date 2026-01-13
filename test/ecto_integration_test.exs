@@ -867,25 +867,28 @@ defmodule Ecto.Integration.EctoLibSqlTest do
         "nested" => %{"key" => "value"}
       }
 
-      # Execute query with map parameter
+      # Execute query with raw map to exercise automatic encoding in Query.encode_param
       result =
         Ecto.Adapters.SQL.query!(
           TestRepo,
           "INSERT INTO posts (title, body, user_id, inserted_at, updated_at) VALUES (?, ?, ?, datetime('now'), datetime('now'))",
-          ["Test Post", Jason.encode!(metadata), user.id]
+          ["Test Post", metadata, user.id]
         )
 
+      # Verify the insert succeeded (automatic encoding worked)
       assert result.num_rows == 1
 
-      # Verify the data was inserted correctly
+      # Verify the data was inserted correctly with JSON encoding
       posts = TestRepo.all(Post)
       assert length(posts) == 1
       post = hd(posts)
       assert post.title == "Test Post"
-      # body contains JSON-encoded metadata
+
+      # Verify the body contains properly encoded JSON
       assert {:ok, decoded} = Jason.decode(post.body)
       assert decoded["tags"] == ["elixir", "database"]
       assert decoded["priority"] == 1
+      assert decoded["nested"]["key"] == "value"
     end
 
     test "nested maps in parameters are encoded" do
