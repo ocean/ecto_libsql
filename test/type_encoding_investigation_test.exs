@@ -140,7 +140,8 @@ defmodule EctoLibSql.TypeEncodingInvestigationTest do
         {"INSERT INTO test_types (int_col) VALUES (?)", [0]}
       ]
 
-      results = statements
+      results =
+        statements
         |> Enum.map(fn {sql, params} ->
           SQL.query!(TestRepo, sql, params)
         end)
@@ -149,7 +150,8 @@ defmodule EctoLibSql.TypeEncodingInvestigationTest do
 
       result = SQL.query!(TestRepo, "SELECT COUNT(*) FROM test_types")
       assert [[count]] = result.rows
-      assert count >= 4  # May have more from previous tests
+      # May have more from previous tests
+      assert count >= 4
 
       SQL.query!(TestRepo, "DELETE FROM test_types")
     end
@@ -228,6 +230,7 @@ defmodule EctoLibSql.TypeEncodingInvestigationTest do
 
     test "pre-encoded map with DateTime works" do
       now = DateTime.utc_now()
+
       nested = %{
         "created_at" => DateTime.to_iso8601(now),
         "data" => "value"
@@ -258,6 +261,7 @@ defmodule EctoLibSql.TypeEncodingInvestigationTest do
 
     test "list with pre-encoded temporal values works" do
       now = DateTime.utc_now()
+
       _list_pre_encoded = [
         DateTime.to_iso8601(now),
         "string",
@@ -292,7 +296,8 @@ defmodule EctoLibSql.TypeEncodingInvestigationTest do
     end
 
     test "very large integer" do
-      large_int = 9_223_372_036_854_775_807  # Max i64
+      # Max i64
+      large_int = 9_223_372_036_854_775_807
 
       result = SQL.query!(TestRepo, "INSERT INTO test_types (int_col) VALUES (?)", [large_int])
       assert result.num_rows == 1
@@ -304,9 +309,12 @@ defmodule EctoLibSql.TypeEncodingInvestigationTest do
     end
 
     test "negative large integer" do
-      large_negative = -9_223_372_036_854_775_808  # Min i64
+      # Min i64
+      large_negative = -9_223_372_036_854_775_808
 
-      result = SQL.query!(TestRepo, "INSERT INTO test_types (int_col) VALUES (?)", [large_negative])
+      result =
+        SQL.query!(TestRepo, "INSERT INTO test_types (int_col) VALUES (?)", [large_negative])
+
       assert result.num_rows == 1
 
       result = SQL.query!(TestRepo, "SELECT int_col FROM test_types ORDER BY id DESC LIMIT 1")
@@ -316,7 +324,8 @@ defmodule EctoLibSql.TypeEncodingInvestigationTest do
     end
 
     test "very large float" do
-      large_float = 1.7976931348623157e308  # Near max f64
+      # Near max f64
+      large_float = 1.7976931348623157e308
 
       result = SQL.query!(TestRepo, "INSERT INTO test_types (real_col) VALUES (?)", [large_float])
       assert result.num_rows == 1
@@ -330,7 +339,8 @@ defmodule EctoLibSql.TypeEncodingInvestigationTest do
     end
 
     test "very small float" do
-      small_float = 1.0e-308  # Near min positive f64
+      # Near min positive f64
+      small_float = 1.0e-308
 
       result = SQL.query!(TestRepo, "INSERT INTO test_types (real_col) VALUES (?)", [small_float])
       assert result.num_rows == 1
@@ -426,7 +436,9 @@ defmodule EctoLibSql.TypeEncodingInvestigationTest do
       SQL.query!(TestRepo, "INSERT INTO test_types (int_col) VALUES (?)", [0])
       SQL.query!(TestRepo, "INSERT INTO test_types (real_col) VALUES (?)", [0.0])
 
-      result = SQL.query!(TestRepo, "SELECT int_col, real_col FROM test_types ORDER BY id DESC LIMIT 2")
+      result =
+        SQL.query!(TestRepo, "SELECT int_col, real_col FROM test_types ORDER BY id DESC LIMIT 2")
+
       rows = result.rows
       # First insert: int_col=0, real_col=nil
       # Second insert: int_col=nil, real_col=0.0
@@ -445,7 +457,10 @@ defmodule EctoLibSql.TypeEncodingInvestigationTest do
       assert result.num_rows == 1
 
       decimal_str = Decimal.to_string(decimal)
-      result = SQL.query!(TestRepo, "SELECT text_col FROM test_types WHERE text_col = ?", [decimal_str])
+
+      result =
+        SQL.query!(TestRepo, "SELECT text_col FROM test_types WHERE text_col = ?", [decimal_str])
+
       assert result.rows != []
       [[stored]] = result.rows
       # Should be stored as string representation
@@ -470,7 +485,10 @@ defmodule EctoLibSql.TypeEncodingInvestigationTest do
       assert result.num_rows == 1
 
       decimal_str = Decimal.to_string(decimal)
-      result = SQL.query!(TestRepo, "SELECT text_col FROM test_types WHERE text_col = ?", [decimal_str])
+
+      result =
+        SQL.query!(TestRepo, "SELECT text_col FROM test_types WHERE text_col = ?", [decimal_str])
+
       assert result.rows != []
       [[stored]] = result.rows
       assert stored == decimal_str
@@ -486,7 +504,9 @@ defmodule EctoLibSql.TypeEncodingInvestigationTest do
       result = SQL.query!(TestRepo, "INSERT INTO test_types (text_col) VALUES (?)", [dt])
       assert result.num_rows == 1
 
-      result = SQL.query!(TestRepo, "SELECT COUNT(*) FROM test_types WHERE text_col LIKE ?", ["202%"])
+      result =
+        SQL.query!(TestRepo, "SELECT COUNT(*) FROM test_types WHERE text_col LIKE ?", ["202%"])
+
       assert [[count]] = result.rows
       assert count >= 1
 
@@ -499,7 +519,9 @@ defmodule EctoLibSql.TypeEncodingInvestigationTest do
       result = SQL.query!(TestRepo, "INSERT INTO test_types (text_col) VALUES (?)", [dt])
       assert result.num_rows == 1
 
-      result = SQL.query!(TestRepo, "SELECT COUNT(*) FROM test_types WHERE text_col LIKE ?", ["202%"])
+      result =
+        SQL.query!(TestRepo, "SELECT COUNT(*) FROM test_types WHERE text_col LIKE ?", ["202%"])
+
       assert [[count]] = result.rows
       assert count >= 1
 
@@ -512,7 +534,11 @@ defmodule EctoLibSql.TypeEncodingInvestigationTest do
       result = SQL.query!(TestRepo, "INSERT INTO test_types (text_col) VALUES (?)", [date])
       assert result.num_rows == 1
 
-      result = SQL.query!(TestRepo, "SELECT COUNT(*) FROM test_types WHERE text_col LIKE ?", ["____-__-__%"])
+      result =
+        SQL.query!(TestRepo, "SELECT COUNT(*) FROM test_types WHERE text_col LIKE ?", [
+          "____-__-__%"
+        ])
+
       assert [[count]] = result.rows
       assert count >= 1
 
@@ -525,7 +551,11 @@ defmodule EctoLibSql.TypeEncodingInvestigationTest do
       result = SQL.query!(TestRepo, "INSERT INTO test_types (text_col) VALUES (?)", [time])
       assert result.num_rows == 1
 
-      result = SQL.query!(TestRepo, "SELECT COUNT(*) FROM test_types WHERE text_col LIKE ?", ["__:__:__%"])
+      result =
+        SQL.query!(TestRepo, "SELECT COUNT(*) FROM test_types WHERE text_col LIKE ?", [
+          "__:__:__%"
+        ])
+
       assert [[count]] = result.rows
       assert count >= 1
 
@@ -560,7 +590,8 @@ defmodule EctoLibSql.TypeEncodingInvestigationTest do
         {"INSERT INTO test_types (real_col) VALUES (?)", [3.14]}
       ]
 
-      results = statements
+      results =
+        statements
         |> Enum.map(fn {sql, params} ->
           SQL.query!(TestRepo, sql, params)
         end)

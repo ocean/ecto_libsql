@@ -72,6 +72,11 @@ defmodule EctoLibSql.Query do
     # This allows using :null in Ecto queries as an alternative to nil
     defp encode_param(:null), do: nil
 
+    # Map encoding: plain maps (not structs) are encoded to JSON
+    defp encode_param(value) when is_map(value) and not is_struct(value) do
+      Jason.encode!(value)
+    end
+
     # Pass through all other values unchanged
     defp encode_param(value), do: value
 

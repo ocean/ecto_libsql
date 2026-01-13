@@ -226,7 +226,9 @@ defmodule EctoLibSql.TypeEncodingImplementationTest do
       assert result.num_rows == 1
 
       # Verify NULL was stored
-      result = SQL.query!(TestRepo, "SELECT uuid FROM users WHERE name = ? AND uuid IS NULL", ["Alice"])
+      result =
+        SQL.query!(TestRepo, "SELECT uuid FROM users WHERE name = ? AND uuid IS NULL", ["Alice"])
+
       assert [[nil]] = result.rows
     end
 
@@ -238,7 +240,9 @@ defmodule EctoLibSql.TypeEncodingImplementationTest do
 
       # Query with :null should find it
       result =
-        SQL.query!(TestRepo, "SELECT COUNT(*) FROM users WHERE uuid IS NULL AND name = ?", ["Alice"])
+        SQL.query!(TestRepo, "SELECT COUNT(*) FROM users WHERE uuid IS NULL AND name = ?", [
+          "Alice"
+        ])
 
       assert [[1]] = result.rows
     end
@@ -247,7 +251,11 @@ defmodule EctoLibSql.TypeEncodingImplementationTest do
       SQL.query!(TestRepo, "DELETE FROM users")
 
       SQL.query!(TestRepo, "INSERT INTO users (name, uuid) VALUES (?, ?)", ["Alice", :null])
-      SQL.query!(TestRepo, "INSERT INTO users (name, uuid) VALUES (?, ?)", ["Bob", Ecto.UUID.generate()])
+
+      SQL.query!(TestRepo, "INSERT INTO users (name, uuid) VALUES (?, ?)", [
+        "Bob",
+        Ecto.UUID.generate()
+      ])
 
       # Count non-NULL values
       result = SQL.query!(TestRepo, "SELECT COUNT(*) FROM users WHERE uuid IS NOT NULL")
@@ -268,7 +276,9 @@ defmodule EctoLibSql.TypeEncodingImplementationTest do
       uuid = Ecto.UUID.generate()
 
       result =
-        SQL.query!(TestRepo, "INSERT INTO users (name, email, active, uuid) VALUES (?, ?, ?, ?)",
+        SQL.query!(
+          TestRepo,
+          "INSERT INTO users (name, email, active, uuid) VALUES (?, ?, ?, ?)",
           ["Alice", "alice@example.com", true, uuid]
         )
 
@@ -276,9 +286,10 @@ defmodule EctoLibSql.TypeEncodingImplementationTest do
 
       # Verify all values
       result =
-        SQL.query!(TestRepo, "SELECT active, uuid FROM users WHERE name = ? AND email = ?",
-          ["Alice", "alice@example.com"]
-        )
+        SQL.query!(TestRepo, "SELECT active, uuid FROM users WHERE name = ? AND email = ?", [
+          "Alice",
+          "alice@example.com"
+        ])
 
       assert [[1, ^uuid]] = result.rows
     end
@@ -358,7 +369,11 @@ defmodule EctoLibSql.TypeEncodingImplementationTest do
 
       SQL.query!(TestRepo, "INSERT INTO users (name, uuid) VALUES (?, ?)", ["A", uuid])
       SQL.query!(TestRepo, "INSERT INTO users (name, uuid) VALUES (?, ?)", ["B", uuid])
-      SQL.query!(TestRepo, "INSERT INTO users (name, uuid) VALUES (?, ?)", ["C", Ecto.UUID.generate()])
+
+      SQL.query!(TestRepo, "INSERT INTO users (name, uuid) VALUES (?, ?)", [
+        "C",
+        Ecto.UUID.generate()
+      ])
 
       # Count by UUID
       result =
@@ -372,7 +387,11 @@ defmodule EctoLibSql.TypeEncodingImplementationTest do
       SQL.query!(TestRepo, "DELETE FROM users")
 
       SQL.query!(TestRepo, "INSERT INTO users (name, uuid) VALUES (?, ?)", ["A", :null])
-      SQL.query!(TestRepo, "INSERT INTO users (name, uuid) VALUES (?, ?)", ["B", Ecto.UUID.generate()])
+
+      SQL.query!(TestRepo, "INSERT INTO users (name, uuid) VALUES (?, ?)", [
+        "B",
+        Ecto.UUID.generate()
+      ])
 
       # IS NULL should work
       result = SQL.query!(TestRepo, "SELECT COUNT(*) FROM users WHERE uuid IS NULL")

@@ -856,12 +856,6 @@ defmodule Ecto.Integration.EctoLibSqlTest do
   end
 
   describe "map parameter encoding" do
-    setup do
-      TestRepo.delete_all(Post)
-      TestRepo.delete_all(User)
-      :ok
-    end
-
     test "plain maps are encoded to JSON before passing to NIF" do
       # Create a user
       user = TestRepo.insert!(%User{name: "Alice", email: "alice@example.com"})
@@ -906,12 +900,12 @@ defmodule Ecto.Integration.EctoLibSqlTest do
         "mixed" => ["string", 42, true]
       }
 
-      # Should encode without error
+      # Pass raw map to verify adapter's automatic encoding
       result =
         Ecto.Adapters.SQL.query!(
           TestRepo,
           "SELECT ? as data",
-          [Jason.encode!(complex_data)]
+          [complex_data]
         )
 
       assert [[json_str]] = result.rows
@@ -920,19 +914,24 @@ defmodule Ecto.Integration.EctoLibSqlTest do
     end
 
     test "structs are not encoded as maps" do
-      # DateTime structs should pass through (handled by query.ex encoding)
+      # DateTime structs should be automatically encoded (handled by query.ex encoding)
       now = DateTime.utc_now()
 
-      # This should not error - DateTime structs are handled separately
+      # Pass raw DateTime struct to verify automatic encoding
       result =
         Ecto.Adapters.SQL.query!(
           TestRepo,
           "SELECT ? as timestamp",
-          [DateTime.to_iso8601(now)]
+          [now]
         )
 
       assert [[timestamp_str]] = result.rows
       assert is_binary(timestamp_str)
+      # Verify it's a valid ISO8601 string
+      assert {:ok, decoded_dt, _offset} = DateTime.from_iso8601(timestamp_str)
+      assert decoded_dt.year == now.year
+      assert decoded_dt.month == now.month
+      assert decoded_dt.day == now.day
     end
   end
 
