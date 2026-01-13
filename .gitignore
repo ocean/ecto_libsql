@@ -41,5 +41,12 @@ z_ecto_libsql_test*
 
 # bv (beads viewer) local config and caches
 .bv/
+
+# Beads CLI local config and database
+.beads/
+
+# Implementation summaries and temporary docs
+TYPE_ENCODING_SUMMARY.md
+
 TEST_AUDIT_REPORT.md
 TEST_COVERAGE_ISSUES_CREATED.md
