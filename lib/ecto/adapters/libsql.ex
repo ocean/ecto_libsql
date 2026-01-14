@@ -281,6 +281,8 @@ defmodule Ecto.Adapters.LibSql do
   defp json_decode(value) when is_map(value), do: {:ok, value}
   defp json_decode(value), do: {:ok, value}
 
+  defp json_array_decode(nil), do: {:ok, nil}
+
   defp json_array_decode(value) when is_binary(value) do
     case value do
       # Empty string defaults to empty array
