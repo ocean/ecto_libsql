@@ -27,13 +27,63 @@ defmodule EctoLibSql.EctoSqlite3CrudCompatTest do
 
     {:ok, _} = EctoLibSql.Integration.TestRepo.start_link()
 
-    # Run migrations
-    :ok = Ecto.Migrator.up(
-      EctoLibSql.Integration.TestRepo,
-      0,
-      EctoLibSql.Integration.Migration,
-      log: false
+    # Create tables manually - migration approach has ID generation issues
+    Ecto.Adapters.SQL.query!(TestRepo, """
+    CREATE TABLE IF NOT EXISTS accounts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT,
+      email TEXT,
+      inserted_at DATETIME,
+      updated_at DATETIME
     )
+    """)
+
+    Ecto.Adapters.SQL.query!(TestRepo, """
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT,
+      custom_id TEXT,
+      inserted_at DATETIME,
+      updated_at DATETIME
+    )
+    """)
+
+    Ecto.Adapters.SQL.query!(TestRepo, """
+    CREATE TABLE IF NOT EXISTS products (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      account_id INTEGER,
+      name TEXT,
+      description TEXT,
+      external_id TEXT,
+      bid BLOB,
+      tags TEXT,
+      type INTEGER,
+      approved_at DATETIME,
+      ordered_at DATETIME,
+      price TEXT,
+      inserted_at DATETIME,
+      updated_at DATETIME
+    )
+    """)
+
+    Ecto.Adapters.SQL.query!(TestRepo, """
+    CREATE TABLE IF NOT EXISTS account_users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      account_id INTEGER,
+      user_id INTEGER,
+      role TEXT,
+      inserted_at DATETIME,
+      updated_at DATETIME
+    )
+    """)
+
+    Ecto.Adapters.SQL.query!(TestRepo, """
+    CREATE TABLE IF NOT EXISTS settings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      properties TEXT,
+      checksum BLOB
+    )
+    """)
 
     on_exit(fn ->
       EctoLibSql.TestHelpers.cleanup_db_files(@test_db)
