@@ -266,6 +266,74 @@ defmodule EctoLibSql.TypeEncodingImplementationTest do
     end
   end
 
+  describe "nil value encoding" do
+    test "nil boolean encoded correctly" do
+      SQL.query!(TestRepo, "DELETE FROM users")
+
+      # Insert with nil boolean
+      result =
+        SQL.query!(TestRepo, "INSERT INTO users (name, active) VALUES (?, ?)", ["Alice", nil])
+
+      assert result.num_rows == 1
+
+      # Verify NULL was stored
+      result = SQL.query!(TestRepo, "SELECT active FROM users WHERE name = ?", ["Alice"])
+      assert [[nil]] = result.rows
+    end
+
+    test "nil date encoded correctly" do
+      # Create table if not exists
+      SQL.query!(TestRepo, """
+      CREATE TABLE IF NOT EXISTS test_dates (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT,
+        birth_date DATE
+      )
+      """)
+
+      SQL.query!(TestRepo, "DELETE FROM test_dates")
+
+      # Insert with nil date
+      result =
+        SQL.query!(TestRepo, "INSERT INTO test_dates (name, birth_date) VALUES (?, ?)", [
+          "Alice",
+          nil
+        ])
+
+      assert result.num_rows == 1
+
+      # Verify NULL was stored
+      result = SQL.query!(TestRepo, "SELECT birth_date FROM test_dates WHERE name = ?", ["Alice"])
+      assert [[nil]] = result.rows
+    end
+
+    test "nil time encoded correctly" do
+      # Create table if not exists
+      SQL.query!(TestRepo, """
+      CREATE TABLE IF NOT EXISTS test_times (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT,
+        start_time TIME
+      )
+      """)
+
+      SQL.query!(TestRepo, "DELETE FROM test_times")
+
+      # Insert with nil time
+      result =
+        SQL.query!(TestRepo, "INSERT INTO test_times (name, start_time) VALUES (?, ?)", [
+          "Alice",
+          nil
+        ])
+
+      assert result.num_rows == 1
+
+      # Verify NULL was stored
+      result = SQL.query!(TestRepo, "SELECT start_time FROM test_times WHERE name = ?", ["Alice"])
+      assert [[nil]] = result.rows
+    end
+  end
+
   describe "combined type encoding" do
     test "multiple encoded types in single query" do
       SQL.query!(TestRepo, "DELETE FROM users")

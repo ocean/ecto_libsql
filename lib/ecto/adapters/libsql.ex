@@ -318,6 +318,7 @@ defmodule Ecto.Adapters.LibSql do
   def dumpers({:array, _}, type), do: [type, &array_encode/1]
   def dumpers(_primitive, type), do: [type]
 
+  defp bool_encode(nil), do: {:ok, nil}
   defp bool_encode(false), do: {:ok, 0}
   defp bool_encode(true), do: {:ok, 1}
 
@@ -333,8 +334,16 @@ defmodule Ecto.Adapters.LibSql do
     {:ok, NaiveDateTime.to_iso8601(datetime)}
   end
 
+  defp date_encode(nil) do
+    {:ok, nil}
+  end
+
   defp date_encode(%Date{} = date) do
     {:ok, Date.to_iso8601(date)}
+  end
+
+  defp time_encode(nil) do
+    {:ok, nil}
   end
 
   defp time_encode(%Time{} = time) do
