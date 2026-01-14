@@ -2896,10 +2896,47 @@ Ecto types map to SQLite types as follows:
 | `:text` | `TEXT` | ✅ Works perfectly |
 | `:date` | `DATE` | ✅ Stored as ISO8601 |
 | `:time` | `TIME` | ✅ Stored as ISO8601 |
+| `:time_usec` | `TIME` | ✅ Stored as ISO8601 with microseconds |
 | `:naive_datetime` | `DATETIME` | ✅ Stored as ISO8601 |
+| `:naive_datetime_usec` | `DATETIME` | ✅ Stored as ISO8601 with microseconds |
 | `:utc_datetime` | `DATETIME` | ✅ Stored as ISO8601 |
+| `:utc_datetime_usec` | `DATETIME` | ✅ Stored as ISO8601 with microseconds |
 | `:map` / `:json` | `TEXT` | ✅ Stored as JSON |
 | `{:array, _}` | ❌ Not supported | Use JSON or separate tables |
+
+**DateTime Types with Microsecond Precision:**
+
+All datetime types support microsecond precision. Use the `_usec` variants for explicit microsecond handling:
+
+```elixir
+# Schema with microsecond timestamps
+defmodule Sale do
+  use Ecto.Schema
+  
+  @timestamps_opts [type: :utc_datetime_usec]
+  schema "sales" do
+    field :product_name, :string
+    field :amount, :decimal
+    # inserted_at and updated_at will be :utc_datetime_usec
+    timestamps()
+  end
+end
+
+# Explicit microsecond field
+defmodule Event do
+  use Ecto.Schema
+  
+  schema "events" do
+    field :name, :string
+    field :occurred_at, :utc_datetime_usec  # Explicit microsecond precision
+    timestamps()
+  end
+end
+```
+
+Both standard and `_usec` variants store datetime values as ISO 8601 strings in SQLite:
+- Standard: `"2026-01-14T06:09:59Z"` (precision varies)
+- With `_usec`: `"2026-01-14T06:09:59.081609Z"` (always includes microseconds)
 
 ### Ecto Migration Notes
 
