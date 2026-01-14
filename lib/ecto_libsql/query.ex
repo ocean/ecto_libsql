@@ -38,8 +38,63 @@ defmodule EctoLibSql.Query do
 
     def describe(query, _opts), do: query
 
+    # Convert Elixir types to SQLite-compatible values before sending to NIF.
+    # Rustler cannot automatically serialise complex Elixir structs like DateTime,
+    # so we convert them to ISO8601 strings that SQLite can handle.
+    #
+    # Supported type conversions:
+    # - DateTime/NaiveDateTime/Date/Time → ISO8601 strings
+    # - Decimal → string representation
+    # - true/false → 1/0 (SQLite uses integers for booleans)
+    # - UUID binary → string representation (if needed)
+    # - :null atom → nil (SQL NULL)
+    def encode(_query, params, _opts) when is_list(params) do
+      Enum.map(params, &encode_param/1)
+    end
+
     def encode(_query, params, _opts), do: params
 
+    # Temporal types
+    defp encode_param(%DateTime{} = dt), do: DateTime.to_iso8601(dt)
+    defp encode_param(%NaiveDateTime{} = dt), do: NaiveDateTime.to_iso8601(dt)
+    defp encode_param(%Date{} = d), do: Date.to_iso8601(d)
+    defp encode_param(%Time{} = t), do: Time.to_iso8601(t)
+
+    # Decimal
+    defp encode_param(%Decimal{} = d), do: Decimal.to_string(d)
+
+    # Boolean conversion: SQLite uses 0/1 for boolean values
+    # This is important for queries like: where u.active == ^true
+    defp encode_param(true), do: 1
+    defp encode_param(false), do: 0
+
+    # NULL atom conversion: :null → nil (SQL NULL)
+    # This allows using :null in Ecto queries as an alternative to nil
+    defp encode_param(:null), do: nil
+
+    # Map encoding: plain maps (not structs) are encoded to JSON
+    # Maps must contain only JSON-serializable values (strings, numbers, booleans,
+    # nil, lists, and nested maps). PIDs, functions, references, and other special
+    # Elixir types are not serializable and will raise a descriptive error.
+    defp encode_param(value) when is_map(value) and not is_struct(value) do
+      case Jason.encode(value) do
+        {:ok, json} ->
+          json
+
+        {:error, %Jason.EncodeError{message: msg}} ->
+          raise ArgumentError,
+            message:
+              "Cannot encode map parameter to JSON. Map contains non-JSON-serializable value. " <>
+                "Maps can only contain strings, numbers, booleans, nil, lists, and nested maps. " <>
+                "Reason: #{msg}. Map: #{inspect(value)}"
+      end
+    end
+
+    # Pass through all other values unchanged
+    defp encode_param(value), do: value
+
+    # Pass through results from Native.ex unchanged.
+    # Native.ex already handles proper normalisation of columns and rows.
     def decode(_query, result, _opts), do: result
   end
 

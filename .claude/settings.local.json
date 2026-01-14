@@ -49,7 +49,11 @@
       "Bash(git commit:*)",
       "Bash(git push)",
       "Bash(git --no-pager status)",
-      "Bash(cargo deny check:*)"
+      "Bash(cargo deny check:*)",
+      "Bash(gh pr diff:*)",
+      "Bash(gh pr checks:*)",
+      "Bash(gh run view:*)",
+      "Bash(gh pr checkout:*)"
     ],
     "deny": [],
     "ask": []

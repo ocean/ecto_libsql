@@ -684,7 +684,10 @@ defmodule EctoLibSql.Native do
 
   @doc false
   defp do_query(conn_id, mode, syncx, statement, args_for_execution, query, state) do
-    case query_args(conn_id, mode, syncx, statement, args_for_execution) do
+    # Encode parameters to handle complex Elixir types (maps, etc.).
+    encoded_args = encode_parameters(args_for_execution)
+
+    case query_args(conn_id, mode, syncx, statement, encoded_args) do
       %{
         "columns" => columns,
         "rows" => rows,
@@ -749,6 +752,9 @@ defmodule EctoLibSql.Native do
 
   @doc false
   defp do_execute_with_trx(conn_id, trx_id, statement, args_for_execution, query, state) do
+    # Encode parameters to handle complex Elixir types (maps, etc.).
+    encoded_args = encode_parameters(args_for_execution)
+
     # Detect the command type to route correctly.
     command = detect_command(statement)
 
@@ -761,7 +767,7 @@ defmodule EctoLibSql.Native do
 
     if should_query do
       # Use query_with_trx_args for SELECT or statements with RETURNING.
-      case query_with_trx_args(trx_id, conn_id, statement, args_for_execution) do
+      case query_with_trx_args(trx_id, conn_id, statement, encoded_args) do
         %{
           "columns" => columns,
           "rows" => rows,
@@ -790,7 +796,7 @@ defmodule EctoLibSql.Native do
       end
     else
       # Use execute_with_transaction for INSERT/UPDATE/DELETE without RETURNING
-      case execute_with_transaction(trx_id, conn_id, statement, args_for_execution) do
+      case execute_with_transaction(trx_id, conn_id, statement, encoded_args) do
         num_rows when is_integer(num_rows) ->
           result = %EctoLibSql.Result{
             command: command,
@@ -2167,4 +2173,22 @@ defmodule EctoLibSql.Native do
   def freeze_replica(_state) do
     {:error, :unsupported}
   end
+
+  # Encode parameters to handle complex Elixir types before passing to NIF.
+  # The Rust NIF cannot serialize plain Elixir maps, so we convert them to JSON strings.
+  @doc false
+  defp encode_parameters(args) when is_list(args) do
+    Enum.map(args, &encode_param/1)
+  end
+
+  defp encode_parameters(args), do: args
+
+  @doc false
+  # Only encode plain maps (not structs) to JSON.
+  # Structs like DateTime, Decimal etc are handled in query.ex encode.
+  defp encode_param(value) when is_map(value) and not is_struct(value) do
+    Jason.encode!(value)
+  end
+
+  defp encode_param(value), do: value
 end

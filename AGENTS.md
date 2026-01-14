@@ -2610,6 +2610,199 @@ export TURSO_AUTH_TOKEN="eyJ..."
 - 🌍 **Global distribution** via Turso edge
 - 💪 **Offline capability** - works without network
 
+### Type Encoding and Parameter Conversion
+
+EctoLibSql automatically converts Elixir types to SQLite-compatible formats. Understanding these conversions is important for correct database usage.
+
+#### Automatically Encoded Types
+
+The following types are automatically converted when passed as query parameters:
+
+##### Temporal Types
+
+```elixir
+# DateTime → ISO8601 string
+dt = DateTime.utc_now()
+SQL.query!(Repo, "INSERT INTO events (created_at) VALUES (?)", [dt])
+# Stored as: "2026-01-13T03:45:23.123456Z"
+
+# NaiveDateTime → ISO8601 string
+dt = NaiveDateTime.utc_now()
+SQL.query!(Repo, "INSERT INTO events (created_at) VALUES (?)", [dt])
+# Stored as: "2026-01-13T03:45:23.123456"
+
+# Date → ISO8601 string
+date = Date.utc_today()
+SQL.query!(Repo, "INSERT INTO events (event_date) VALUES (?)", [date])
+# Stored as: "2026-01-13"
+
+# Time → ISO8601 string
+time = Time.new!(14, 30, 45)
+SQL.query!(Repo, "INSERT INTO events (event_time) VALUES (?)", [time])
+# Stored as: "14:30:45.000000"
+
+# Relative dates (compute absolute date first, then pass)
+tomorrow = Date.add(Date.utc_today(), 1)  # Becomes a Date struct
+SQL.query!(Repo, "INSERT INTO events (event_date) VALUES (?)", [tomorrow])
+
+# Third-party date types (Timex, etc.) - pre-convert to standard types
+# ❌ NOT SUPPORTED: Timex.DateTime or custom structs
+# ✅ DO THIS: Convert to native DateTime first
+timex_dt = Timex.now()
+native_dt = Timex.to_datetime(timex_dt)  # Convert to DateTime
+SQL.query!(Repo, "INSERT INTO events (created_at) VALUES (?)", [native_dt])
+```
+
+##### Boolean Values
+
+```elixir
+# true → 1, false → 0
+# SQLite uses integers for booleans
+SQL.query!(Repo, "INSERT INTO users (active) VALUES (?)", [true])
+# Stored as: 1
+
+SQL.query!(Repo, "INSERT INTO users (active) VALUES (?)", [false])
+# Stored as: 0
+
+# Works with WHERE clauses
+SQL.query!(Repo, "SELECT * FROM users WHERE active = ?", [true])
+# Matches rows where active = 1
+```
+
+##### Decimal Values
+
+```elixir
+# Decimal → string representation
+decimal = Decimal.new("123.45")
+SQL.query!(Repo, "INSERT INTO prices (amount) VALUES (?)", [decimal])
+# Stored as: "123.45"
+```
+
+##### NULL/nil Values
+
+```elixir
+# nil → NULL
+SQL.query!(Repo, "INSERT INTO users (bio) VALUES (?)", [nil])
+# Stored as SQL NULL
+
+# :null atom → nil → NULL (v0.8.3+)
+# Alternative way to represent NULL
+SQL.query!(Repo, "INSERT INTO users (bio) VALUES (?)", [:null])
+# Also stored as SQL NULL
+
+# Both work identically:
+SQL.query!(Repo, "SELECT * FROM users WHERE bio IS NULL")  # Matches both
+```
+
+##### UUID Values
+
+```elixir
+# Ecto.UUID strings work directly (already binary strings)
+uuid = Ecto.UUID.generate()
+SQL.query!(Repo, "INSERT INTO users (id) VALUES (?)", [uuid])
+# Stored as: "550e8400-e29b-41d4-a716-446655440000"
+
+# Works with WHERE clauses
+SQL.query!(Repo, "SELECT * FROM users WHERE id = ?", [uuid])
+```
+
+#### Type Encoding Examples
+
+```elixir
+defmodule MyApp.Examples do
+  def example_with_multiple_types do
+    import Ecto.Adapters.SQL
+    
+    now = DateTime.utc_now()
+    user_active = true
+    amount = Decimal.new("99.99")
+    
+    # All types are automatically encoded
+    query!(Repo, 
+      "INSERT INTO transactions (created_at, active, amount) VALUES (?, ?, ?)",
+      [now, user_active, amount]
+    )
+  end
+
+  def example_with_ecto_queries do
+    import Ecto.Query
+    
+    from(u in User,
+      where: u.active == ^true,           # Boolean encoded to 1
+      where: u.created_at > ^DateTime.utc_now()  # DateTime encoded to ISO8601
+    )
+    |> Repo.all()
+  end
+
+  def example_with_null do
+    # Both are equivalent:
+    SQL.query!(Repo, "INSERT INTO users (bio) VALUES (?)", [nil])
+    SQL.query!(Repo, "INSERT INTO users (bio) VALUES (?)", [:null])
+    
+    # Query for NULL values
+    SQL.query!(Repo, "SELECT * FROM users WHERE bio IS NULL")
+  end
+end
+```
+
+#### Limitations: Nested Structures with Temporal Types
+
+Nested structures (maps/lists) containing temporal types are **not automatically encoded**. Only top-level parameters are encoded.
+
+```elixir
+# ❌ DOESN'T WORK - Nested DateTime not encoded
+nested = %{
+  "created_at" => DateTime.utc_now(),  # ← Not auto-encoded
+  "data" => "value"
+}
+SQL.query!(Repo, "INSERT INTO events (metadata) VALUES (?)", [nested])
+# Error: DateTime struct cannot be serialized to JSON
+
+# ✅ WORKS - Pre-encode nested values
+nested = %{
+  "created_at" => DateTime.utc_now() |> DateTime.to_iso8601(),
+  "data" => "value"
+}
+json = Jason.encode!(nested)
+SQL.query!(Repo, "INSERT INTO events (metadata) VALUES (?)", [json])
+
+# ✅ WORKS - Encode before creating map
+dt = DateTime.utc_now() |> DateTime.to_iso8601()
+nested = %{"created_at" => dt, "data" => "value"}
+json = Jason.encode!(nested)
+SQL.query!(Repo, "INSERT INTO events (metadata) VALUES (?)", [json])
+```
+
+**Workaround:**
+When working with maps/lists containing temporal types, manually convert them to JSON strings before passing to queries:
+
+```elixir
+defmodule MyApp.JsonHelpers do
+  def safe_json_encode(map) when is_map(map) do
+    map
+    |> Enum.map(fn
+      {k, %DateTime{} = v} -> {k, DateTime.to_iso8601(v)}
+      {k, %NaiveDateTime{} = v} -> {k, NaiveDateTime.to_iso8601(v)}
+      {k, %Date{} = v} -> {k, Date.to_iso8601(v)}
+      {k, %Decimal{} = v} -> {k, Decimal.to_string(v)}
+      {k, v} -> {k, v}
+    end)
+    |> Enum.into(%{})
+    |> Jason.encode!()
+  end
+end
+
+# Usage:
+nested = %{
+  "created_at" => DateTime.utc_now(),
+  "data" => "value"
+}
+json = MyApp.JsonHelpers.safe_json_encode(nested)
+SQL.query!(Repo, "INSERT INTO events (metadata) VALUES (?)", [json])
+```
+
+---
+
 ### Limitations and Known Issues
 
 #### freeze_replica/1 - NOT SUPPORTED
