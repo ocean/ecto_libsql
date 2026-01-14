@@ -76,7 +76,7 @@ defmodule EctoLibSql.ReturningTest do
 
     assert is_integer(id)
     assert title == "Test Post"
-    assert is_binary(inserted_at) or inserted_at == now
-    assert is_binary(updated_at) or updated_at == now
+    assert inserted_at == now
+    assert updated_at == now
   end
 end
