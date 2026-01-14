@@ -976,4 +976,174 @@ defmodule Ecto.Adapters.LibSql.MigrationTest do
       refute sql =~ ~r/"status".*DEFAULT/
     end
   end
+
+  describe "CHECK constraints" do
+    test "creates table with column-level CHECK constraint" do
+      table = %Table{name: :users, prefix: nil}
+
+      columns = [
+        {:add, :id, :id, [primary_key: true]},
+        {:add, :age, :integer, [check: "age >= 0"]}
+      ]
+
+      [sql] = Connection.execute_ddl({:create, table, columns})
+      Ecto.Adapters.SQL.query!(TestRepo, sql)
+
+      # Verify table was created with CHECK constraint.
+      {:ok, %{rows: [[schema]]}} =
+        Ecto.Adapters.SQL.query(
+          TestRepo,
+          "SELECT sql FROM sqlite_master WHERE type='table' AND name='users'"
+        )
+
+      assert schema =~ "CHECK (age >= 0)"
+    end
+
+    test "enforces column-level CHECK constraint" do
+      table = %Table{name: :users, prefix: nil}
+
+      columns = [
+        {:add, :id, :id, [primary_key: true]},
+        {:add, :age, :integer, [check: "age >= 0"]}
+      ]
+
+      [sql] = Connection.execute_ddl({:create, table, columns})
+      Ecto.Adapters.SQL.query!(TestRepo, sql)
+
+      # Valid insert should succeed.
+      {:ok, _} = Ecto.Adapters.SQL.query(TestRepo, "INSERT INTO users (age) VALUES (?)", [25])
+
+      # Invalid insert should fail.
+      assert {:error, %{message: message}} =
+               Ecto.Adapters.SQL.query(TestRepo, "INSERT INTO users (age) VALUES (?)", [-5])
+
+      assert message =~ "CHECK constraint failed"
+    end
+
+    test "raises error when attempting to use create constraint DDL" do
+      alias Ecto.Migration.Constraint
+
+      assert_raise ArgumentError,
+                   ~r/LibSQL\/SQLite does not support ALTER TABLE ADD CONSTRAINT/,
+                   fn ->
+                     Connection.execute_ddl(
+                       {:create,
+                        %Constraint{
+                          name: "age_check",
+                          table: "users",
+                          check: "age >= 0"
+                        }}
+                     )
+                   end
+    end
+
+    test "raises error when attempting to use drop constraint DDL" do
+      alias Ecto.Migration.Constraint
+
+      assert_raise ArgumentError,
+                   ~r/LibSQL\/SQLite does not support ALTER TABLE DROP CONSTRAINT/,
+                   fn ->
+                     Connection.execute_ddl(
+                       {:drop,
+                        %Constraint{
+                          name: "age_check",
+                          table: "users"
+                        }, :restrict}
+                     )
+                   end
+    end
+
+    test "raises error when attempting to use drop_if_exists constraint DDL" do
+      alias Ecto.Migration.Constraint
+
+      assert_raise ArgumentError,
+                   ~r/LibSQL\/SQLite does not support ALTER TABLE DROP CONSTRAINT/,
+                   fn ->
+                     Connection.execute_ddl(
+                       {:drop_if_exists,
+                        %Constraint{
+                          name: "age_check",
+                          table: "users"
+                        }, :restrict}
+                     )
+                   end
+    end
+
+    test "creates table with multiple CHECK constraints" do
+      table = %Table{name: :jobs, prefix: nil}
+
+      columns = [
+        {:add, :id, :id, [primary_key: true]},
+        {:add, :attempt, :integer, [default: 0, null: false, check: "attempt >= 0"]},
+        {:add, :max_attempts, :integer, [default: 20, null: false, check: "max_attempts > 0"]},
+        {:add, :priority, :integer, [default: 0, null: false, check: "priority BETWEEN 0 AND 9"]}
+      ]
+
+      [sql] = Connection.execute_ddl({:create, table, columns})
+      Ecto.Adapters.SQL.query!(TestRepo, sql)
+
+      # Verify table was created with all CHECK constraints.
+      {:ok, %{rows: [[schema]]}} =
+        Ecto.Adapters.SQL.query(
+          TestRepo,
+          "SELECT sql FROM sqlite_master WHERE type='table' AND name='jobs'"
+        )
+
+      assert schema =~ "CHECK (attempt >= 0)"
+      assert schema =~ "CHECK (max_attempts > 0)"
+      assert schema =~ "CHECK (priority BETWEEN 0 AND 9)"
+    end
+
+    test "enforces multiple CHECK constraints correctly" do
+      table = %Table{name: :jobs, prefix: nil}
+
+      columns = [
+        {:add, :id, :id, [primary_key: true]},
+        {:add, :attempt, :integer, [default: 0, null: false, check: "attempt >= 0"]},
+        {:add, :max_attempts, :integer, [default: 20, null: false, check: "max_attempts > 0"]},
+        {:add, :priority, :integer, [default: 0, null: false, check: "priority BETWEEN 0 AND 9"]}
+      ]
+
+      [sql] = Connection.execute_ddl({:create, table, columns})
+      Ecto.Adapters.SQL.query!(TestRepo, sql)
+
+      # Valid insert should succeed.
+      {:ok, _} =
+        Ecto.Adapters.SQL.query(
+          TestRepo,
+          "INSERT INTO jobs (attempt, max_attempts, priority) VALUES (?, ?, ?)",
+          [0, 20, 5]
+        )
+
+      # Invalid attempt (negative) should fail.
+      assert {:error, %{message: message}} =
+               Ecto.Adapters.SQL.query(
+                 TestRepo,
+                 "INSERT INTO jobs (attempt, max_attempts, priority) VALUES (?, ?, ?)",
+                 [-1, 20, 5]
+               )
+
+      assert message =~ "CHECK constraint failed"
+
+      # Invalid max_attempts (zero) should fail.
+      assert {:error, %{message: message}} =
+               Ecto.Adapters.SQL.query(
+                 TestRepo,
+                 "INSERT INTO jobs (attempt, max_attempts, priority) VALUES (?, ?, ?)",
+                 [0, 0, 5]
+               )
+
+      assert message =~ "CHECK constraint failed"
+
+      # Invalid priority (out of range) should fail.
+      assert {:error, %{message: message}} =
+               Ecto.Adapters.SQL.query(
+                 TestRepo,
+                 "INSERT INTO jobs (attempt, max_attempts, priority) VALUES (?, ?, ?)",
+                 [0, 20, 10]
+               )
+
+      assert message =~ "CHECK constraint failed"
+    end
+  end
 end
