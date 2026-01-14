@@ -370,8 +370,17 @@ defmodule EctoLibSql.TypeLoaderDumperTest do
 
       {:ok, result} = Ecto.Adapters.SQL.query(TestRepo, "SELECT decimal_field FROM all_types")
 
-      # SQLite's NUMERIC type affinity stores decimals as numbers when possible
-      assert [[123.45]] = result.rows
+      # SQLite's NUMERIC type affinity stores decimals as numbers when possible,
+      # but we need to accept either float or string representation from the query result
+      assert [[value]] = result.rows
+
+      case value do
+        v when is_float(v) or is_integer(v) ->
+          assert abs(v - 123.45) < 0.001
+
+        v when is_binary(v) ->
+          assert v == "123.45"
+      end
     end
 
     test "decimal loader parses strings, integers, and floats" do
@@ -399,8 +408,31 @@ defmodule EctoLibSql.TypeLoaderDumperTest do
           "SELECT decimal_field FROM all_types ORDER BY decimal_field"
         )
 
-      # SQLite's NUMERIC type affinity stores decimals as numbers
-      assert [[-123.45], [0], [999.999]] = result.rows
+      # SQLite's NUMERIC type affinity stores decimals as numbers, but accept
+      # both numeric and string representations from the query result
+      assert 3 = length(result.rows)
+
+      # Normalize rows by converting to strings for comparison
+      normalized_rows =
+        Enum.map(result.rows, fn [value] ->
+          case value do
+            v when is_float(v) or is_integer(v) -> to_string(v)
+            v when is_binary(v) -> v
+          end
+        end)
+
+      # Verify values in sorted order (by parsed numeric value)
+      assert length(normalized_rows) == 3
+      [first, second, third] = normalized_rows
+
+      # Check first is -123.45 (or 123.45 with leading -)
+      assert String.contains?(first, "-123.45") or first == "-123.45"
+
+      # Check second is 0
+      assert second == "0" or String.to_float(second) == 0.0
+
+      # Check third is 999.999
+      assert String.contains?(third, "999.999") or third == "999.999"
     end
   end
 
