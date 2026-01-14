@@ -28,6 +28,7 @@ defmodule EctoLibSql.Schemas.Product do
     |> cast(attrs, [
       :name,
       :description,
+      :external_id,
       :tags,
       :account_id,
       :approved_at,
@@ -43,7 +44,8 @@ defmodule EctoLibSql.Schemas.Product do
     if get_field(changeset, :external_id) do
       changeset
     else
-      put_change(changeset, :external_id, Ecto.UUID.bingenerate())
+      # Generate as string UUID, not binary
+      put_change(changeset, :external_id, Ecto.UUID.generate())
     end
   end
 end

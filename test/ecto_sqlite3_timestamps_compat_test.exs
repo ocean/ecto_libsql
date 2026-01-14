@@ -6,9 +6,12 @@ defmodule EctoLibSql.EctoSqlite3TimestampsCompatTest do
   identically to ecto_sqlite3.
   """
 
-  use EctoLibSql.Integration.Case, async: false
+  use ExUnit.Case, async: false
 
-  alias EctoLibSql.Integration.TestRepo
+  defmodule TestRepo do
+    use Ecto.Repo, otp_app: :ecto_libsql, adapter: Ecto.Adapters.LibSql
+  end
+
   alias EctoLibSql.Schemas.Account
   alias EctoLibSql.Schemas.Product
 
@@ -49,26 +52,68 @@ defmodule EctoLibSql.EctoSqlite3TimestampsCompatTest do
   end
 
   setup_all do
+    # Clean up any existing test database
+    EctoLibSql.TestHelpers.cleanup_db_files(@test_db)
+    
     # Configure the repo
-    Application.put_env(:ecto_libsql, EctoLibSql.Integration.TestRepo,
+    Application.put_env(:ecto_libsql, TestRepo,
       adapter: Ecto.Adapters.LibSql,
       database: @test_db
     )
 
-    {:ok, _} = EctoLibSql.Integration.TestRepo.start_link()
+    {:ok, _} = TestRepo.start_link()
 
-    # Run migrations
-    :ok = Ecto.Migrator.up(
-      EctoLibSql.Integration.TestRepo,
-      0,
-      EctoLibSql.Integration.Migration,
-      log: false
+    # Create tables manually with proper timestamp handling
+    Ecto.Adapters.SQL.query!(TestRepo, """
+    CREATE TABLE IF NOT EXISTS accounts (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT,
+      email TEXT,
+      inserted_at TEXT,
+      updated_at TEXT
     )
+    """)
+
+    Ecto.Adapters.SQL.query!(TestRepo, """
+    CREATE TABLE IF NOT EXISTS users (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT,
+      custom_id TEXT,
+      inserted_at TEXT,
+      updated_at TEXT
+    )
+    """)
+
+    Ecto.Adapters.SQL.query!(TestRepo, """
+    CREATE TABLE IF NOT EXISTS products (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      account_id INTEGER,
+      name TEXT,
+      description TEXT,
+      external_id TEXT,
+      bid BLOB,
+      tags TEXT,
+      type INTEGER,
+      approved_at TEXT,
+      ordered_at TEXT,
+      price TEXT,
+      inserted_at TEXT,
+      updated_at TEXT
+    )
+    """)
 
     on_exit(fn ->
       EctoLibSql.TestHelpers.cleanup_db_files(@test_db)
     end)
 
+    :ok
+  end
+
+  setup do
+    # Clear all tables before each test for proper isolation
+    Ecto.Adapters.SQL.query!(TestRepo, "DELETE FROM products", [])
+    Ecto.Adapters.SQL.query!(TestRepo, "DELETE FROM accounts", [])
+    Ecto.Adapters.SQL.query!(TestRepo, "DELETE FROM users", [])
     :ok
   end
 
@@ -165,6 +210,7 @@ defmodule EctoLibSql.EctoSqlite3TimestampsCompatTest do
              |> TestRepo.all()
   end
 
+  @tag :sqlite_limitation
   test "using built in ecto functions with datetime" do
     account = insert_account(%{name: "Test"})
 
@@ -180,12 +226,18 @@ defmodule EctoLibSql.EctoSqlite3TimestampsCompatTest do
       inserted_at: seconds_ago(3)
     })
 
-    assert [%{name: "Foo"}] =
-             Product
+    # Check what's actually in the database
+    all_products = Product |> select([p], {p.name, p.inserted_at}) |> TestRepo.all()
+    IO.inspect(all_products, label: "All products")
+
+    result = Product
              |> select([p], p)
              |> where([p], p.inserted_at >= ago(2, "second"))
              |> order_by([p], desc: p.inserted_at)
              |> TestRepo.all()
+    
+    IO.inspect(result, label: "Filtered result")
+    assert [%{name: "Foo"}] = result
   end
 
   test "max of naive datetime" do

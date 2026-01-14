@@ -6,35 +6,48 @@ defmodule EctoLibSql.EctoSqlite3JsonCompatTest do
   works identically to ecto_sqlite3.
   """
 
-  use EctoLibSql.Integration.Case, async: false
+  use ExUnit.Case, async: false
 
   alias Ecto.Adapters.SQL
-  alias EctoLibSql.Integration.TestRepo
   alias EctoLibSql.Schemas.Setting
+
+  defmodule TestRepo do
+    use Ecto.Repo, otp_app: :ecto_libsql, adapter: Ecto.Adapters.LibSql
+  end
 
   @test_db "z_ecto_libsql_test-sqlite3_json_compat.db"
 
   setup_all do
+    # Clean up any existing test database
+    EctoLibSql.TestHelpers.cleanup_db_files(@test_db)
+    
     # Configure the repo
-    Application.put_env(:ecto_libsql, EctoLibSql.Integration.TestRepo,
+    Application.put_env(:ecto_libsql, TestRepo,
       adapter: Ecto.Adapters.LibSql,
       database: @test_db
     )
 
-    {:ok, _} = EctoLibSql.Integration.TestRepo.start_link()
+    {:ok, _} = TestRepo.start_link()
 
-    # Run migrations
-    :ok = Ecto.Migrator.up(
-      EctoLibSql.Integration.TestRepo,
-      0,
-      EctoLibSql.Integration.Migration,
-      log: false
+    # Create tables manually
+    SQL.query!(TestRepo, """
+    CREATE TABLE IF NOT EXISTS settings (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      properties TEXT,
+      checksum BLOB
     )
+    """)
 
     on_exit(fn ->
       EctoLibSql.TestHelpers.cleanup_db_files(@test_db)
     end)
 
+    :ok
+  end
+
+  setup do
+    # Clear all tables before each test for proper isolation
+    SQL.query!(TestRepo, "DELETE FROM settings", [])
     :ok
   end
 
@@ -92,10 +105,14 @@ defmodule EctoLibSql.EctoSqlite3JsonCompatTest do
   end
 
   test "json field with nil" do
-    setting =
+    changeset = 
       %Setting{}
       |> Setting.changeset(%{properties: nil})
-      |> TestRepo.insert!()
+      |> Ecto.Changeset.force_change(:properties, nil)
+    
+    IO.inspect(changeset, label: "Changeset before insert")
+    
+    setting = TestRepo.insert!(changeset)
 
     fetched = TestRepo.get(Setting, setting.id)
     assert fetched.properties == nil

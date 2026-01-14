@@ -310,6 +310,10 @@ defmodule Ecto.Adapters.LibSql do
   defp bool_encode(false), do: {:ok, 0}
   defp bool_encode(true), do: {:ok, 1}
 
+  defp datetime_encode(nil) do
+    {:ok, nil}
+  end
+
   defp datetime_encode(%DateTime{} = datetime) do
     {:ok, DateTime.to_iso8601(datetime)}
   end
