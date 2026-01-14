@@ -345,6 +345,8 @@ defmodule Ecto.Adapters.LibSql.Connection do
   defp reference_on_update(:restrict), do: " ON UPDATE RESTRICT"
 
   defp column_type(:id, _opts), do: "INTEGER"
+  defp column_type(:serial, _opts), do: "INTEGER"
+  defp column_type(:bigserial, _opts), do: "INTEGER"
   defp column_type(:binary_id, _opts), do: "TEXT"
   defp column_type(:uuid, _opts), do: "TEXT"
   defp column_type(:string, opts), do: "TEXT#{size_constraint(opts)}"
