@@ -474,38 +474,9 @@ defmodule Ecto.Adapters.LibSql.Connection do
   defp column_default(value) when is_number(value), do: " DEFAULT #{value}"
   defp column_default({:fragment, expr}), do: " DEFAULT #{expr}"
 
-  defp column_default(value) when is_map(value) do
-    case Jason.encode(value) do
-      {:ok, json} ->
-        " DEFAULT '#{escape_string(json)}'"
-
-      {:error, reason} ->
-        require Logger
-
-        Logger.warning(
-          "Failed to JSON encode map default value in migration: #{inspect(value)} - " <>
-            "Reason: #{inspect(reason)} - no DEFAULT clause will be generated."
-        )
-
-        ""
-    end
-  end
-
-  defp column_default(value) when is_list(value) do
-    case Jason.encode(value) do
-      {:ok, json} ->
-        " DEFAULT '#{escape_string(json)}'"
-
-      {:error, reason} ->
-        require Logger
-
-        Logger.warning(
-          "Failed to JSON encode list default value in migration: #{inspect(value)} - " <>
-            "Reason: #{inspect(reason)} - no DEFAULT clause will be generated."
-        )
-
-        ""
-    end
+  defp column_default(value) when is_map(value) or is_list(value) do
+    type_name = if is_map(value), do: "map", else: "list"
+    encode_json_default(value, type_name)
   end
 
   # Handle any other unexpected types (e.g., empty maps or third-party migrations)
@@ -520,6 +491,24 @@ defmodule Ecto.Adapters.LibSql.Connection do
     )
 
     ""
+  end
+
+  # Helper function to encode JSON default values and log failures
+  defp encode_json_default(value, type_name) do
+    case Jason.encode(value) do
+      {:ok, json} ->
+        " DEFAULT '#{escape_string(json)}'"
+
+      {:error, reason} ->
+        require Logger
+
+        Logger.warning(
+          "Failed to JSON encode #{type_name} default value in migration: #{inspect(value)} - " <>
+            "Reason: #{inspect(reason)} - no DEFAULT clause will be generated."
+        )
+
+        ""
+    end
   end
 
   defp table_options(table, columns) do
