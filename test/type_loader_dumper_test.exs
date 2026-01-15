@@ -810,15 +810,33 @@ defmodule EctoLibSql.TypeLoaderDumperTest do
       assert record.date_field == attrs.date_field
       assert record.time_field == attrs.time_field
       assert record.time_usec_field == attrs.time_usec_field
-      # Microseconds might be truncated depending on precision, verify date/time components
+
+      # Verify naive_datetime_field preserves date/time components
       assert record.naive_datetime_field.year == naive_now.year
       assert record.naive_datetime_field.month == naive_now.month
       assert record.naive_datetime_field.day == naive_now.day
       assert record.naive_datetime_field.hour == naive_now.hour
+
+      # Verify naive_datetime_usec_field preserves full datetime with microseconds
+      assert record.naive_datetime_usec_field == attrs.naive_datetime_usec_field
+      {naive_usec, naive_precision} = record.naive_datetime_usec_field.microsecond
+      {naive_now_usec, _naive_now_precision} = naive_now.microsecond
+      assert naive_precision == 6
+      assert naive_usec == naive_now_usec
+
+      # Verify utc_datetime_field preserves date/time components
       assert record.utc_datetime_field.year == now.year
       assert record.utc_datetime_field.month == now.month
       assert record.utc_datetime_field.day == now.day
       assert record.utc_datetime_field.hour == now.hour
+
+      # Verify utc_datetime_usec_field preserves full datetime with microseconds
+      assert record.utc_datetime_usec_field == attrs.utc_datetime_usec_field
+      {utc_usec, utc_precision} = record.utc_datetime_usec_field.microsecond
+      {now_usec, _now_precision} = now.microsecond
+      assert utc_precision == 6
+      assert utc_usec == now_usec
+
       assert record.map_field == attrs.map_field
       assert record.json_field == attrs.json_field
       assert record.array_field == attrs.array_field
