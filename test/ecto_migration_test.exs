@@ -1047,8 +1047,10 @@ defmodule Ecto.Adapters.LibSql.MigrationTest do
       [sql] = Connection.execute_ddl({:create, table, columns})
 
       assert sql =~ ~r/"metadata".*TEXT.*DEFAULT/
-      # Verify JSON is properly escaped
-      assert String.contains?(sql, ["string", "number", "bool"])
+      # Verify JSON is properly escaped - all keys must be present
+      assert sql =~ "string"
+      assert sql =~ "number"
+      assert sql =~ "bool"
     end
 
     test "logs warning when map has unencodable value (PID)" do
