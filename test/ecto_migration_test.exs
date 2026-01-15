@@ -1094,6 +1094,95 @@ defmodule Ecto.Adapters.LibSql.MigrationTest do
 
       assert log_output =~ "Failed to JSON encode list default value in migration"
     end
+
+    test "handles :null atom defaults (same as nil)" do
+      table = %Table{name: :users, prefix: nil}
+      columns = [{:add, :bio, :text, [default: :null]}]
+
+      [sql] = Connection.execute_ddl({:create, table, columns})
+
+      # :null should result in no DEFAULT clause (same as nil)
+      refute sql =~ "DEFAULT"
+    end
+
+    test "handles Decimal defaults" do
+      table = %Table{name: :products, prefix: nil}
+      columns = [{:add, :price, :decimal, [default: Decimal.new("19.99")]}]
+
+      [sql] = Connection.execute_ddl({:create, table, columns})
+
+      # Decimal should be converted to string representation
+      assert sql =~ ~r/"price".*DECIMAL.*DEFAULT/
+      assert sql =~ "'19.99'"
+    end
+
+    test "handles DateTime defaults" do
+      table = %Table{name: :events, prefix: nil}
+      dt = DateTime.new!(~D[2026-01-16], ~T[14:30:00.000000], "UTC")
+      columns = [{:add, :created_at, :utc_datetime, [default: dt]}]
+
+      [sql] = Connection.execute_ddl({:create, table, columns})
+
+      # DateTime should be converted to ISO8601 string
+      assert sql =~ ~r/"created_at".*DATETIME.*DEFAULT/
+      assert sql =~ "2026-01-16T14:30:00Z"
+    end
+
+    test "handles NaiveDateTime defaults" do
+      table = %Table{name: :logs, prefix: nil}
+      dt = ~N[2026-01-16 14:30:00.000000]
+      columns = [{:add, :recorded_at, :naive_datetime, [default: dt]}]
+
+      [sql] = Connection.execute_ddl({:create, table, columns})
+
+      # NaiveDateTime should be converted to ISO8601 string
+      assert sql =~ ~r/"recorded_at".*DATETIME.*DEFAULT/
+      assert sql =~ "2026-01-16T14:30:00"
+    end
+
+    test "handles Date defaults" do
+      table = %Table{name: :schedules, prefix: nil}
+      date = ~D[2026-01-16]
+      columns = [{:add, :event_date, :date, [default: date]}]
+
+      [sql] = Connection.execute_ddl({:create, table, columns})
+
+      # Date should be converted to ISO8601 string
+      assert sql =~ ~r/"event_date".*DATE.*DEFAULT/
+      assert sql =~ "'2026-01-16'"
+    end
+
+    test "handles Time defaults" do
+      table = %Table{name: :schedules, prefix: nil}
+      time = ~T[14:30:45.123456]
+      columns = [{:add, :event_time, :time, [default: time]}]
+
+      [sql] = Connection.execute_ddl({:create, table, columns})
+
+      # Time should be converted to ISO8601 string
+      assert sql =~ ~r/"event_time".*TIME.*DEFAULT/
+      assert sql =~ "14:30:45.123456"
+    end
+
+    test "handles Decimal with many decimal places" do
+      table = %Table{name: :data, prefix: nil}
+      columns = [{:add, :value, :decimal, [default: Decimal.new("123.456789012345")]}]
+
+      [sql] = Connection.execute_ddl({:create, table, columns})
+
+      assert sql =~ ~r/"value".*DECIMAL.*DEFAULT/
+      assert sql =~ "'123.456789012345'"
+    end
+
+    test "handles negative Decimal defaults" do
+      table = %Table{name: :balances, prefix: nil}
+      columns = [{:add, :amount, :decimal, [default: Decimal.new("-42.50")]}]
+
+      [sql] = Connection.execute_ddl({:create, table, columns})
+
+      assert sql =~ ~r/"amount".*DECIMAL.*DEFAULT/
+      assert sql =~ "'-42.50'"
+    end
   end
 
   describe "CHECK constraints" do

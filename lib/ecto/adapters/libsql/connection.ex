@@ -468,11 +468,34 @@ defmodule Ecto.Adapters.LibSql.Connection do
   end
 
   defp column_default(nil), do: ""
+  defp column_default(:null), do: ""
   defp column_default(true), do: " DEFAULT 1"
   defp column_default(false), do: " DEFAULT 0"
   defp column_default(value) when is_binary(value), do: " DEFAULT '#{escape_string(value)}'"
   defp column_default(value) when is_number(value), do: " DEFAULT #{value}"
   defp column_default({:fragment, expr}), do: " DEFAULT #{expr}"
+
+  # Temporal types - convert to ISO8601 strings
+  defp column_default(%DateTime{} = dt) do
+    " DEFAULT '#{escape_string(DateTime.to_iso8601(dt))}'"
+  end
+
+  defp column_default(%NaiveDateTime{} = dt) do
+    " DEFAULT '#{escape_string(NaiveDateTime.to_iso8601(dt))}'"
+  end
+
+  defp column_default(%Date{} = d) do
+    " DEFAULT '#{escape_string(Date.to_iso8601(d))}'"
+  end
+
+  defp column_default(%Time{} = t) do
+    " DEFAULT '#{escape_string(Time.to_iso8601(t))}'"
+  end
+
+  # Decimal type - convert to string representation
+  defp column_default(%Decimal{} = d) do
+    " DEFAULT '#{escape_string(Decimal.to_string(d))}'"
+  end
 
   defp column_default(value) when is_map(value) or is_list(value) do
     type_name = if is_map(value), do: "map", else: "list"
