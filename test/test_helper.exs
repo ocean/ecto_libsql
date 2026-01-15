@@ -23,6 +23,15 @@ ExUnit.start(exclude: exclude)
 # Set logger level to :info to reduce debug output during tests
 Logger.configure(level: :info)
 
+# Load support files for ecto_sqlite3 compatibility tests
+Code.require_file("support/repo.ex", __DIR__)
+Code.require_file("support/case.ex", __DIR__)
+Code.require_file("support/migration.ex", __DIR__)
+
+# Load schema files
+Path.wildcard("#{__DIR__}/support/schemas/*.ex")
+|> Enum.each(&Code.require_file/1)
+
 defmodule EctoLibSql.TestHelpers do
   @moduledoc """
   Shared helpers for EctoLibSql tests.

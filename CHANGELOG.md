@@ -5,6 +5,28 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- **CHECK Constraint Support** - Column-level CHECK constraints in migrations
+- **R*Tree Spatial Indexing** - Full support for SQLite R*Tree virtual tables with 1D-5D indexing, validation, and comprehensive test coverage
+- **ecto_sqlite3 Compatibility Test Suite** - Comprehensive tests ensuring feature parity with ecto_sqlite3
+- **Type Encoding Improvements** - Automatic JSON encoding for plain maps, DateTime/Decimal parameter encoding, improved type coercion
+
+### Fixed
+
+- **DateTime Microsecond Type Loading** - Fixed `:utc_datetime_usec`, `:naive_datetime_usec`, and `:time_usec` loading from ISO 8601 strings with microsecond precision
+- **Parameter Encoding** - Automatic map-to-JSON conversion, DateTime/Decimal encoding for compatibility with Oban and other libraries
+- **Migration Robustness** - Handle `:serial`/`:bigserial` types, improved default value handling with warnings for unsupported types
+- **JSON and RETURNING Clauses** - Fixed JSON encoding in RETURNING queries and datetime function calls
+- **Test Isolation** - Comprehensive database cleanup across all test suites, per-test table clearing, improved resource management
+
+### Changed
+
+- **Test Suite Consolidation** - Streamlined and improved test organization with better coverage of edge cases, error handling, and concurrent operations
+- **Code Quality** - Fixed Credo warnings, improved error handling patterns, removed unused variables/imports, enhanced British English consistency
+
 ## [0.8.6] - 2026-01-07
 
 ### Added

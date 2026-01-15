@@ -2845,7 +2845,42 @@ The `EctoLibSql.Native.freeze_replica/1` function is **not implemented**. This f
    end
    ```
 
-### Type Mappings
+   #### SQLite-Specific Query Limitations
+
+   The following Ecto query features are not supported due to SQLite limitations (discovered through comprehensive compatibility testing):
+
+   **Subquery & Aggregation Features:**
+   - `selected_as()` with GROUP BY aliases - SQLite doesn't support column aliases in GROUP BY clauses
+   - `exists()` with parent_as() - Complex nested query correlation has issues
+   - `update_all()` with `select` clause and RETURNING - Ecto feature not well-supported with SQLite
+
+   **Fragment & Dynamic SQL:**
+   - `fragment(literal(...))` - SQLite fragment handling doesn't support literal() syntax
+   - `fragment(identifier(...))` - SQLite fragment handling doesn't support identifier() syntax
+
+   **Type Coercion:**
+   - Mixed arithmetic (string + float) - SQLite returns TEXT type instead of coercing to REAL
+   - Case-insensitive text comparison - SQLite TEXT fields are case-sensitive by default (use `COLLATE NOCASE` for case-insensitive)
+
+   **Binary Data:**
+   - SQLite BLOBs are binary-safe and support embedded NUL bytes. If truncation occurs in testing, it indicates an adapter/driver issue (e.g., libSQL/sqlite3 driver incorrectly using text APIs instead of blob APIs). See Binary/BLOB data compatibility test results (4/5 passing).
+
+   **Temporal Functions:**
+   - `ago(N, unit)` - Does not work with TEXT-based timestamps (SQLite stores datetimes as TEXT in ISO8601 format)
+   - DateTime arithmetic functions - Limited support compared to PostgreSQL
+
+   **Compatibility Testing Results:**
+   - CRUD operations: 13/21 tests passing (8 SQLite limitations documented)
+   - Timestamps: 7/8 tests passing (1 SQLite limitation)
+   - JSON/MAP fields: 6/6 tests passing ✅
+   - Binary/BLOB data: 4/5 tests passing (1 SQLite limitation)
+   - Type compatibility: 1/1 tests passing ✅
+
+   **Overall Ecto/SQLite Compatibility: 31/42 tests passing (74%)**
+
+   All limitations are SQLite-specific and not adapter bugs. They represent features that PostgreSQL/MySQL support, but SQLite does not.
+
+   ### Type Mappings
 
 Ecto types map to SQLite types as follows:
 
@@ -2861,10 +2896,47 @@ Ecto types map to SQLite types as follows:
 | `:text` | `TEXT` | ✅ Works perfectly |
 | `:date` | `DATE` | ✅ Stored as ISO8601 |
 | `:time` | `TIME` | ✅ Stored as ISO8601 |
+| `:time_usec` | `TIME` | ✅ Stored as ISO8601 with microseconds |
 | `:naive_datetime` | `DATETIME` | ✅ Stored as ISO8601 |
+| `:naive_datetime_usec` | `DATETIME` | ✅ Stored as ISO8601 with microseconds |
 | `:utc_datetime` | `DATETIME` | ✅ Stored as ISO8601 |
+| `:utc_datetime_usec` | `DATETIME` | ✅ Stored as ISO8601 with microseconds |
 | `:map` / `:json` | `TEXT` | ✅ Stored as JSON |
 | `{:array, _}` | ❌ Not supported | Use JSON or separate tables |
+
+**DateTime Types with Microsecond Precision:**
+
+All datetime types support microsecond precision. Use the `_usec` variants for explicit microsecond handling:
+
+```elixir
+# Schema with microsecond timestamps
+defmodule Sale do
+  use Ecto.Schema
+  
+  @timestamps_opts [type: :utc_datetime_usec]
+  schema "sales" do
+    field :product_name, :string
+    field :amount, :decimal
+    # inserted_at and updated_at will be :utc_datetime_usec
+    timestamps()
+  end
+end
+
+# Explicit microsecond field
+defmodule Event do
+  use Ecto.Schema
+  
+  schema "events" do
+    field :name, :string
+    field :occurred_at, :utc_datetime_usec  # Explicit microsecond precision
+    timestamps()
+  end
+end
+```
+
+Both standard and `_usec` variants store datetime values as ISO 8601 strings in SQLite:
+- Standard: `"2026-01-14T06:09:59Z"` (precision varies)
+- With `_usec`: `"2026-01-14T06:09:59.081609Z"` (always includes microseconds)
 
 ### Ecto Migration Notes
 

@@ -270,6 +270,41 @@ defmodule Ecto.Adapters.LibSql.Connection do
     ["DROP INDEX IF EXISTS #{index_name}"]
   end
 
+  def execute_ddl({:create, %Ecto.Migration.Constraint{}}) do
+    raise ArgumentError, """
+    LibSQL/SQLite does not support ALTER TABLE ADD CONSTRAINT.
+
+    CHECK constraints must be defined inline during table creation using the :check option
+    in your migration's add/3 call, or as table-level constraints.
+
+    Example:
+        create table(:users) do
+          add :age, :integer, check: "age >= 0"
+        end
+
+    For table-level constraints, use execute/1 with raw SQL:
+        execute "CREATE TABLE users (age INTEGER, CHECK (age >= 0))"
+    """
+  end
+
+  def execute_ddl({:drop, %Ecto.Migration.Constraint{}, _mode}) do
+    raise ArgumentError, """
+    LibSQL/SQLite does not support ALTER TABLE DROP CONSTRAINT.
+
+    To remove a constraint, you must recreate the table without it.
+    See the Ecto migration guide for table recreation patterns.
+    """
+  end
+
+  def execute_ddl({:drop_if_exists, %Ecto.Migration.Constraint{}, _mode}) do
+    raise ArgumentError, """
+    LibSQL/SQLite does not support ALTER TABLE DROP CONSTRAINT.
+
+    To remove a constraint, you must recreate the table without it.
+    See the Ecto migration guide for table recreation patterns.
+    """
+  end
+
   def execute_ddl({:rename, %Ecto.Migration.Table{} = table, old_name, new_name}) do
     table_name = quote_table(table.prefix, table.name)
     ["ALTER TABLE #{table_name} RENAME COLUMN #{quote_name(old_name)} TO #{quote_name(new_name)}"]
@@ -345,6 +380,8 @@ defmodule Ecto.Adapters.LibSql.Connection do
   defp reference_on_update(:restrict), do: " ON UPDATE RESTRICT"
 
   defp column_type(:id, _opts), do: "INTEGER"
+  defp column_type(:serial, _opts), do: "INTEGER"
+  defp column_type(:bigserial, _opts), do: "INTEGER"
   defp column_type(:binary_id, _opts), do: "TEXT"
   defp column_type(:uuid, _opts), do: "TEXT"
   defp column_type(:string, opts), do: "TEXT#{size_constraint(opts)}"
@@ -413,7 +450,21 @@ defmodule Ecto.Adapters.LibSql.Connection do
           " GENERATED ALWAYS AS (#{expr})#{stored}"
       end
 
-    "#{pk}#{null}#{default}#{generated}"
+    # Column-level CHECK constraint
+    check =
+      case Keyword.get(opts, :check) do
+        nil ->
+          ""
+
+        expr when is_binary(expr) ->
+          " CHECK (#{expr})"
+
+        invalid ->
+          raise ArgumentError,
+                "CHECK constraint expression must be a binary string, got: #{inspect(invalid)}"
+      end
+
+    "#{pk}#{null}#{default}#{generated}#{check}"
   end
 
   defp column_default(nil), do: ""

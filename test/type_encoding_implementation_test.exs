@@ -28,6 +28,24 @@ defmodule EctoLibSql.TypeEncodingImplementationTest do
     end
   end
 
+  defmodule TestDate do
+    use Ecto.Schema
+
+    schema "test_dates" do
+      field(:name, :string)
+      field(:birth_date, :date)
+    end
+  end
+
+  defmodule TestTime do
+    use Ecto.Schema
+
+    schema "test_times" do
+      field(:name, :string)
+      field(:start_time, :time)
+    end
+  end
+
   @test_db "z_type_encoding_implementation.db"
 
   setup_all do
@@ -45,7 +63,25 @@ defmodule EctoLibSql.TypeEncodingImplementationTest do
     )
     """)
 
+    # Tables for nil encoding tests.
+    SQL.query!(TestRepo, """
+    CREATE TABLE IF NOT EXISTS test_dates (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT,
+      birth_date DATE
+    )
+    """)
+
+    SQL.query!(TestRepo, """
+    CREATE TABLE IF NOT EXISTS test_times (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      name TEXT,
+      start_time TIME
+    )
+    """)
+
     on_exit(fn ->
+      # cleanup_db_files removes the entire database file, including all tables.
       EctoLibSql.TestHelpers.cleanup_db_files(@test_db)
     end)
 
@@ -263,6 +299,97 @@ defmodule EctoLibSql.TypeEncodingImplementationTest do
       result = SQL.query!(TestRepo, "SELECT COUNT(*) FROM users WHERE uuid IS NULL")
       assert [[count]] = result.rows
       assert count == 1
+    end
+  end
+
+  describe "nil value encoding via Ecto dumpers" do
+    test "nil boolean encoded correctly via Ecto.Changeset" do
+      SQL.query!(TestRepo, "DELETE FROM users")
+
+      # Create changeset with explicit nil to bypass default
+      changeset =
+        %User{name: "Alice", email: "alice@example.com"}
+        |> Ecto.Changeset.change(%{active: nil})
+
+      {:ok, inserted} = TestRepo.insert(changeset)
+
+      assert inserted.active == nil
+
+      # Verify NULL was stored in database
+      result = SQL.query!(TestRepo, "SELECT active FROM users WHERE name = ?", ["Alice"])
+      assert [[nil]] = result.rows
+    end
+
+    test "nil date encoded correctly via Ecto.Changeset" do
+      SQL.query!(TestRepo, "DELETE FROM test_dates")
+
+      # Insert with nil date using Ecto schema (exercises date_encode/1 dumper)
+      {:ok, inserted} =
+        %TestDate{name: "Alice", birth_date: nil}
+        |> Ecto.Changeset.change()
+        |> TestRepo.insert()
+
+      assert inserted.birth_date == nil
+
+      # Verify NULL was stored in database
+      result = SQL.query!(TestRepo, "SELECT birth_date FROM test_dates WHERE name = ?", ["Alice"])
+      assert [[nil]] = result.rows
+    end
+
+    test "nil time encoded correctly via Ecto.Changeset" do
+      SQL.query!(TestRepo, "DELETE FROM test_times")
+
+      # Insert with nil time using Ecto schema (exercises time_encode/1 dumper)
+      {:ok, inserted} =
+        %TestTime{name: "Alice", start_time: nil}
+        |> Ecto.Changeset.change()
+        |> TestRepo.insert()
+
+      assert inserted.start_time == nil
+
+      # Verify NULL was stored in database
+      result = SQL.query!(TestRepo, "SELECT start_time FROM test_times WHERE name = ?", ["Alice"])
+      assert [[nil]] = result.rows
+    end
+
+    test "nil boolean loaded back as nil from database" do
+      SQL.query!(TestRepo, "DELETE FROM users")
+
+      changeset =
+        %User{name: "Bob", email: "bob@example.com"}
+        |> Ecto.Changeset.change(%{active: nil})
+
+      {:ok, _inserted} = TestRepo.insert(changeset)
+
+      # Load back and verify nil is preserved
+      loaded = TestRepo.get_by!(User, name: "Bob")
+      assert loaded.active == nil
+    end
+
+    test "nil date loaded back as nil from database" do
+      SQL.query!(TestRepo, "DELETE FROM test_dates")
+
+      {:ok, _inserted} =
+        %TestDate{name: "Bob", birth_date: nil}
+        |> Ecto.Changeset.change()
+        |> TestRepo.insert()
+
+      # Load back and verify nil is preserved
+      loaded = TestRepo.get_by!(TestDate, name: "Bob")
+      assert loaded.birth_date == nil
+    end
+
+    test "nil time loaded back as nil from database" do
+      SQL.query!(TestRepo, "DELETE FROM test_times")
+
+      {:ok, _inserted} =
+        %TestTime{name: "Bob", start_time: nil}
+        |> Ecto.Changeset.change()
+        |> TestRepo.insert()
+
+      # Load back and verify nil is preserved
+      loaded = TestRepo.get_by!(TestTime, name: "Bob")
+      assert loaded.start_time == nil
     end
   end
 
