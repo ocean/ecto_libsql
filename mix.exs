@@ -17,6 +17,8 @@ defmodule EctoLibSql.MixProject do
       package: package(),
       description: description(),
       docs: docs(),
+      test_pattern: "**/*_test.exs",
+      test_paths: ["test"],
       dialyzer: [
         plt_core_path: "priv/plts",
         app_tree: true,
