@@ -989,8 +989,13 @@ defmodule Ecto.Adapters.LibSql.MigrationTest do
 
       # Map should be JSON encoded
       assert sql =~ ~r/"preferences".*TEXT.*DEFAULT/
-      assert sql =~ "theme"
-      assert sql =~ "dark"
+
+      [_, json] = Regex.run(~r/DEFAULT '([^']*)'/, sql)
+
+      assert Jason.decode!(json) == %{
+               "theme" => "dark",
+               "notifications" => true
+             }
     end
 
     test "handles list defaults (JSON encoding)" do
@@ -1004,8 +1009,10 @@ defmodule Ecto.Adapters.LibSql.MigrationTest do
 
       # List should be JSON encoded
       assert sql =~ ~r/"tags".*TEXT.*DEFAULT/
-      assert sql =~ "tag1"
-      assert sql =~ "tag2"
+
+      [_, json] = Regex.run(~r/DEFAULT '([^']*)'/, sql)
+
+      assert Jason.decode!(json) == ["tag1", "tag2", "tag3"]
     end
 
     test "handles empty list defaults" do
@@ -1016,7 +1023,11 @@ defmodule Ecto.Adapters.LibSql.MigrationTest do
       [sql] = Connection.execute_ddl({:create, table, columns})
 
       # Should have a DEFAULT clause with empty array JSON
-      assert sql =~ ~r/"tags".*TEXT.*DEFAULT '\[\]'/
+      assert sql =~ ~r/"tags".*TEXT.*DEFAULT/
+
+      [_, json] = Regex.run(~r/DEFAULT '([^']*)'/, sql)
+
+      assert Jason.decode!(json) == []
     end
 
     test "handles complex nested map defaults" do
@@ -1031,9 +1042,13 @@ defmodule Ecto.Adapters.LibSql.MigrationTest do
 
       # Nested map should be JSON encoded
       assert sql =~ ~r/"settings".*TEXT.*DEFAULT/
-      assert sql =~ "user"
-      assert sql =~ "theme"
-      assert sql =~ "light"
+
+      [_, json] = Regex.run(~r/DEFAULT '([^']*)'/, sql)
+
+      assert Jason.decode!(json) == %{
+               "user" => %{"theme" => "light"},
+               "privacy" => false
+             }
     end
 
     test "handles map with various JSON types" do
@@ -1047,10 +1062,16 @@ defmodule Ecto.Adapters.LibSql.MigrationTest do
       [sql] = Connection.execute_ddl({:create, table, columns})
 
       assert sql =~ ~r/"metadata".*TEXT.*DEFAULT/
-      # Verify JSON is properly escaped - all keys must be present
-      assert sql =~ "string"
-      assert sql =~ "number"
-      assert sql =~ "bool"
+
+      # Verify JSON is properly escaped - all keys must be present including null values
+      [_, json] = Regex.run(~r/DEFAULT '([^']*)'/, sql)
+
+      assert Jason.decode!(json) == %{
+               "string" => "value",
+               "number" => 42,
+               "bool" => true,
+               "null" => nil
+             }
     end
 
     test "logs warning when map has unencodable value (PID)" do
