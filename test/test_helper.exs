@@ -2,7 +2,8 @@
 # - :ci_only tests (like path traversal) are only run on CI by default
 # - :slow tests (like stress/load tests) are excluded by default to keep test runs fast
 # - :flaky tests (like concurrency tests) are excluded by default to avoid CI brittleness
-# - :sqlite_limitation tests are for PostgreSQL-only behavior that doesn't work in SQLite
+# - :sqlite_limitation tests are for PostgreSQL-only behaviour that doesn't work in SQLite
+# - :turso_remote tests require Turso credentials and a live connection to test replication features
 ci? =
   case System.get_env("CI") do
     nil -> false
@@ -11,11 +12,11 @@ ci? =
 
 exclude =
   if ci? do
-    # Running on CI (GitHub Actions, etc.) - skip flaky tests and known SQLite limitations
-    [flaky: true, sqlite_limitation: true]
+    # Running on CI (GitHub Actions, etc.) - skip flaky tests, SQLite limitations, and Turso remote tests
+    [flaky: true, sqlite_limitation: true, turso_remote: true]
   else
-    # Running locally - skip :ci_only, :slow, :flaky tests, and SQLite limitations
-    [ci_only: true, slow: true, flaky: true, sqlite_limitation: true]
+    # Running locally - skip :ci_only, :slow, :flaky tests, SQLite limitations, and Turso remote tests
+    [ci_only: true, slow: true, flaky: true, sqlite_limitation: true, turso_remote: true]
   end
 
 ExUnit.start(exclude: exclude)

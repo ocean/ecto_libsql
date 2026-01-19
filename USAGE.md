@@ -2852,7 +2852,6 @@ The `EctoLibSql.Native.freeze_replica/1` function is **not implemented**. This f
    **Subquery & Aggregation Features:**
    - `selected_as()` with GROUP BY aliases - SQLite doesn't support column aliases in GROUP BY clauses
    - `exists()` with parent_as() - Complex nested query correlation has issues
-   - `update_all()` with `select` clause and RETURNING - Ecto feature not well-supported with SQLite
 
    **Fragment & Dynamic SQL:**
    - `fragment(literal(...))` - SQLite fragment handling doesn't support literal() syntax
