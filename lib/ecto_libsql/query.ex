@@ -90,24 +90,12 @@ defmodule EctoLibSql.Query do
       end
     end
 
-    # List/Array encoding: lists are encoded to JSON arrays
-    # Lists must contain only JSON-serializable values (strings, numbers, booleans,
-    # nil, lists, and maps). This enables array parameter support in raw SQL queries.
-    defp encode_param(value) when is_list(value) do
-      case Jason.encode(value) do
-        {:ok, json} ->
-          json
-
-        {:error, %Jason.EncodeError{message: msg}} ->
-          raise ArgumentError,
-            message:
-              "Cannot encode list parameter to JSON. List contains non-JSON-serializable value. " <>
-                "Lists can only contain strings, numbers, booleans, nil, lists, and maps. " <>
-                "Reason: #{msg}. List: #{inspect(value)}"
-      end
-    end
-
     # Pass through all other values unchanged
+    # Note: Lists are not automatically JSON-encoded here.
+    # - For Ecto queries with IN clauses: Ecto's query builder expands lists into individual parameters
+    # - For array fields in schemas: Ecto dumpers handle JSON encoding via array_encode/1
+    # - For raw SQL with arrays: Users should pre-encode lists using Jason.encode!
+    # This design allows IN clauses to work correctly while still supporting array fields.
     defp encode_param(value), do: value
 
     # Pass through results from Native.ex unchanged.

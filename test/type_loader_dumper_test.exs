@@ -650,19 +650,20 @@ defmodule EctoLibSql.TypeLoaderDumperTest do
   describe "array types" do
     test "array fields load and dump as JSON arrays" do
       array = ["a", "b", "c"]
+      json_array = Jason.encode!(array)
 
       {:ok, _} =
         Ecto.Adapters.SQL.query(
           TestRepo,
           "INSERT INTO all_types (array_field) VALUES (?)",
-          [array]
+          [json_array]
         )
 
       {:ok, result} = Ecto.Adapters.SQL.query(TestRepo, "SELECT array_field FROM all_types")
 
       # Should be stored as JSON array string
-      assert [[json_string]] = result.rows
-      assert {:ok, decoded} = Jason.decode(json_string)
+      assert [[^json_array]] = result.rows
+      assert {:ok, decoded} = Jason.decode(json_array)
       assert decoded == ["a", "b", "c"]
     end
 
@@ -682,16 +683,18 @@ defmodule EctoLibSql.TypeLoaderDumperTest do
     end
 
     test "handles empty arrays" do
+      empty_json = Jason.encode!([])
+
       {:ok, _} =
         Ecto.Adapters.SQL.query(
           TestRepo,
           "INSERT INTO all_types (array_field) VALUES (?)",
-          [[]]
+          [empty_json]
         )
 
       {:ok, result} = Ecto.Adapters.SQL.query(TestRepo, "SELECT array_field FROM all_types")
 
-      assert [["[]"]] = result.rows
+      assert [[^empty_json]] = result.rows
     end
 
     test "empty string defaults to empty array" do
@@ -762,6 +765,7 @@ defmodule EctoLibSql.TypeLoaderDumperTest do
       }
 
       # Insert via raw SQL
+      # Note: arrays and maps must be pre-encoded to JSON when using raw SQL
       {:ok, _} =
         Ecto.Adapters.SQL.query(
           TestRepo,
@@ -789,9 +793,9 @@ defmodule EctoLibSql.TypeLoaderDumperTest do
             attrs.naive_datetime_usec_field,
             attrs.utc_datetime_field,
             attrs.utc_datetime_usec_field,
-            attrs.map_field,
-            attrs.json_field,
-            attrs.array_field
+            Jason.encode!(attrs.map_field),
+            Jason.encode!(attrs.json_field),
+            Jason.encode!(attrs.array_field)
           ]
         )
 
