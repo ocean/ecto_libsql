@@ -121,4 +121,32 @@ defmodule EctoLibSql.Issue63InClauseTest do
     # Empty IN clause should match nothing
     assert result == []
   end
+
+  test "IN clause with literal word list (~w) - e.g. oban" do
+    # test data matching Oban's state values
+    Ecto.Adapters.SQL.query!(TestRepo, """
+    INSERT INTO test_items (state, name, inserted_at, updated_at)
+    VALUES ('scheduled', 'job1', datetime('now'), datetime('now')),
+           ('retryable', 'job2', datetime('now'), datetime('now')),
+           ('available', 'job3', datetime('now'), datetime('now')),
+           ('completed', 'job4', datetime('now'), datetime('now'))
+    """)
+
+    # This is how Oban's Lite engine queries jobs - using ~w() sigil
+    # ~w() creates a compile-time list that Ecto wraps in %Ecto.Query.Tagged{}
+    # This was causing "datatype mismatch" because the Tagged struct wasn't
+    # being handled by the IN clause expression generator
+    query =
+      from(t in "test_items",
+        where: t.state in ~w(scheduled retryable),
+        select: t.name
+      )
+
+    # should not raise "datatype mismatch" error
+    result = TestRepo.all(query)
+
+    assert length(result) == 2
+    assert "job1" in result
+    assert "job2" in result
+  end
 end

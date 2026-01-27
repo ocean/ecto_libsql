@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **IN Clause with Ecto.Query.Tagged Structs** - Fixed issue #63 where `~w()` sigil word lists in IN clauses returned zero results due to Tagged struct wrapping. Now properly extracts list values from `Ecto.Query.Tagged` structs before generating IN clauses, enabling these patterns to work correctly.
+
 ## [0.8.8] - 2026-01-23
 
 ### Fixed

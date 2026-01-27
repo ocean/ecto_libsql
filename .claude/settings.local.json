@@ -53,7 +53,9 @@
       "Bash(gh pr diff:*)",
       "Bash(gh pr checks:*)",
       "Bash(gh run view:*)",
-      "Bash(gh pr checkout:*)"
+      "Bash(gh pr checkout:*)",
+      "mcp__acp__Bash",
+      "mcp__acp__Edit"
     ],
     "deny": [],
     "ask": []
