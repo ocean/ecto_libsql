@@ -1249,6 +1249,27 @@ defmodule Ecto.Adapters.LibSql.Connection do
     [expr(left, sources, query), " IN (", args, ?)]
   end
 
+  # Catch-all for IN with non-list right side (e.g. Ecto.Query.Tagged from ~w() sigil, JSON-encoded arrays)
+  # This handles cases where the right side has been pre-processed or wrapped by Ecto
+  defp expr({:in, _, [left, right]}, sources, query) do
+    case right do
+      %Ecto.Query.Tagged{value: val} when is_list(val) ->
+        # Extract list from Tagged struct and generate proper IN clause
+        args = Enum.map_intersperse(val, ?,, &expr(&1, sources, query))
+        [expr(left, sources, query), " IN (", args, ?)]
+
+      _ ->
+        # Default fallback: use JSON_EACH to handle JSON-encoded arrays or other complex types
+        [
+          expr(left, sources, query),
+          " IN (SELECT value FROM JSON_EACH(",
+          expr(right, sources, query),
+          ?),
+          ?)
+        ]
+    end
+  end
+
   # LIKE
   defp expr({:like, _, [left, right]}, sources, query) do
     [expr(left, sources, query), " LIKE ", expr(right, sources, query)]
