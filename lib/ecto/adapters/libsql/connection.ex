@@ -1249,6 +1249,11 @@ defmodule Ecto.Adapters.LibSql.Connection do
     [expr(left, sources, query), " IN (", args, ?)]
   end
 
+  # IN with subquery - generate proper SQL subquery instead of JSON_EACH
+  defp expr({:in, _, [left, %Ecto.SubQuery{} = subquery]}, sources, query) do
+    [expr(left, sources, query), " IN ", expr(subquery, sources, query)]
+  end
+
   # Catch-all for IN with non-list right side (e.g. Ecto.Query.Tagged from ~w() sigil, JSON-encoded arrays)
   # This handles cases where the right side has been pre-processed or wrapped by Ecto
   defp expr({:in, _, [left, right]}, sources, query) do
@@ -1315,6 +1320,18 @@ defmodule Ecto.Adapters.LibSql.Connection do
   # Type casting
   defp expr({:type, _, [arg, _type]}, sources, query) do
     expr(arg, sources, query)
+  end
+
+  # SubQuery expression - generates inline SQL subquery
+  defp expr(%Ecto.SubQuery{query: query}, sources, parent_query) do
+    combinations =
+      Enum.map(query.combinations, fn {type, combination_query} ->
+        {type, put_in(combination_query.aliases[@parent_as], {parent_query, sources})}
+      end)
+
+    query = put_in(query.combinations, combinations)
+    query = put_in(query.aliases[@parent_as], {parent_query, sources})
+    [?(, all(query, subquery_as_prefix(sources)), ?)]
   end
 
   # Literal values (numbers, strings, etc.)
