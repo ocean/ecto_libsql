@@ -90,12 +90,13 @@ For lower-level control, you can use the DBConnection interface directly:
 
 **Advanced Features**
 - Vector similarity search
+- R*Tree spatial indexing for multi-dimensional range queries
 - Database encryption (local AES-256-CBC and Turso remote encryption)
 - WebSocket and HTTP protocols
 - Cursor-based streaming for large result sets (via DBConnection interface)
 - Advanced replica synchronisation with frame tracking
 
-**Note:** Ecto `Repo.stream()` is not yet implemented. For streaming large datasets, use the DBConnection cursor interface directly (see examples in AGENTS.md).
+**Note:** Ecto `Repo.stream()` is not yet implemented. For streaming large datasets, use the DBConnection cursor interface directly (see examples in USAGE.md).
 
 **Reliability**
 - **Production-ready error handling**: All Rust NIF errors return proper Elixir error tuples instead of crashing the BEAM VM
@@ -104,7 +105,7 @@ For lower-level control, you can use the DBConnection interface directly:
 ## Documentation
 
 - **API Documentation**: [https://hexdocs.pm/ecto_libsql](https://hexdocs.pm/ecto_libsql)
-- **LLM / AGENT Guide**: [AGENTS.md](AGENTS.md)
+- **LLM / AGENT Guide**: [USAGE.md](USAGE.md)
 - **Changelog**: [CHANGELOG.md](CHANGELOG.md)
 - **Migration Guide**: [ECTO_MIGRATION_GUIDE.md](ECTO_MIGRATION_GUIDE.md)
 

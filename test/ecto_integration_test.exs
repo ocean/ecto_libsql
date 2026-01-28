@@ -94,9 +94,7 @@ defmodule Ecto.Integration.EctoLibSqlTest do
     """)
 
     on_exit(fn ->
-      File.rm(@test_db)
-      File.rm(@test_db <> "-shm")
-      File.rm(@test_db <> "-wal")
+      EctoLibSql.TestHelpers.cleanup_db_files(@test_db)
     end)
 
     :ok
@@ -854,6 +852,89 @@ defmodule Ecto.Integration.EctoLibSqlTest do
         )
 
       assert [[2]] = count.rows
+    end
+  end
+
+  describe "map parameter encoding" do
+    test "plain maps are encoded to JSON before passing to NIF" do
+      # Create a user
+      user = TestRepo.insert!(%User{name: "Alice", email: "alice@example.com"})
+
+      # Test with plain map as parameter (e.g., for metadata/JSON columns)
+      metadata = %{
+        "tags" => ["elixir", "database"],
+        "priority" => 1,
+        "nested" => %{"key" => "value"}
+      }
+
+      # Execute query with raw map to exercise automatic encoding in Query.encode_param
+      result =
+        Ecto.Adapters.SQL.query!(
+          TestRepo,
+          "INSERT INTO posts (title, body, user_id, inserted_at, updated_at) VALUES (?, ?, ?, datetime('now'), datetime('now'))",
+          ["Test Post", metadata, user.id]
+        )
+
+      # Verify the insert succeeded (automatic encoding worked)
+      assert result.num_rows == 1
+
+      # Verify the data was inserted correctly with JSON encoding
+      posts = TestRepo.all(Post)
+      assert length(posts) == 1
+      post = hd(posts)
+      assert post.title == "Test Post"
+
+      # Verify the body contains properly encoded JSON
+      assert {:ok, decoded} = Jason.decode(post.body)
+      assert decoded["tags"] == ["elixir", "database"]
+      assert decoded["priority"] == 1
+      assert decoded["nested"]["key"] == "value"
+    end
+
+    test "nested maps in parameters are encoded" do
+      # Test with nested map structure
+      complex_data = %{
+        "level1" => %{
+          "level2" => %{
+            "level3" => "deep value"
+          }
+        },
+        "array" => [1, 2, 3],
+        "mixed" => ["string", 42, true]
+      }
+
+      # Pass raw map to verify adapter's automatic encoding
+      result =
+        Ecto.Adapters.SQL.query!(
+          TestRepo,
+          "SELECT ? as data",
+          [complex_data]
+        )
+
+      assert [[json_str]] = result.rows
+      assert {:ok, decoded} = Jason.decode(json_str)
+      assert decoded["level1"]["level2"]["level3"] == "deep value"
+    end
+
+    test "structs are not encoded as maps" do
+      # DateTime structs should be automatically encoded (handled by query.ex encoding)
+      now = DateTime.utc_now()
+
+      # Pass raw DateTime struct to verify automatic encoding
+      result =
+        Ecto.Adapters.SQL.query!(
+          TestRepo,
+          "SELECT ? as timestamp",
+          [now]
+        )
+
+      assert [[timestamp_str]] = result.rows
+      assert is_binary(timestamp_str)
+      # Verify it's a valid ISO8601 string
+      assert {:ok, decoded_dt, _offset} = DateTime.from_iso8601(timestamp_str)
+      assert decoded_dt.year == now.year
+      assert decoded_dt.month == now.month
+      assert decoded_dt.day == now.day
     end
   end
 

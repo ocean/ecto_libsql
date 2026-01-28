@@ -5,9 +5,83 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.8.9] - 2026-01-28
+
+### Fixed
+
+- **IN Clause with Ecto.Query.Tagged Structs** - Fixed issue #63 where `~w()` sigil word lists in IN clauses returned zero results due to Tagged struct wrapping. Now properly extracts list values from `Ecto.Query.Tagged` structs before generating IN clauses, enabling these patterns to work correctly.
+- **SubQuery Support in IN Expressions** - Fixed SubQuery expressions being incorrectly wrapped in `JSON_EACH()`, causing invalid SQL. Now properly generates inline subqueries like `WHERE id IN (SELECT s0.id FROM table AS s0 WHERE ...)`. Fixes compatibility with libraries like Oban that use subqueries in UPDATE...WHERE patterns. (Thanks [@nadilas](https://github.com/nadilas) for PR #66 !)
+- **Ecto.Query.Tagged Expression Handling** - Fixed type-cast fragments (e.g. `type(fragment(...), :integer)`) falling through to catch-all expression handler and generating incorrect parameter placeholders. Now properly handles `%Ecto.Query.Tagged{}` structs that Ecto's query planner creates from `{:type, _, [expr, type]}` AST nodes. Fixes parameter count mismatches with Hrana/Turso. (Thanks [@nadilas](https://github.com/nadilas) for PR #67 !)
+
+## [0.8.8] - 2026-01-23
+
+### Fixed
+
+- **IN Clause Datatype Mismatch** - Fixed issue #63 where IN clauses with parameterised lists caused datatype mismatch errors due to automatic JSON encoding of lists
+- **SQL Comment Query Detection** - Fixed Protocol.UndefinedError when queries start with SQL comments (both `--` and `/* */` styles) by properly skipping comments before detecting query type
+- **RETURNING Clause for update_all/delete_all** - Added RETURNING clause generation when using update_all/delete_all with select clauses, fixing Protocol.UndefinedError with Oban job fetching
+
+### Changed
+
+- **Removed Unsupported Replication Tests** - Removed replication integration tests that were testing unsupported features
+
+## [0.8.7] - 2026-01-16
 
 ### Added
+
+- **CHECK Constraint Support** - Column-level CHECK constraints in migrations
+- **R*Tree Spatial Indexing** - Full support for SQLite R*Tree virtual tables with 1D-5D indexing, validation, and comprehensive test coverage
+- **ecto_sqlite3 Compatibility Test Suite** - Comprehensive tests ensuring feature parity with ecto_sqlite3
+- **Type Encoding Improvements** - Automatic JSON encoding for plain maps, DateTime/Decimal parameter encoding, improved type coercion
+- **Comprehensive Type Loader/Dumper Support** - Full support for encoding/decoding temporal types (DateTime, NaiveDateTime, Date, Time), Decimal, and special nil values with proper ISO 8601 formatting
+- **Default Value Type Handling** - Support for Decimal, DateTime, NaiveDateTime, Date, Time, and `:null` as default values in migrations with warning logging for unsupported types
+- **Connection Recovery Testing** - Test suite for connection failure scenarios and recovery patterns
+- **Query Encoding Improvements** - Explicit test coverage for query parameter encoding with various data types and edge cases
+
+### Fixed
+
+- **DateTime Microsecond Type Loading** - Fixed `:utc_datetime_usec`, `:naive_datetime_usec`, and `:time_usec` loading from ISO 8601 strings with microsecond precision
+- **Parameter Encoding** - Automatic map-to-JSON conversion, DateTime/Decimal encoding for compatibility with Oban and other libraries
+- **Migration Robustness** - Handle `:serial`/`:bigserial` types, improved default value handling with warnings for unsupported types
+- **JSON and RETURNING Clauses** - Fixed JSON encoding in RETURNING queries and datetime function calls
+- **Test Isolation** - Comprehensive database cleanup across all test suites, per-test table clearing, improved resource management
+- **DateTime Type Handling** - Fixed datetime_decode to handle timezone-aware ISO 8601 strings and nil value encoding for date/time/bool types
+- **Decimal Type Handling** - Updated assertions to accept both numeric and string representations of decimal values in database queries
+- **Datetime Roundtrip Preservation** - Strengthened microsecond precision preservation in datetime round-trip tests
+
+### Changed
+
+- **Test Suite Consolidation** - Streamlined and improved test organization with better coverage of edge cases, error handling, and concurrent operations
+- **Code Quality** - Fixed Credo warnings, improved error handling patterns, removed unused variables/imports, enhanced British English consistency
+- **Documentation** - Updated documentation with SQLite-specific query limitations, compatibility testing results, and guidance for type encoding edge cases
+
+## [0.8.6] - 2026-01-07
+
+### Added
+
+- **R*Tree Spatial Indexing Support**
+  - Full support for SQLite R*Tree virtual tables for multidimensional spatial indexing
+  - **Table creation**: Use `options: [rtree: true]` in Ecto migrations
+  - **Dimensions supported**: 1D to 5D (3 to 11 columns total including ID)
+  - **Column structure**: First column must be `id` (integer primary key), followed by min/max coordinate pairs
+  - **Validation**: Automatic validation of column count (odd numbers only), first-column requirements (must be 'id'), dimensional constraints, and incompatible table options - virtual tables reject standard table options (`:strict`, `:random_rowid`, `:without_rowid`) with clear error messages
+  - **Use cases**: Geographic bounding boxes, collision detection, time-range queries, spatial indexing
+  - **Migration example**:
+    ```elixir
+    create table(:geo_regions, options: [rtree: true]) do
+      add :min_lat, :float
+      add :max_lat, :float
+      add :min_lng, :float
+      add :max_lng, :float
+    end
+    ```
+  - **Query patterns**: Point containment, bounding box intersection, range queries
+  - **Virtual table syntax**: Generates `CREATE VIRTUAL TABLE ... USING rtree(...)` DDL
+  - **Implementation**: New `create_rtree_table/3`, `validate_rtree_options!/1`, and `validate_rtree_columns!/1` helpers in `connection.ex`
+  - **Comprehensive test coverage** in `test/rtree_test.exs` covering 2D/3D tables, validation, queries, and CRUD operations
+  - **Documentation**: Full guide in USAGE.md with examples for geographic data, time-series, and hybrid vector+spatial search
+  - **Comparison guide**: R*Tree vs Vector Search decision matrix in documentation
+  - **Ecto integration**: Works with Ecto schemas using fragments for spatial queries
 
 - **Named Parameters Execution Support**
   - Full support for SQLite named parameter syntax in prepared statements and direct execution
@@ -96,6 +170,100 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
             |> select([h], h.name)
     ```
   - 9 new CTE tests covering simple, recursive, and edge cases
+
+- **EXPLAIN QUERY PLAN Support**
+  - Full support for SQLite's `EXPLAIN QUERY PLAN` via Ecto's `Repo.explain/2` and `Repo.explain/3`
+  - **Query detection**: Rust NIF `should_use_query()` now detects EXPLAIN statements for proper query/execute routing
+  - **Ecto.Multi compatibility**: `explain_query/4` callback returns `{:ok, maps}` tuple format required by Ecto.Multi
+  - **Output format**: Returns list of maps with `id`, `parent`, `notused`, and `detail` keys matching SQLite's output
+  - **Usage examples**:
+    ```elixir
+    # Basic EXPLAIN QUERY PLAN
+    {:ok, plan} = Repo.explain(:all, from(u in User, where: u.active == true))
+    # Returns: [%{"id" => 2, "parent" => 0, "notused" => 0, "detail" => "SCAN users"}]
+
+    # With options
+    {:ok, plan} = Repo.explain(:all, query, analyze: true)
+
+    # Direct SQL execution
+    {:ok, _, result, _state} = EctoLibSql.handle_execute(
+      "EXPLAIN QUERY PLAN SELECT * FROM users WHERE id = ?",
+      [1],
+      [],
+      state
+    )
+    ```
+  - **Implementation**: Query detection in `utils.rs:should_use_query()`, SQL generation in `connection.ex:explain_query/4`
+  - **Test coverage**: 12 tests across `explain_simple_test.exs` and `explain_query_test.exs`
+
+- **STRICT Table Option Support**
+  - Added support for SQLite's STRICT table option for stronger type enforcement
+  - Usage: Pass `options: [strict: true]` to `create table()` in migrations
+  - Example:
+    ```elixir
+    create table(:users, options: [strict: true]) do
+      add :name, :string
+      add :age, :integer
+    end
+    ```
+  - STRICT tables enforce column type constraints at INSERT/UPDATE time
+  - Helps catch type errors early and ensures data integrity
+  - Can be combined with other table options
+
+- **Enhanced JSON and JSONB Functions**
+  - Added comprehensive JSON manipulation functions for working with JSON data
+  - SQL injection protection with proper parameter handling
+  - Functions include `json_extract/2`, `json_type/2`, `json_valid/1`, and more
+  - Consolidated JSON result handling for consistent behaviour
+  - Extensive test coverage for all JSON operations
+
+- **Cross-Connection Security Tests**
+  - Added comprehensive tests for transaction isolation across connections
+  - Validates that transactions from one connection cannot be accessed by another
+  - Tests cover savepoints, prepared statements, and cursors
+  - Ensures strict connection ownership and prevents security vulnerabilities
+
+- **Generated/Computed Columns Documentation**
+  - Added documentation for SQLite's generated column support
+  - Covers both VIRTUAL and STORED generated columns
+  - Examples of computed columns in migrations
+
+### Security
+
+- **CVE-2025-47736 Protection**
+  - Comprehensive parameter validation to prevent atom table exhaustion
+  - Improved parameter extraction to avoid malicious input exploitation
+  - Validates all named parameters against statement introspection
+  - Proper error handling for invalid or malicious parameter names
+  - See [security documentation](SECURITY.md) for details
+
+### Fixed
+
+- **Statement Caching Improvements**
+  - Replaced unbounded `persistent_term` cache with bounded ETS LRU cache
+  - Prevents memory leaks from unlimited prepared statement caching
+  - Configurable cache size with automatic eviction of least-recently-used entries
+  - Improved cache performance and memory footprint
+
+- **Error Handling Improvements**
+  - Propagate parameter introspection errors instead of silently falling back
+  - Return descriptive errors for invalid argument types in parameter normalisation
+  - Improved error tuple handling in fuzz tests
+  - Better error messages throughout the codebase
+
+- **Code Quality Improvements**
+  - Fixed Credo warnings (nesting, unused variables, assertions)
+  - Standardised unused variable naming for consistency
+  - Improved test reliability and reduced flakiness
+  - Better state threading in security tests
+  - Fixed binary blob round-trip handling in tests
+
+### Changed
+
+- **Rust UTF-8 Validation Cleanup**
+  - Removed redundant UTF-8 validation comments and tautological boundary checks
+  - Removed redundant `validate_utf8_sql` function (SQLite already validates UTF-8)
+  - Cleaner, more maintainable codebase
 
 ## [0.8.3] - 2025-12-29
 

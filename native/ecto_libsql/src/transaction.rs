@@ -1,7 +1,7 @@
 /// Transaction management for LibSQL databases.
 ///
 /// This module handles database transactions, including:
-/// - Starting transactions with configurable locking behavior
+/// - Starting transactions with configurable locking behaviour
 /// - Executing queries and statements within transactions
 /// - Committing or rolling back transactions
 /// - Transaction ownership verification
@@ -152,7 +152,7 @@ impl Drop for TransactionEntryGuard {
 
 /// Begin a new database transaction.
 ///
-/// Starts a transaction with the default DEFERRED behavior, which acquires
+/// Starts a transaction with the default DEFERRED behaviour, which acquires
 /// locks only when needed. Use `begin_transaction_with_behavior` for fine-grained
 /// control over transaction locking.
 ///
@@ -200,7 +200,7 @@ pub fn begin_transaction(conn_id: &str) -> NifResult<String> {
     Ok(trx_id)
 }
 
-/// Begin a new database transaction with specific locking behavior.
+/// Begin a new database transaction with specific locking behaviour.
 ///
 /// Allows control over how aggressively the transaction acquires locks:
 /// - `:deferred` - Acquire locks only when needed (default, recommended)
@@ -326,6 +326,9 @@ pub fn query_with_trx_args<'a>(
     query: &str,
     args: Vec<Term<'a>>,
 ) -> NifResult<Term<'a>> {
+    // UTF-8 validation is guaranteed by Rust's &str type and Rustler's conversion,
+    // so we can rely on the type system rather than runtime checks.
+
     // Decode args before locking
     let decoded_args: Vec<libsql::Value> = args
         .into_iter()

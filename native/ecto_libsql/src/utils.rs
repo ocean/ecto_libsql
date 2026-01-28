@@ -304,6 +304,60 @@ pub fn detect_query_type(query: &str) -> QueryType {
     }
 }
 
+/// Skip leading whitespace and SQL comments in a byte slice.
+///
+/// Handles both single-line comments (`-- comment`) and block comments (`/* comment */`).
+/// Returns the index of the first non-whitespace, non-comment character.
+#[inline]
+fn skip_whitespace_and_comments(bytes: &[u8]) -> usize {
+    let len = bytes.len();
+    let mut pos = 0;
+
+    loop {
+        // Skip whitespace
+        while pos < len && bytes[pos].is_ascii_whitespace() {
+            pos += 1;
+        }
+
+        if pos >= len {
+            return pos;
+        }
+
+        // Check for single-line comment: -- ...
+        if pos + 1 < len && bytes[pos] == b'-' && bytes[pos + 1] == b'-' {
+            pos += 2;
+            // Skip to end of line
+            while pos < len && bytes[pos] != b'\n' {
+                pos += 1;
+            }
+            // Skip the newline if present
+            if pos < len && bytes[pos] == b'\n' {
+                pos += 1;
+            }
+            continue;
+        }
+
+        // Check for block comment: /* ... */
+        if pos + 1 < len && bytes[pos] == b'/' && bytes[pos + 1] == b'*' {
+            pos += 2;
+            // Find closing */
+            while pos + 1 < len {
+                if bytes[pos] == b'*' && bytes[pos + 1] == b'/' {
+                    pos += 2;
+                    break;
+                }
+                pos += 1;
+            }
+            continue;
+        }
+
+        // Not whitespace or comment, we're done
+        break;
+    }
+
+    pos
+}
+
 /// Determines if a query should use query() or execute()
 ///
 /// Returns true if should use query() (SELECT or has RETURNING clause).
@@ -314,10 +368,15 @@ pub fn detect_query_type(query: &str) -> QueryType {
 /// - Early termination on match
 /// - Case-insensitive ASCII comparison without allocations
 ///
-/// ## Limitation: String and Comment Handling
+/// ## Comment Handling
+///
+/// This function correctly skips leading SQL comments (both `-- single line`
+/// and `/* block */` style) before checking for query keywords.
+///
+/// ## Limitation: String Literal Handling
 ///
 /// This function performs simple keyword matching and does not parse SQL syntax.
-/// It will match keywords appearing in string literals or comments.
+/// It will match keywords appearing in string literals.
 ///
 /// **Why this is acceptable**:
 /// - False positives (using `query()` when `execute()` would suffice) are **safe**
@@ -332,14 +391,27 @@ pub fn should_use_query(sql: &str) -> bool {
         return false;
     }
 
-    // Find first non-whitespace character
-    let mut start = 0;
-    while start < len && bytes[start].is_ascii_whitespace() {
-        start += 1;
-    }
+    // Skip leading whitespace and comments
+    let start = skip_whitespace_and_comments(bytes);
 
     if start >= len {
         return false;
+    }
+
+    // Check if starts with EXPLAIN (case-insensitive)
+    // EXPLAIN always returns rows, so treat it like a query
+    if len - start >= 7
+        && (bytes[start] == b'E' || bytes[start] == b'e')
+        && (bytes[start + 1] == b'X' || bytes[start + 1] == b'x')
+        && (bytes[start + 2] == b'P' || bytes[start + 2] == b'p')
+        && (bytes[start + 3] == b'L' || bytes[start + 3] == b'l')
+        && (bytes[start + 4] == b'A' || bytes[start + 4] == b'a')
+        && (bytes[start + 5] == b'I' || bytes[start + 5] == b'i')
+        && (bytes[start + 6] == b'N' || bytes[start + 6] == b'n')
+        // Verify it's followed by whitespace or end of string
+        && (start + 7 >= len || bytes[start + 7].is_ascii_whitespace())
+    {
+        return true;
     }
 
     // Check if starts with SELECT (case-insensitive)

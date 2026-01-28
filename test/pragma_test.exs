@@ -10,9 +10,7 @@ defmodule EctoLibSql.PragmaTest do
 
     on_exit(fn ->
       EctoLibSql.disconnect([], state)
-      File.rm(test_db)
-      File.rm(test_db <> "-shm")
-      File.rm(test_db <> "-wal")
+      EctoLibSql.TestHelpers.cleanup_db_files(test_db)
     end)
 
     {:ok, state: state}
@@ -274,9 +272,7 @@ defmodule EctoLibSql.PragmaTest do
 
       # Clean up
       EctoLibSql.disconnect([], state2)
-      File.rm(test_db2)
-      File.rm(test_db2 <> "-wal")
-      File.rm(test_db2 <> "-shm")
+      EctoLibSql.TestHelpers.cleanup_db_files(test_db2)
     end
   end
 end

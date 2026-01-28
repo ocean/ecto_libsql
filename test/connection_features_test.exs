@@ -11,9 +11,7 @@ defmodule EctoLibSql.ConnectionFeaturesTest do
     test_db = "z_ecto_libsql_test-conn_features_#{:erlang.unique_integer([:positive])}.db"
 
     on_exit(fn ->
-      File.rm(test_db)
-      File.rm(test_db <> "-shm")
-      File.rm(test_db <> "-wal")
+      EctoLibSql.TestHelpers.cleanup_db_files(test_db)
     end)
 
     {:ok, database: test_db}

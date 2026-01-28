@@ -48,7 +48,17 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(git push)",
-      "Bash(git --no-pager status)"
+      "Bash(git --no-pager status)",
+      "Bash(cargo deny check:*)",
+      "Bash(gh pr diff:*)",
+      "Bash(gh pr checks:*)",
+      "Bash(gh run view:*)",
+      "Bash(gh pr checkout:*)",
+      "mcp__acp__Bash",
+      "mcp__acp__Edit",
+      "Bash(for:*)",
+      "Bash(do echo \"=== Run $i ===\")",
+      "Bash(done)"
     ],
     "deny": [],
     "ask": []

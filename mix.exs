@@ -1,7 +1,7 @@
 defmodule EctoLibSql.MixProject do
   use Mix.Project
 
-  @version "0.8.3"
+  @version "0.8.9"
   @source_url "https://github.com/ocean/ecto_libsql"
 
   def project do
@@ -64,7 +64,7 @@ defmodule EctoLibSql.MixProject do
   defp package() do
     [
       name: "ecto_libsql",
-      files: ~w(lib priv .formatter.exs mix.exs README* LICENSE* CHANGELOG* AGENT* native),
+      files: ~w(lib priv .formatter.exs mix.exs README.md LICENSE CHANGELOG.md USAGE.md native),
       licenses: ["Apache-2.0"],
       links: %{
         "GitHub" => @source_url,
@@ -79,7 +79,7 @@ defmodule EctoLibSql.MixProject do
       main: "EctoLibSql",
       source_ref: "v#{@version}",
       source_url: @source_url,
-      extras: ["README.md", "CHANGELOG.md", "AGENTS.md", "ECTO_MIGRATION_GUIDE.md"],
+      extras: ["README.md", "CHANGELOG.md", "USAGE.md", "ECTO_MIGRATION_GUIDE.md", "SECURITY.md"],
       groups_for_modules: [
         "Core Modules": [EctoLibSql, EctoLibSql.Native],
         "Support Modules": [

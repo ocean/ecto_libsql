@@ -594,7 +594,7 @@ defmodule EctoLibSql.JSON do
   Converts SQL values to properly escaped JSON string representation.
   Useful for building JSON values dynamically.
 
-  Named `json_quote/2` to avoid shadowing Elixir's `Kernel.quote/2` macro.
+  Named `json_quote/2` to avoid shadowing Elixir's Kernel.quote/2 macro.
 
   ## Parameters
 

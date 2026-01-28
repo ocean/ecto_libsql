@@ -9,11 +9,11 @@ Welcome to ecto_libsql! This guide provides comprehensive documentation, API ref
 
 ## ℹ️ About This Guide
 
-**AGENTS.md** is the application usage guide for developers building apps with ecto_libsql. It covers:
+**USAGE.md** is the application usage guide for developers building apps with ecto_libsql. It covers:
 - How to integrate ecto_libsql into your Elixir/Phoenix application
 - Configuration and connection management
 - Ecto schemas, migrations, and queries
-- Advanced features (vector search, encryption, batching)
+- Advanced features (vector search, R*Tree spatial indexing, encryption, batching)
 - Real-world usage examples and patterns
 - Performance optimisation for your applications
 
@@ -32,6 +32,7 @@ Welcome to ecto_libsql! This guide provides comprehensive documentation, API ref
   - [Connection Management](#connection-management)
   - [PRAGMA Configuration](#pragma-configuration)
   - [Vector Search](#vector-search)
+  - [R*Tree Spatial Indexing](#rtree-spatial-indexing)
   - [Encryption](#encryption)
 - [Ecto Integration](#ecto-integration)
   - [Quick Start with Ecto](#quick-start-with-ecto)
@@ -1104,6 +1105,236 @@ distance_sql = EctoLibSql.Native.vector_distance_cos("description_embedding", qu
 )
 ```
 
+### R*Tree Spatial Indexing
+
+R*Tree is a specialised spatial index for efficient multidimensional range queries. Perfect for geospatial data, collision detection, and time-series queries.
+
+#### Creating R*Tree Tables
+
+R*Tree tables are created as virtual tables by passing `rtree: true` to the table options in migrations. Two approaches prevent duplicate id columns:
+
+##### Option 1: Use Ecto's default id (recommended)
+
+```elixir
+defmodule MyApp.Repo.Migrations.CreateLocationsRTree do
+  use Ecto.Migration
+
+  def change do
+    create table(:geo_regions, options: [rtree: true]) do
+      add :min_lat, :float
+      add :max_lat, :float
+      add :min_lng, :float
+      add :max_lng, :float
+    end
+  end
+end
+```
+
+Ecto automatically creates the `id` column, resulting in: `id, min_lat, max_lat, min_lng, max_lng` (5 columns, odd ✓).
+
+##### Option 2: Disable default id and add explicit id
+
+```elixir
+defmodule MyApp.Repo.Migrations.CreateEventsRTree do
+  use Ecto.Migration
+
+  def change do
+    create table(:events, options: [rtree: true], primary_key: false) do
+      add :id, :integer, primary_key: true
+      add :min_x, :float
+      add :max_x, :float
+      add :min_y, :float
+      add :max_y, :float
+      add :min_time, :integer
+      add :max_time, :integer
+    end
+  end
+end
+```
+
+This creates: `id, min_x, max_x, min_y, max_y, min_time, max_time` (7 columns, odd ✓).
+
+**Important R*Tree Requirements:**
+- First column must be named `id` (integer primary key)
+- Remaining columns come in min/max pairs (1D, 2D, 3D, 4D, or 5D multidimensional)
+- Total columns must be odd (3, 5, 7, 9, or 11)
+- Minimum 3 columns (id + 1 dimension), maximum 11 columns (id + 5 dimensions)
+- R*Tree tables are virtual tables and do not support standard table options like `:strict`, `:random_rowid`, or `:without_rowid`
+
+#### 2D Example: Geographic Boundaries
+
+```elixir
+# Create table for geographic regions
+Ecto.Adapters.SQL.query!(
+  Repo,
+  """
+  CREATE VIRTUAL TABLE geo_regions USING rtree(
+    id,
+    min_lat, max_lat,
+    min_lng, max_lng
+  )
+  """
+)
+
+# Insert bounding boxes for regions
+# Sydney: -34.0 to -33.8 lat, 151.0 to 151.3 lng
+Ecto.Adapters.SQL.query!(
+  Repo,
+  "INSERT INTO geo_regions VALUES (1, -34.0, -33.8, 151.0, 151.3)"
+)
+
+# Melbourne: -38.0 to -37.7 lat, 144.8 to 145.1 lng
+Ecto.Adapters.SQL.query!(
+  Repo,
+  "INSERT INTO geo_regions VALUES (2, -38.0, -37.7, 144.8, 145.1)"
+)
+
+# Find regions containing a point (Sydney: -33.87, 151.21)
+result = Ecto.Adapters.SQL.query!(
+  Repo,
+  """
+  SELECT id FROM geo_regions
+  WHERE min_lat <= -33.87 AND max_lat >= -33.87
+    AND min_lng <= 151.21 AND max_lng >= 151.21
+  """
+)
+# Returns: [[1]]
+```
+
+#### 3D Example: Spatial + Time Ranges
+
+```elixir
+# Create table for events with location and time bounds
+Ecto.Adapters.SQL.query!(
+  Repo,
+  """
+  CREATE VIRTUAL TABLE events USING rtree(
+    id,
+    min_x, max_x,      -- X coordinate bounds
+    min_y, max_y,      -- Y coordinate bounds
+    min_time, max_time -- Time bounds (Unix timestamp)
+  )
+  """
+)
+
+# Insert event: Conference at (100, 200) from Jan 1-3, 2025
+start_time = DateTime.to_unix(~U[2025-01-01 00:00:00Z])
+end_time = DateTime.to_unix(~U[2025-01-03 23:59:59Z])
+
+Ecto.Adapters.SQL.query!(
+  Repo,
+  "INSERT INTO events VALUES (1, 100, 100, 200, 200, #{start_time}, #{end_time})"
+)
+
+# Find events in area (90-110, 190-210) during Jan 2025
+query_start = DateTime.to_unix(~U[2025-01-01 00:00:00Z])
+query_end = DateTime.to_unix(~U[2025-01-31 23:59:59Z])
+
+result = Ecto.Adapters.SQL.query!(
+  Repo,
+  """
+  SELECT id FROM events
+  WHERE max_x >= 90 AND min_x <= 110
+    AND max_y >= 190 AND min_y <= 210
+    AND max_time >= #{query_start} AND min_time <= #{query_end}
+  """
+)
+```
+
+#### Using with Ecto Schemas
+
+While R*Tree tables are virtual tables, you can still define schemas for them:
+
+```elixir
+defmodule MyApp.GeoRegion do
+  use Ecto.Schema
+
+  @primary_key {:id, :integer, autogenerate: false}
+  schema "geo_regions" do
+    field :min_lat, :float
+    field :max_lat, :float
+    field :min_lng, :float
+    field :max_lng, :float
+  end
+end
+
+# Insert using Ecto
+region = %MyApp.GeoRegion{
+  id: 1,
+  min_lat: -34.0,
+  max_lat: -33.8,
+  min_lng: 151.0,
+  max_lng: 151.3
+}
+Repo.insert!(region)
+
+# Query using fragments
+import Ecto.Query
+
+# Find regions containing a point
+point_lat = -33.87
+point_lng = 151.21
+
+query = from r in MyApp.GeoRegion,
+  where: fragment("min_lat <= ? AND max_lat >= ?", ^point_lat, ^point_lat),
+  where: fragment("min_lng <= ? AND max_lng >= ?", ^point_lng, ^point_lng)
+
+regions = Repo.all(query)
+```
+
+#### Common Query Patterns
+
+```elixir
+# 1. Point containment: Does bounding box contain this point?
+"""
+SELECT id FROM rtree_table
+WHERE min_x <= ?1 AND max_x >= ?1
+  AND min_y <= ?2 AND max_y >= ?2
+"""
+
+# 2. Bounding box intersection: Do two boxes overlap?
+"""
+SELECT id FROM rtree_table
+WHERE max_x >= ?1 AND min_x <= ?2  -- Query box: ?1 to ?2
+  AND max_y >= ?3 AND min_y <= ?4  -- Query box: ?3 to ?4
+"""
+
+# 3. Range query: All items within bounds
+"""
+SELECT id FROM rtree_table
+WHERE min_x >= ?1 AND max_x <= ?2
+  AND min_y >= ?3 AND max_y <= ?4
+"""
+```
+
+#### R*Tree vs Vector Search
+
+**Use R*Tree when:**
+- You have bounding box data (geographic regions, time ranges)
+- You need exact range queries (all items within bounds)
+- Working with 1-5 dimensional coordinate data
+- Query performance is critical for range lookups
+
+**Use Vector Search when:**
+- You have high-dimensional embeddings (384-1536+ dimensions)
+- You need similarity/distance-based search
+- Working with semantic search, recommendations, or ML features
+- Approximate nearest neighbors is acceptable
+
+**Hybrid Approach:**
+```elixir
+# Combine both for location-aware semantic search
+"""
+SELECT p.*, vector_distance_cos(p.embedding, ?1) as similarity
+FROM products p
+JOIN geo_regions r ON r.id = p.region_id
+WHERE r.min_lat <= ?2 AND r.max_lat >= ?2
+  AND r.min_lng <= ?3 AND r.max_lng >= ?3
+ORDER BY similarity
+LIMIT 10
+"""
+```
+
 ### Connection Management
 
 Control connection behaviour and performance with these utilities (v0.7.0+):
@@ -1552,7 +1783,7 @@ settings = ~s({"theme":"dark","notifications":true,"language":"es"})
 
 #### Comparison: Set vs Replace vs Insert vs Patch
 
-The modification functions have different behaviors:
+The modification functions have different behaviours:
 
 ```elixir
 json = ~s({"a":1,"b":2})
@@ -2379,6 +2610,199 @@ export TURSO_AUTH_TOKEN="eyJ..."
 - 🌍 **Global distribution** via Turso edge
 - 💪 **Offline capability** - works without network
 
+### Type Encoding and Parameter Conversion
+
+EctoLibSql automatically converts Elixir types to SQLite-compatible formats. Understanding these conversions is important for correct database usage.
+
+#### Automatically Encoded Types
+
+The following types are automatically converted when passed as query parameters:
+
+##### Temporal Types
+
+```elixir
+# DateTime → ISO8601 string
+dt = DateTime.utc_now()
+SQL.query!(Repo, "INSERT INTO events (created_at) VALUES (?)", [dt])
+# Stored as: "2026-01-13T03:45:23.123456Z"
+
+# NaiveDateTime → ISO8601 string
+dt = NaiveDateTime.utc_now()
+SQL.query!(Repo, "INSERT INTO events (created_at) VALUES (?)", [dt])
+# Stored as: "2026-01-13T03:45:23.123456"
+
+# Date → ISO8601 string
+date = Date.utc_today()
+SQL.query!(Repo, "INSERT INTO events (event_date) VALUES (?)", [date])
+# Stored as: "2026-01-13"
+
+# Time → ISO8601 string
+time = Time.new!(14, 30, 45)
+SQL.query!(Repo, "INSERT INTO events (event_time) VALUES (?)", [time])
+# Stored as: "14:30:45.000000"
+
+# Relative dates (compute absolute date first, then pass)
+tomorrow = Date.add(Date.utc_today(), 1)  # Becomes a Date struct
+SQL.query!(Repo, "INSERT INTO events (event_date) VALUES (?)", [tomorrow])
+
+# Third-party date types (Timex, etc.) - pre-convert to standard types
+# ❌ NOT SUPPORTED: Timex.DateTime or custom structs
+# ✅ DO THIS: Convert to native DateTime first
+timex_dt = Timex.now()
+native_dt = Timex.to_datetime(timex_dt)  # Convert to DateTime
+SQL.query!(Repo, "INSERT INTO events (created_at) VALUES (?)", [native_dt])
+```
+
+##### Boolean Values
+
+```elixir
+# true → 1, false → 0
+# SQLite uses integers for booleans
+SQL.query!(Repo, "INSERT INTO users (active) VALUES (?)", [true])
+# Stored as: 1
+
+SQL.query!(Repo, "INSERT INTO users (active) VALUES (?)", [false])
+# Stored as: 0
+
+# Works with WHERE clauses
+SQL.query!(Repo, "SELECT * FROM users WHERE active = ?", [true])
+# Matches rows where active = 1
+```
+
+##### Decimal Values
+
+```elixir
+# Decimal → string representation
+decimal = Decimal.new("123.45")
+SQL.query!(Repo, "INSERT INTO prices (amount) VALUES (?)", [decimal])
+# Stored as: "123.45"
+```
+
+##### NULL/nil Values
+
+```elixir
+# nil → NULL
+SQL.query!(Repo, "INSERT INTO users (bio) VALUES (?)", [nil])
+# Stored as SQL NULL
+
+# :null atom → nil → NULL (v0.8.3+)
+# Alternative way to represent NULL
+SQL.query!(Repo, "INSERT INTO users (bio) VALUES (?)", [:null])
+# Also stored as SQL NULL
+
+# Both work identically:
+SQL.query!(Repo, "SELECT * FROM users WHERE bio IS NULL")  # Matches both
+```
+
+##### UUID Values
+
+```elixir
+# Ecto.UUID strings work directly (already binary strings)
+uuid = Ecto.UUID.generate()
+SQL.query!(Repo, "INSERT INTO users (id) VALUES (?)", [uuid])
+# Stored as: "550e8400-e29b-41d4-a716-446655440000"
+
+# Works with WHERE clauses
+SQL.query!(Repo, "SELECT * FROM users WHERE id = ?", [uuid])
+```
+
+#### Type Encoding Examples
+
+```elixir
+defmodule MyApp.Examples do
+  def example_with_multiple_types do
+    import Ecto.Adapters.SQL
+    
+    now = DateTime.utc_now()
+    user_active = true
+    amount = Decimal.new("99.99")
+    
+    # All types are automatically encoded
+    query!(Repo, 
+      "INSERT INTO transactions (created_at, active, amount) VALUES (?, ?, ?)",
+      [now, user_active, amount]
+    )
+  end
+
+  def example_with_ecto_queries do
+    import Ecto.Query
+    
+    from(u in User,
+      where: u.active == ^true,           # Boolean encoded to 1
+      where: u.created_at > ^DateTime.utc_now()  # DateTime encoded to ISO8601
+    )
+    |> Repo.all()
+  end
+
+  def example_with_null do
+    # Both are equivalent:
+    SQL.query!(Repo, "INSERT INTO users (bio) VALUES (?)", [nil])
+    SQL.query!(Repo, "INSERT INTO users (bio) VALUES (?)", [:null])
+    
+    # Query for NULL values
+    SQL.query!(Repo, "SELECT * FROM users WHERE bio IS NULL")
+  end
+end
+```
+
+#### Limitations: Nested Structures with Temporal Types
+
+Nested structures (maps/lists) containing temporal types are **not automatically encoded**. Only top-level parameters are encoded.
+
+```elixir
+# ❌ DOESN'T WORK - Nested DateTime not encoded
+nested = %{
+  "created_at" => DateTime.utc_now(),  # ← Not auto-encoded
+  "data" => "value"
+}
+SQL.query!(Repo, "INSERT INTO events (metadata) VALUES (?)", [nested])
+# Error: DateTime struct cannot be serialized to JSON
+
+# ✅ WORKS - Pre-encode nested values
+nested = %{
+  "created_at" => DateTime.utc_now() |> DateTime.to_iso8601(),
+  "data" => "value"
+}
+json = Jason.encode!(nested)
+SQL.query!(Repo, "INSERT INTO events (metadata) VALUES (?)", [json])
+
+# ✅ WORKS - Encode before creating map
+dt = DateTime.utc_now() |> DateTime.to_iso8601()
+nested = %{"created_at" => dt, "data" => "value"}
+json = Jason.encode!(nested)
+SQL.query!(Repo, "INSERT INTO events (metadata) VALUES (?)", [json])
+```
+
+**Workaround:**
+When working with maps/lists containing temporal types, manually convert them to JSON strings before passing to queries:
+
+```elixir
+defmodule MyApp.JsonHelpers do
+  def safe_json_encode(map) when is_map(map) do
+    map
+    |> Enum.map(fn
+      {k, %DateTime{} = v} -> {k, DateTime.to_iso8601(v)}
+      {k, %NaiveDateTime{} = v} -> {k, NaiveDateTime.to_iso8601(v)}
+      {k, %Date{} = v} -> {k, Date.to_iso8601(v)}
+      {k, %Decimal{} = v} -> {k, Decimal.to_string(v)}
+      {k, v} -> {k, v}
+    end)
+    |> Enum.into(%{})
+    |> Jason.encode!()
+  end
+end
+
+# Usage:
+nested = %{
+  "created_at" => DateTime.utc_now(),
+  "data" => "value"
+}
+json = MyApp.JsonHelpers.safe_json_encode(nested)
+SQL.query!(Repo, "INSERT INTO events (metadata) VALUES (?)", [json])
+```
+
+---
+
 ### Limitations and Known Issues
 
 #### freeze_replica/1 - NOT SUPPORTED
@@ -2421,7 +2845,41 @@ The `EctoLibSql.Native.freeze_replica/1` function is **not implemented**. This f
    end
    ```
 
-### Type Mappings
+   #### SQLite-Specific Query Limitations
+
+   The following Ecto query features are not supported due to SQLite limitations (discovered through comprehensive compatibility testing):
+
+   **Subquery & Aggregation Features:**
+   - `selected_as()` with GROUP BY aliases - SQLite doesn't support column aliases in GROUP BY clauses
+   - `exists()` with parent_as() - Complex nested query correlation has issues
+
+   **Fragment & Dynamic SQL:**
+   - `fragment(literal(...))` - SQLite fragment handling doesn't support literal() syntax
+   - `fragment(identifier(...))` - SQLite fragment handling doesn't support identifier() syntax
+
+   **Type Coercion:**
+   - Mixed arithmetic (string + float) - SQLite returns TEXT type instead of coercing to REAL
+   - Case-insensitive text comparison - SQLite TEXT fields are case-sensitive by default (use `COLLATE NOCASE` for case-insensitive)
+
+   **Binary Data:**
+   - SQLite BLOBs are binary-safe and support embedded NUL bytes. If truncation occurs in testing, it indicates an adapter/driver issue (e.g., libSQL/sqlite3 driver incorrectly using text APIs instead of blob APIs). See Binary/BLOB data compatibility test results (4/5 passing).
+
+   **Temporal Functions:**
+   - `ago(N, unit)` - Does not work with TEXT-based timestamps (SQLite stores datetimes as TEXT in ISO8601 format)
+   - DateTime arithmetic functions - Limited support compared to PostgreSQL
+
+   **Compatibility Testing Results:**
+   - CRUD operations: 13/21 tests passing (8 SQLite limitations documented)
+   - Timestamps: 7/8 tests passing (1 SQLite limitation)
+   - JSON/MAP fields: 6/6 tests passing ✅
+   - Binary/BLOB data: 4/5 tests passing (1 SQLite limitation)
+   - Type compatibility: 1/1 tests passing ✅
+
+   **Overall Ecto/SQLite Compatibility: 31/42 tests passing (74%)**
+
+   All limitations are SQLite-specific and not adapter bugs. They represent features that PostgreSQL/MySQL support, but SQLite does not.
+
+   ### Type Mappings
 
 Ecto types map to SQLite types as follows:
 
@@ -2437,10 +2895,47 @@ Ecto types map to SQLite types as follows:
 | `:text` | `TEXT` | ✅ Works perfectly |
 | `:date` | `DATE` | ✅ Stored as ISO8601 |
 | `:time` | `TIME` | ✅ Stored as ISO8601 |
+| `:time_usec` | `TIME` | ✅ Stored as ISO8601 with microseconds |
 | `:naive_datetime` | `DATETIME` | ✅ Stored as ISO8601 |
+| `:naive_datetime_usec` | `DATETIME` | ✅ Stored as ISO8601 with microseconds |
 | `:utc_datetime` | `DATETIME` | ✅ Stored as ISO8601 |
+| `:utc_datetime_usec` | `DATETIME` | ✅ Stored as ISO8601 with microseconds |
 | `:map` / `:json` | `TEXT` | ✅ Stored as JSON |
 | `{:array, _}` | ❌ Not supported | Use JSON or separate tables |
+
+**DateTime Types with Microsecond Precision:**
+
+All datetime types support microsecond precision. Use the `_usec` variants for explicit microsecond handling:
+
+```elixir
+# Schema with microsecond timestamps
+defmodule Sale do
+  use Ecto.Schema
+  
+  @timestamps_opts [type: :utc_datetime_usec]
+  schema "sales" do
+    field :product_name, :string
+    field :amount, :decimal
+    # inserted_at and updated_at will be :utc_datetime_usec
+    timestamps()
+  end
+end
+
+# Explicit microsecond field
+defmodule Event do
+  use Ecto.Schema
+  
+  schema "events" do
+    field :name, :string
+    field :occurred_at, :utc_datetime_usec  # Explicit microsecond precision
+    timestamps()
+  end
+end
+```
+
+Both standard and `_usec` variants store datetime values as ISO 8601 strings in SQLite:
+- Standard: `"2026-01-14T06:09:59Z"` (precision varies)
+- With `_usec`: `"2026-01-14T06:09:59.081609Z"` (always includes microseconds)
 
 ### Ecto Migration Notes
 
@@ -2870,7 +3365,7 @@ Helper to create SQL fragments for Ecto queries using JSON operators.
 - `path` (String.t() | integer): JSON path (string key or array index)
 - `operator` (`:arrow | :double_arrow`, optional, default `:arrow`): Operator type
 
-**Returns:** String for use in `Ecto.Query.fragment/1`
+**Returns:** String for use in Ecto.Query.fragment/1
 
 ### Sync Functions
 
@@ -4113,3 +4608,29 @@ Found a bug or have a feature request? Please open an issue on GitHub!
 ## License
 
 Apache 2.0
+
+## Landing the Plane (Session Completion)
+
+**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git push` succeeds.
+
+**MANDATORY WORKFLOW:**
+
+1. **File issues for remaining work** - Create issues for anything that needs follow-up
+2. **Run quality gates** (if code changed) - Tests, linters, builds
+3. **Update issue status** - Close finished work, update in-progress items
+4. **PUSH TO REMOTE** - This is MANDATORY:
+   ```bash
+   git pull --rebase
+   bd sync
+   git push
+   git status  # MUST show "up to date with origin"
+   ```
+5. **Clean up** - Clear stashes, prune remote branches
+6. **Verify** - All changes committed AND pushed
+7. **Hand off** - Provide context for next session
+
+**CRITICAL RULES:**
+- Work is NOT complete until `git push` succeeds
+- NEVER stop before pushing - that leaves work stranded locally
+- NEVER say "ready to push when you are" - YOU must push
+- If push fails, resolve and retry until it succeeds

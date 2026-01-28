@@ -298,10 +298,31 @@ mod should_use_query_tests {
 
     #[test]
     fn test_sql_with_comments() {
-        // Comments BEFORE the statement: we don't parse SQL comments,
-        // so "-- Comment\nSELECT" won't detect SELECT (first non-whitespace is '-')
-        // This is fine - Ecto doesn't generate SQL with leading comments
-        assert!(!should_use_query("-- Comment\nSELECT * FROM users"));
+        // Leading single-line comments are now skipped correctly
+        assert!(should_use_query("-- Comment\nSELECT * FROM users"));
+        assert!(should_use_query(
+            "-- First comment\n-- Second comment\nSELECT * FROM users"
+        ));
+
+        // Leading block comments are also skipped correctly
+        assert!(should_use_query("/* Block comment */ SELECT * FROM users"));
+        assert!(should_use_query(
+            "/* Multi\nline\nblock */ SELECT * FROM users"
+        ));
+
+        // Mixed comments and whitespace
+        assert!(should_use_query("  -- Comment\n  SELECT * FROM users"));
+        assert!(should_use_query(
+            "/* comment */ -- another\nSELECT * FROM users"
+        ));
+
+        // Leading comments on other statements
+        assert!(!should_use_query(
+            "-- Comment\nINSERT INTO users VALUES (1)"
+        ));
+        assert!(should_use_query(
+            "-- Comment\nINSERT INTO users VALUES (1) RETURNING id"
+        ));
 
         // Comments WITHIN the statement are fine - we detect keywords/clauses
         assert!(should_use_query(
@@ -419,39 +440,57 @@ mod should_use_query_tests {
     }
 
     // ===== EXPLAIN Query Tests =====
+    // EXPLAIN queries always return rows (the query plan), so should_use_query returns true.
 
     #[test]
-    fn test_explain_select_not_detected() {
-        // EXPLAIN SELECT is NOT detected because it starts with EXPLAIN, not SELECT.
-        assert!(!should_use_query("EXPLAIN SELECT * FROM users"));
-        assert!(!should_use_query(
+    fn test_explain_select_detected() {
+        // EXPLAIN SELECT returns query plan rows, so it's detected.
+        assert!(should_use_query("EXPLAIN SELECT * FROM users"));
+        assert!(should_use_query(
             "EXPLAIN QUERY PLAN SELECT * FROM users WHERE id = 1"
         ));
     }
 
     #[test]
-    fn test_explain_insert_not_detected() {
-        // EXPLAIN INSERT (without RETURNING) is not detected.
-        assert!(!should_use_query(
+    fn test_explain_insert_detected() {
+        // EXPLAIN INSERT returns query plan rows, so it's detected.
+        assert!(should_use_query(
             "EXPLAIN INSERT INTO users VALUES (1, 'Alice')"
         ));
 
-        // However, if RETURNING is added, it IS detected because of the RETURNING keyword.
+        // With RETURNING, it's also detected (via both EXPLAIN and RETURNING).
         assert!(should_use_query(
             "EXPLAIN INSERT INTO users VALUES (1, 'Alice') RETURNING id"
         ));
     }
 
     #[test]
-    fn test_explain_update_delete_not_detected() {
-        assert!(!should_use_query(
+    fn test_explain_update_delete_detected() {
+        // EXPLAIN UPDATE/DELETE return query plan rows, so they're detected.
+        assert!(should_use_query(
             "EXPLAIN UPDATE users SET name = 'Bob' WHERE id = 1"
         ));
-        assert!(!should_use_query("EXPLAIN DELETE FROM users WHERE id = 1"));
+        assert!(should_use_query("EXPLAIN DELETE FROM users WHERE id = 1"));
 
-        // With RETURNING, they ARE detected via the RETURNING keyword.
+        // With RETURNING, they're also detected (via both EXPLAIN and RETURNING).
         assert!(should_use_query(
             "EXPLAIN UPDATE users SET name = 'Bob' WHERE id = 1 RETURNING id"
+        ));
+    }
+
+    #[test]
+    fn test_explain_case_insensitive() {
+        assert!(should_use_query("explain SELECT * FROM users"));
+        assert!(should_use_query("Explain SELECT * FROM users"));
+        assert!(should_use_query("EXPLAIN select * from users"));
+    }
+
+    #[test]
+    fn test_explain_with_whitespace() {
+        assert!(should_use_query("  EXPLAIN SELECT * FROM users"));
+        assert!(should_use_query("\tEXPLAIN SELECT * FROM users"));
+        assert!(should_use_query(
+            "\n  EXPLAIN QUERY PLAN SELECT * FROM users"
         ));
     }
 
@@ -622,9 +661,10 @@ mod should_use_query_tests {
     }
 
     #[test]
-    fn test_explain_queries_not_detected_as_select() {
-        assert!(!should_use_query("EXPLAIN SELECT * FROM users"));
-        assert!(!should_use_query(
+    fn test_explain_queries_detected_as_returning_rows() {
+        // EXPLAIN queries return query plan rows and should use the query path.
+        assert!(should_use_query("EXPLAIN SELECT * FROM users"));
+        assert!(should_use_query(
             "EXPLAIN QUERY PLAN SELECT * FROM users WHERE id = 1"
         ));
     }

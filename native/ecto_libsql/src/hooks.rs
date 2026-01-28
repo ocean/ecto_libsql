@@ -160,3 +160,20 @@ pub fn set_authorizer(env: Env, _conn_id: &str, _pid: LocalPid) -> NifResult<(At
         Atom::from_str(env, "unsupported")?,
     ))
 }
+
+/// Determine if a SQL query should use the query path (returns rows) or execute path (no rows)
+///
+/// This is used by the Elixir adapter to route queries correctly:
+/// - SELECT, EXPLAIN, WITH, and RETURNING clauses return rows → use query path
+/// - INSERT, UPDATE, DELETE (without RETURNING) don't return rows → use execute path
+///
+/// # Arguments
+/// - `sql` - SQL statement to analyze
+///
+/// # Returns
+/// - `true` - Query returns rows, should use query path
+/// - `false` - Query doesn't return rows, should use execute path
+#[rustler::nif]
+pub fn should_use_query_path(sql: String) -> bool {
+    crate::should_use_query(&sql)
+}

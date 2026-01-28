@@ -211,10 +211,16 @@ defmodule Ecto.Adapters.LibSql do
   def loaders(:boolean, type), do: [&bool_decode/1, type]
   def loaders(:binary_id, type), do: [type]
   def loaders(:utc_datetime, type), do: [&datetime_decode/1, type]
+  def loaders(:utc_datetime_usec, type), do: [&datetime_decode/1, type]
   def loaders(:naive_datetime, type), do: [&datetime_decode/1, type]
+  def loaders(:naive_datetime_usec, type), do: [&datetime_decode/1, type]
   def loaders(:date, type), do: [&date_decode/1, type]
   def loaders(:time, type), do: [&time_decode/1, type]
+  def loaders(:time_usec, type), do: [&time_decode/1, type]
   def loaders(:decimal, type), do: [&decimal_decode/1, type]
+  def loaders(:json, type), do: [&json_decode/1, type]
+  def loaders(:map, type), do: [&json_decode/1, type]
+  def loaders({:array, _}, type), do: [&json_array_decode/1, type]
   def loaders(_primitive, type), do: [type]
 
   defp bool_decode(0), do: {:ok, false}
@@ -223,8 +229,15 @@ defmodule Ecto.Adapters.LibSql do
 
   defp datetime_decode(value) when is_binary(value) do
     case NaiveDateTime.from_iso8601(value) do
-      {:ok, datetime} -> {:ok, datetime}
-      {:error, _} -> :error
+      {:ok, datetime} ->
+        {:ok, datetime}
+
+      {:error, _} ->
+        # Try parsing as timezone-aware ISO8601 (with "Z" or offset)
+        case DateTime.from_iso8601(value) do
+          {:ok, datetime, _offset} -> {:ok, datetime}
+          {:error, _} -> :error
+        end
     end
   end
 
@@ -265,26 +278,81 @@ defmodule Ecto.Adapters.LibSql do
 
   defp decimal_decode(value), do: {:ok, value}
 
+  defp json_decode(value) when is_binary(value) do
+    case Jason.decode(value) do
+      {:ok, decoded} -> {:ok, decoded}
+      {:error, _} -> :error
+    end
+  end
+
+  defp json_decode(value) when is_map(value), do: {:ok, value}
+  defp json_decode(value), do: {:ok, value}
+
+  defp json_array_decode(nil), do: {:ok, nil}
+
+  defp json_array_decode(value) when is_binary(value) do
+    case value do
+      # Empty string defaults to empty array for backwards compatibility with nullable array fields.
+      # This differs from json_decode/1, which would return :error for empty strings,
+      # but provides a reasonable default for array-typed columns that may be empty.
+      "" ->
+        {:ok, []}
+
+      _ ->
+        case Jason.decode(value) do
+          {:ok, decoded} when is_list(decoded) -> {:ok, decoded}
+          {:ok, _} -> :error
+          {:error, _} -> :error
+        end
+    end
+  end
+
+  defp json_array_decode(value) when is_list(value), do: {:ok, value}
+  defp json_array_decode(_value), do: :error
+
   @doc false
   def dumpers(:binary, type), do: [type]
   def dumpers(:binary_id, type), do: [type]
   def dumpers(:boolean, type), do: [type, &bool_encode/1]
   def dumpers(:utc_datetime, type), do: [type, &datetime_encode/1]
+  def dumpers(:utc_datetime_usec, type), do: [type, &datetime_encode/1]
   def dumpers(:naive_datetime, type), do: [type, &datetime_encode/1]
+  def dumpers(:naive_datetime_usec, type), do: [type, &datetime_encode/1]
   def dumpers(:date, type), do: [type, &date_encode/1]
   def dumpers(:time, type), do: [type, &time_encode/1]
+  def dumpers(:time_usec, type), do: [type, &time_encode/1]
   def dumpers(:decimal, type), do: [type, &decimal_encode/1]
+  def dumpers(:json, type), do: [type, &json_encode/1]
+  def dumpers(:map, type), do: [type, &json_encode/1]
+  def dumpers({:array, _}, type), do: [type, &array_encode/1]
   def dumpers(_primitive, type), do: [type]
 
+  defp bool_encode(nil), do: {:ok, nil}
   defp bool_encode(false), do: {:ok, 0}
   defp bool_encode(true), do: {:ok, 1}
+
+  defp datetime_encode(nil) do
+    {:ok, nil}
+  end
+
+  defp datetime_encode(%DateTime{} = datetime) do
+    {:ok, DateTime.to_iso8601(datetime)}
+  end
 
   defp datetime_encode(%NaiveDateTime{} = datetime) do
     {:ok, NaiveDateTime.to_iso8601(datetime)}
   end
 
+  defp date_encode(nil) do
+    {:ok, nil}
+  end
+
   defp date_encode(%Date{} = date) do
     {:ok, Date.to_iso8601(date)}
+  end
+
+  defp time_encode(nil) do
+    {:ok, nil}
   end
 
   defp time_encode(%Time{} = time) do
@@ -294,4 +362,26 @@ defmodule Ecto.Adapters.LibSql do
   defp decimal_encode(%Decimal{} = decimal) do
     {:ok, Decimal.to_string(decimal)}
   end
+
+  defp json_encode(nil), do: {:ok, nil}
+
+  defp json_encode(value) when is_binary(value), do: {:ok, value}
+
+  defp json_encode(value) when is_map(value) or is_list(value) do
+    case Jason.encode(value) do
+      {:ok, json} -> {:ok, json}
+      {:error, _} -> :error
+    end
+  end
+
+  defp json_encode(value), do: {:ok, value}
+
+  defp array_encode(value) when is_list(value) do
+    case Jason.encode(value) do
+      {:ok, json} -> {:ok, json}
+      {:error, _} -> :error
+    end
+  end
+
+  defp array_encode(value), do: {:ok, value}
 end

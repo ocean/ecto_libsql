@@ -7,23 +7,15 @@
 // Allow unwrap() in tests for cleaner test code - see CLAUDE.md "Test Code Exception"
 #![allow(clippy::unwrap_used)]
 
+use super::test_utils::{setup_test_db, TestDbGuard};
 use libsql::{Builder, Value};
-use std::fs;
-use uuid::Uuid;
-
-fn setup_test_db() -> String {
-    format!("z_ecto_libsql_test-{}.db", Uuid::new_v4())
-}
-
-fn cleanup_test_db(db_path: &str) {
-    let _ = fs::remove_file(db_path);
-}
 
 #[tokio::test]
 async fn test_create_local_database() {
     let db_path = setup_test_db();
+    let _guard = TestDbGuard::new(db_path.clone());
 
-    let result = Builder::new_local(&db_path).build().await;
+    let result = Builder::new_local(db_path.to_str().unwrap()).build().await;
     assert!(result.is_ok(), "Failed to create local database");
 
     let db = result.unwrap();
@@ -34,14 +26,17 @@ async fn test_create_local_database() {
         .execute("CREATE TABLE test (id INTEGER PRIMARY KEY, name TEXT)", ())
         .await;
     assert!(result.is_ok(), "Failed to create table");
-
-    cleanup_test_db(&db_path);
 }
 
 #[tokio::test]
 async fn test_parameter_binding_with_integers() {
     let db_path = setup_test_db();
-    let db = Builder::new_local(&db_path).build().await.unwrap();
+    let _guard = TestDbGuard::new(db_path.clone());
+
+    let db = Builder::new_local(db_path.to_str().unwrap())
+        .build()
+        .await
+        .unwrap();
     let conn = db.connect().unwrap();
 
     conn.execute("CREATE TABLE users (id INTEGER, age INTEGER)", ())
@@ -70,14 +65,17 @@ async fn test_parameter_binding_with_integers() {
     let row = rows.next().await.unwrap().unwrap();
     assert_eq!(row.get::<i64>(0).unwrap(), 1);
     assert_eq!(row.get::<i64>(1).unwrap(), 30);
-
-    cleanup_test_db(&db_path);
 }
 
 #[tokio::test]
 async fn test_parameter_binding_with_floats() {
     let db_path = setup_test_db();
-    let db = Builder::new_local(&db_path).build().await.unwrap();
+    let _guard = TestDbGuard::new(db_path.clone());
+
+    let db = Builder::new_local(db_path.to_str().unwrap())
+        .build()
+        .await
+        .unwrap();
     let conn = db.connect().unwrap();
 
     conn.execute("CREATE TABLE products (id INTEGER, price REAL)", ())
@@ -110,14 +108,17 @@ async fn test_parameter_binding_with_floats() {
         (price - 19.99).abs() < 0.01,
         "Price should be approximately 19.99"
     );
-
-    cleanup_test_db(&db_path);
 }
 
 #[tokio::test]
 async fn test_parameter_binding_with_text() {
     let db_path = setup_test_db();
-    let db = Builder::new_local(&db_path).build().await.unwrap();
+    let _guard = TestDbGuard::new(db_path.clone());
+
+    let db = Builder::new_local(db_path.to_str().unwrap())
+        .build()
+        .await
+        .unwrap();
     let conn = db.connect().unwrap();
 
     conn.execute("CREATE TABLE users (id INTEGER, name TEXT)", ())
@@ -145,14 +146,17 @@ async fn test_parameter_binding_with_text() {
 
     let row = rows.next().await.unwrap().unwrap();
     assert_eq!(row.get::<String>(0).unwrap(), "Alice");
-
-    cleanup_test_db(&db_path);
 }
 
 #[tokio::test]
 async fn test_transaction_commit() {
     let db_path = setup_test_db();
-    let db = Builder::new_local(&db_path).build().await.unwrap();
+    let _guard = TestDbGuard::new(db_path.clone());
+
+    let db = Builder::new_local(db_path.to_str().unwrap())
+        .build()
+        .await
+        .unwrap();
     let conn = db.connect().unwrap();
 
     conn.execute("CREATE TABLE users (id INTEGER, name TEXT)", ())
@@ -173,14 +177,17 @@ async fn test_transaction_commit() {
     let mut rows = conn.query("SELECT COUNT(*) FROM users", ()).await.unwrap();
     let row = rows.next().await.unwrap().unwrap();
     assert_eq!(row.get::<i64>(0).unwrap(), 1);
-
-    cleanup_test_db(&db_path);
 }
 
 #[tokio::test]
 async fn test_transaction_rollback() {
     let db_path = setup_test_db();
-    let db = Builder::new_local(&db_path).build().await.unwrap();
+    let _guard = TestDbGuard::new(db_path.clone());
+
+    let db = Builder::new_local(db_path.to_str().unwrap())
+        .build()
+        .await
+        .unwrap();
     let conn = db.connect().unwrap();
 
     conn.execute("CREATE TABLE users (id INTEGER, name TEXT)", ())
@@ -201,14 +208,17 @@ async fn test_transaction_rollback() {
     let mut rows = conn.query("SELECT COUNT(*) FROM users", ()).await.unwrap();
     let row = rows.next().await.unwrap().unwrap();
     assert_eq!(row.get::<i64>(0).unwrap(), 0);
-
-    cleanup_test_db(&db_path);
 }
 
 #[tokio::test]
 async fn test_prepared_statement() {
     let db_path = setup_test_db();
-    let db = Builder::new_local(&db_path).build().await.unwrap();
+    let _guard = TestDbGuard::new(db_path.clone());
+
+    let db = Builder::new_local(db_path.to_str().unwrap())
+        .build()
+        .await
+        .unwrap();
     let conn = db.connect().unwrap();
 
     conn.execute("CREATE TABLE users (id INTEGER, name TEXT)", ())
@@ -238,7 +248,7 @@ async fn test_prepared_statement() {
     let first_row = result_rows_1.next().await.unwrap().unwrap();
     assert_eq!(first_row.get::<String>(0).unwrap(), "Alice");
 
-    // Test prepared statement with second parameter (prepare again, mimicking NIF behavior)
+    // Test prepared statement with second parameter (prepare again, mimicking NIF behaviour)
     let stmt2 = conn
         .prepare("SELECT name FROM users WHERE id = ?1")
         .await
@@ -246,14 +256,17 @@ async fn test_prepared_statement() {
     let mut result_rows_2 = stmt2.query(vec![Value::Integer(2)]).await.unwrap();
     let second_row = result_rows_2.next().await.unwrap().unwrap();
     assert_eq!(second_row.get::<String>(0).unwrap(), "Bob");
-
-    cleanup_test_db(&db_path);
 }
 
 #[tokio::test]
 async fn test_blob_storage() {
     let db_path = setup_test_db();
-    let db = Builder::new_local(&db_path).build().await.unwrap();
+    let _guard = TestDbGuard::new(db_path.clone());
+
+    let db = Builder::new_local(db_path.to_str().unwrap())
+        .build()
+        .await
+        .unwrap();
     let conn = db.connect().unwrap();
 
     conn.execute("CREATE TABLE files (id INTEGER, data BLOB)", ())
@@ -280,14 +293,17 @@ async fn test_blob_storage() {
     let row = rows.next().await.unwrap().unwrap();
     let retrieved_data = row.get::<Vec<u8>>(0).unwrap();
     assert_eq!(retrieved_data, test_data);
-
-    cleanup_test_db(&db_path);
 }
 
 #[tokio::test]
 async fn test_null_values() {
     let db_path = setup_test_db();
-    let db = Builder::new_local(&db_path).build().await.unwrap();
+    let _guard = TestDbGuard::new(db_path.clone());
+
+    let db = Builder::new_local(db_path.to_str().unwrap())
+        .build()
+        .await
+        .unwrap();
     let conn = db.connect().unwrap();
 
     conn.execute("CREATE TABLE users (id INTEGER, email TEXT)", ())
@@ -313,6 +329,4 @@ async fn test_null_values() {
     let row = rows.next().await.unwrap().unwrap();
     let email_value = row.get_value(0).unwrap();
     assert!(matches!(email_value, Value::Null));
-
-    cleanup_test_db(&db_path);
 }

@@ -152,11 +152,154 @@ defmodule EctoLibSql do
         query when is_binary(query) -> %EctoLibSql.Query{statement: query}
       end
 
-    if trx_id do
-      EctoLibSql.Native.execute_with_trx(state, query_struct, args)
-    else
-      EctoLibSql.Native.execute_non_trx(query_struct, state, args)
+    # Check if query returns rows (SELECT, EXPLAIN, WITH, RETURNING clauses).
+    # If so, route through query path instead of execute path.
+    sql = query_struct.statement
+
+    case EctoLibSql.Native.should_use_query_path(sql) do
+      true ->
+        # Query returns rows, use the query path.
+        # Convert map arguments to list if needed (NIFs expect lists).
+        normalised_args = normalise_args_for_query(sql, args)
+
+        if trx_id do
+          EctoLibSql.Native.query_with_trx_args(trx_id, state.conn_id, sql, normalised_args)
+          |> format_query_result(state)
+        else
+          EctoLibSql.Native.query_args(
+            state.conn_id,
+            state.mode,
+            state.sync,
+            sql,
+            normalised_args
+          )
+          |> format_query_result(state)
+        end
+
+      false ->
+        # Query doesn't return rows, use the execute path (INSERT/UPDATE/DELETE).
+        # Note: execute_with_trx and execute_non_trx handle argument normalisation internally.
+        if trx_id do
+          EctoLibSql.Native.execute_with_trx(state, query_struct, args)
+        else
+          EctoLibSql.Native.execute_non_trx(query_struct, state, args)
+        end
     end
+  end
+
+  # Helper to format raw query results for return
+  defp format_query_result(%{"columns" => columns, "rows" => rows, "num_rows" => num_rows}, state) do
+    result = %EctoLibSql.Result{
+      columns: columns,
+      rows: rows,
+      num_rows: num_rows
+    }
+
+    {:ok, %EctoLibSql.Query{}, result, state}
+  end
+
+  defp format_query_result({:error, reason}, state) do
+    error = build_error(reason)
+    {:error, error, state}
+  end
+
+  # Build an EctoLibSql.Error from various reason formats.
+  defp build_error(%EctoLibSql.Error{} = error), do: error
+
+  defp build_error(reason) when is_binary(reason) do
+    %EctoLibSql.Error{message: reason, sqlite: %{code: :error, message: reason}}
+  end
+
+  defp build_error(reason) when is_map(reason) do
+    message = Map.get(reason, :message) || Map.get(reason, "message") || inspect(reason)
+    %EctoLibSql.Error{message: message, sqlite: %{code: :error, message: message}}
+  end
+
+  defp build_error(reason) do
+    message = inspect(reason)
+    %EctoLibSql.Error{message: message, sqlite: %{code: :error, message: message}}
+  end
+
+  # Convert map arguments to a list by extracting named parameters from SQL.
+  # If args is already a list, return it unchanged.
+  defp normalise_args_for_query(_sql, args) when is_list(args), do: args
+
+  defp normalise_args_for_query(sql, args) when is_map(args) do
+    # Extract named parameters from SQL in order of appearance.
+    # Supports :name, $name, and @name formats.
+    param_names = extract_named_params(sql)
+
+    # Validate that all parameters exist in the map and collect missing ones.
+    missing_params =
+      Enum.filter(param_names, fn name ->
+        not has_param?(args, name)
+      end)
+
+    # Raise error if any parameters are missing.
+    if missing_params != [] do
+      missing_list = Enum.map_join(missing_params, ", ", &":#{&1}")
+
+      raise ArgumentError,
+            "Missing required parameters: #{missing_list}. " <>
+              "SQL requires: #{Enum.map_join(param_names, ", ", &":#{&1}")}"
+    end
+
+    # Convert map values to list in parameter order.
+    Enum.map(param_names, fn name ->
+      get_param_value(args, name)
+    end)
+  end
+
+  # Check if a parameter exists in the map (supports both atom and string keys).
+  # Uses String.to_existing_atom/1 to avoid atom table exhaustion from dynamic SQL.
+  defp has_param?(map, name) when is_binary(name) do
+    # Try existing atom key first (common case), then string key.
+    try do
+      atom_key = String.to_existing_atom(name)
+      Map.has_key?(map, atom_key) or Map.has_key?(map, name)
+    rescue
+      ArgumentError ->
+        # Atom doesn't exist, check string key only.
+        Map.has_key?(map, name)
+    end
+  end
+
+  # Get a parameter value from a map, supporting both atom and string keys.
+  # Uses String.to_existing_atom/1 to avoid atom table exhaustion from dynamic SQL.
+  # This assumes the parameter exists (validated by has_param?).
+  defp get_param_value(map, name) when is_binary(name) do
+    # Try existing atom key first (common case), then string key.
+    atom_key = String.to_existing_atom(name)
+    Map.get(map, atom_key, Map.get(map, name))
+  rescue
+    ArgumentError ->
+      # Atom doesn't exist, try string key only.
+      Map.get(map, name)
+  end
+
+  # Extract named parameter names from SQL in order of appearance.
+  # Returns a list of strings to avoid atom table exhaustion from dynamic SQL.
+  #
+  # LIMITATION: This regex-based approach cannot distinguish between parameter-like
+  # patterns in SQL string literals or comments and actual parameters. For example:
+  #
+  #   SELECT ':not_a_param', name FROM users WHERE id = :actual_param
+  #
+  # Would extract both "not_a_param" and "actual_param", even though the first
+  # appears in a string literal. This is an edge case that would require a full
+  # SQL parser to handle correctly (tracking quoted strings, escaped characters,
+  # and comment blocks). In practice, this limitation rarely causes issues because:
+  # 1. SQL string literals containing parameter-like patterns are uncommon
+  # 2. The validation will catch truly missing parameters
+  # 3. Extra entries in the parameter list are ignored during binding
+  #
+  # If this becomes problematic, consider using a proper SQL parser or the
+  # prepared statement introspection approach used in lib/ecto_libsql/native.ex.
+  defp extract_named_params(sql) do
+    # Match :name, $name, or @name patterns.
+    ~r/[:$@]([a-zA-Z_][a-zA-Z0-9_]*)/
+    |> Regex.scan(sql)
+    |> Enum.map(fn [_full, name] -> name end)
   end
 
   @impl true

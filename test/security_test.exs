@@ -3,10 +3,7 @@ defmodule EctoLibSql.SecurityTest do
 
   # Helper to clean up database files and associated WAL/SHM files.
   defp cleanup_db(db_path) do
-    File.rm(db_path)
-    File.rm(db_path <> "-wal")
-    File.rm(db_path <> "-shm")
-    File.rm(db_path <> "-journal")
+    EctoLibSql.TestHelpers.cleanup_db_files(db_path)
   end
 
   describe "Transaction Isolation ✅" do

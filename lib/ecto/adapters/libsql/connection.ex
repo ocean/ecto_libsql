@@ -184,17 +184,25 @@ defmodule Ecto.Adapters.LibSql.Connection do
     table_name = quote_table(table.prefix, table.name)
     if_not_exists = if command == :create_if_not_exists, do: " IF NOT EXISTS", else: ""
 
-    # Check if we have a composite primary key.
-    composite_pk = composite_primary_key?(columns)
+    # Check if this is an R*Tree virtual table
+    if table.options && Keyword.get(table.options, :rtree, false) do
+      # Validate that no incompatible options are set with :rtree
+      validate_rtree_options!(table.options)
+      create_rtree_table(table_name, if_not_exists, columns)
+    else
+      # Standard table creation
+      # Check if we have a composite primary key.
+      composite_pk = composite_primary_key?(columns)
 
-    column_definitions =
-      Enum.map_join(columns, ", ", &column_definition(&1, composite_pk))
+      column_definitions =
+        Enum.map_join(columns, ", ", &column_definition(&1, composite_pk))
 
-    {table_constraints, table_suffix} = table_options(table, columns)
+      {table_constraints, table_suffix} = table_options(table, columns)
 
-    [
-      "CREATE TABLE#{if_not_exists} #{table_name} (#{column_definitions}#{table_constraints})#{table_suffix}"
-    ]
+      [
+        "CREATE TABLE#{if_not_exists} #{table_name} (#{column_definitions}#{table_constraints})#{table_suffix}"
+      ]
+    end
   end
 
   def execute_ddl({:drop, %Ecto.Migration.Table{} = table, _}) do
@@ -260,6 +268,41 @@ defmodule Ecto.Adapters.LibSql.Connection do
   def execute_ddl({:drop_if_exists, %Ecto.Migration.Index{} = index, _}) do
     index_name = quote_name(index.name)
     ["DROP INDEX IF EXISTS #{index_name}"]
+  end
+
+  def execute_ddl({:create, %Ecto.Migration.Constraint{}}) do
+    raise ArgumentError, """
+    LibSQL/SQLite does not support ALTER TABLE ADD CONSTRAINT.
+
+    CHECK constraints must be defined inline during table creation using the :check option
+    in your migration's add/3 call, or as table-level constraints.
+
+    Example:
+        create table(:users) do
+          add :age, :integer, check: "age >= 0"
+        end
+
+    For table-level constraints, use execute/1 with raw SQL:
+        execute "CREATE TABLE users (age INTEGER, CHECK (age >= 0))"
+    """
+  end
+
+  def execute_ddl({:drop, %Ecto.Migration.Constraint{}, _mode}) do
+    raise ArgumentError, """
+    LibSQL/SQLite does not support ALTER TABLE DROP CONSTRAINT.
+
+    To remove a constraint, you must recreate the table without it.
+    See the Ecto migration guide for table recreation patterns.
+    """
+  end
+
+  def execute_ddl({:drop_if_exists, %Ecto.Migration.Constraint{}, _mode}) do
+    raise ArgumentError, """
+    LibSQL/SQLite does not support ALTER TABLE DROP CONSTRAINT.
+
+    To remove a constraint, you must recreate the table without it.
+    See the Ecto migration guide for table recreation patterns.
+    """
   end
 
   def execute_ddl({:rename, %Ecto.Migration.Table{} = table, old_name, new_name}) do
@@ -337,6 +380,8 @@ defmodule Ecto.Adapters.LibSql.Connection do
   defp reference_on_update(:restrict), do: " ON UPDATE RESTRICT"
 
   defp column_type(:id, _opts), do: "INTEGER"
+  defp column_type(:serial, _opts), do: "INTEGER"
+  defp column_type(:bigserial, _opts), do: "INTEGER"
   defp column_type(:binary_id, _opts), do: "TEXT"
   defp column_type(:uuid, _opts), do: "TEXT"
   defp column_type(:string, opts), do: "TEXT#{size_constraint(opts)}"
@@ -405,15 +450,89 @@ defmodule Ecto.Adapters.LibSql.Connection do
           " GENERATED ALWAYS AS (#{expr})#{stored}"
       end
 
-    "#{pk}#{null}#{default}#{generated}"
+    # Column-level CHECK constraint
+    check =
+      case Keyword.get(opts, :check) do
+        nil ->
+          ""
+
+        expr when is_binary(expr) ->
+          " CHECK (#{expr})"
+
+        invalid ->
+          raise ArgumentError,
+                "CHECK constraint expression must be a binary string, got: #{inspect(invalid)}"
+      end
+
+    "#{pk}#{null}#{default}#{generated}#{check}"
   end
 
   defp column_default(nil), do: ""
+  defp column_default(:null), do: ""
   defp column_default(true), do: " DEFAULT 1"
   defp column_default(false), do: " DEFAULT 0"
   defp column_default(value) when is_binary(value), do: " DEFAULT '#{escape_string(value)}'"
   defp column_default(value) when is_number(value), do: " DEFAULT #{value}"
   defp column_default({:fragment, expr}), do: " DEFAULT #{expr}"
+
+  # Temporal types - convert to ISO8601 strings
+  defp column_default(%DateTime{} = dt) do
+    " DEFAULT '#{escape_string(DateTime.to_iso8601(dt))}'"
+  end
+
+  defp column_default(%NaiveDateTime{} = dt) do
+    " DEFAULT '#{escape_string(NaiveDateTime.to_iso8601(dt))}'"
+  end
+
+  defp column_default(%Date{} = d) do
+    " DEFAULT '#{escape_string(Date.to_iso8601(d))}'"
+  end
+
+  defp column_default(%Time{} = t) do
+    " DEFAULT '#{escape_string(Time.to_iso8601(t))}'"
+  end
+
+  # Decimal type - convert to string representation
+  defp column_default(%Decimal{} = d) do
+    " DEFAULT '#{escape_string(Decimal.to_string(d))}'"
+  end
+
+  defp column_default(value) when is_map(value) or is_list(value) do
+    type_name = if is_map(value), do: "map", else: "list"
+    encode_json_default(value, type_name)
+  end
+
+  # Handle any other unexpected types (e.g., empty maps or third-party migrations)
+  # Logs a warning to help with debugging while gracefully falling back to no DEFAULT clause
+  defp column_default(unexpected) do
+    require Logger
+
+    Logger.warning(
+      "Unsupported default value type in migration: #{inspect(unexpected)} - " <>
+        "no DEFAULT clause will be generated. This can occur with some generated migrations " <>
+        "or other third-party integrations that provide unexpected default types."
+    )
+
+    ""
+  end
+
+  # Helper function to encode JSON default values and log failures
+  defp encode_json_default(value, type_name) do
+    case Jason.encode(value) do
+      {:ok, json} ->
+        " DEFAULT '#{escape_string(json)}'"
+
+      {:error, reason} ->
+        require Logger
+
+        Logger.warning(
+          "Failed to JSON encode #{type_name} default value in migration: #{inspect(value)} - " <>
+            "Reason: #{inspect(reason)} - no DEFAULT clause will be generated."
+        )
+
+        ""
+    end
+  end
 
   defp table_options(table, columns) do
     # Validate mutually exclusive options (per libSQL specification)
@@ -472,6 +591,80 @@ defmodule Ecto.Adapters.LibSql.Connection do
     table_suffix = Enum.join(suffixes)
 
     {table_constraints, table_suffix}
+  end
+
+  defp create_rtree_table(table_name, if_not_exists, columns) do
+    # R*Tree virtual tables require specific column structure:
+    # First column: integer primary key (id)
+    # Remaining columns: coordinate pairs (min/max)
+
+    # Extract column names for R*Tree
+    rtree_columns =
+      Enum.map(columns, fn {:add, name, _type, _opts} ->
+        Atom.to_string(name)
+      end)
+
+    # Validate column structure
+    validate_rtree_columns!(rtree_columns)
+
+    # Build R*Tree column list: id, min1, max1, min2, max2, ...
+    column_list = Enum.join(rtree_columns, ", ")
+
+    [
+      "CREATE VIRTUAL TABLE#{if_not_exists} #{table_name} USING rtree(#{column_list})"
+    ]
+  end
+
+  defp validate_rtree_options!(options) do
+    # R*Tree virtual tables are incompatible with standard table options
+    # Check for any non-:rtree options that would be silently ignored
+    incompatible_options =
+      Keyword.keys(options)
+      |> Enum.reject(&(&1 == :rtree))
+
+    unless Enum.empty?(incompatible_options) do
+      options_str = Enum.map_join(incompatible_options, ", ", &inspect/1)
+
+      raise ArgumentError,
+            "R*Tree virtual tables do not support standard table options. " <>
+              "Found incompatible options: #{options_str}. " <>
+              "R*Tree tables can only use the :rtree option."
+    end
+
+    :ok
+  end
+
+  defp validate_rtree_columns!(columns) do
+    # R*Tree requires odd number of columns (3 to 11)
+    # First column is ID, then min/max pairs
+    num_columns = length(columns)
+
+    cond do
+      num_columns < 3 ->
+        raise ArgumentError,
+              "R*Tree tables require at least 3 columns (id + 1 dimension). Got #{num_columns} columns."
+
+      num_columns > 11 ->
+        raise ArgumentError,
+              "R*Tree tables support maximum 11 columns (id + 5 dimensions). Got #{num_columns} columns."
+
+      rem(num_columns, 2) == 0 ->
+        raise ArgumentError,
+              "R*Tree tables require odd number of columns (id + min/max pairs). Got #{num_columns} columns."
+
+      true ->
+        :ok
+    end
+
+    # Validate first column is 'id'
+    [first_column | _rest] = columns
+
+    unless first_column == "id" do
+      raise ArgumentError,
+            "R*Tree tables must have 'id' as the first column. Got '#{first_column}' instead."
+    end
+
+    :ok
   end
 
   ## Query Helpers
@@ -545,7 +738,7 @@ defmodule Ecto.Adapters.LibSql.Connection do
     {join, wheres} = using_join(query, :update_all, "FROM", sources)
     where = where(%{query | wheres: wheres}, sources)
 
-    ["UPDATE ", from, " AS ", name, " SET ", fields, join, where]
+    ["UPDATE ", from, " AS ", name, " SET ", fields, join, where | returning(query, sources)]
   end
 
   @impl true
@@ -556,7 +749,7 @@ defmodule Ecto.Adapters.LibSql.Connection do
     {join, wheres} = using_join(query, :delete_all, "USING", sources)
     where = where(%{query | wheres: wheres}, sources)
 
-    ["DELETE FROM ", from, " AS ", name, join, where]
+    ["DELETE FROM ", from, " AS ", name, join, where | returning(query, sources)]
   end
 
   @impl true
@@ -694,9 +887,25 @@ defmodule Ecto.Adapters.LibSql.Connection do
 
   @impl true
   def explain_query(conn, query, params, opts) do
-    sql = all(query)
-    explain_sql = IO.iodata_to_binary(["EXPLAIN QUERY PLAN " | sql])
-    execute(conn, explain_sql, params, opts)
+    # The query parameter is the prepared SQL string generated by Ecto
+    # Prepend "EXPLAIN QUERY PLAN" to get the optimiser plan
+    sql = IO.iodata_to_binary(["EXPLAIN QUERY PLAN " | query])
+
+    # EXPLAIN QUERY PLAN returns rows, so use query() path not execute()
+    case query(conn, sql, params, opts) do
+      {:ok, result} ->
+        # Convert result to list of maps for Ecto's explain consumption
+        # Return {:ok, maps} - Ecto.Multi requires this format
+        maps =
+          Enum.map(result.rows, fn row ->
+            Enum.zip(result.columns, row) |> Enum.into(%{})
+          end)
+
+        {:ok, maps}
+
+      error ->
+        error
+    end
   end
 
   @impl true
@@ -1040,6 +1249,32 @@ defmodule Ecto.Adapters.LibSql.Connection do
     [expr(left, sources, query), " IN (", args, ?)]
   end
 
+  # IN with subquery - generate proper SQL subquery instead of JSON_EACH
+  defp expr({:in, _, [left, %Ecto.SubQuery{} = subquery]}, sources, query) do
+    [expr(left, sources, query), " IN ", expr(subquery, sources, query)]
+  end
+
+  # Catch-all for IN with non-list right side (e.g. Ecto.Query.Tagged from ~w() sigil, JSON-encoded arrays)
+  # This handles cases where the right side has been pre-processed or wrapped by Ecto
+  defp expr({:in, _, [left, right]}, sources, query) do
+    case right do
+      %Ecto.Query.Tagged{value: val} when is_list(val) ->
+        # Extract list from Tagged struct and generate proper IN clause
+        args = Enum.map_intersperse(val, ?,, &expr(&1, sources, query))
+        [expr(left, sources, query), " IN (", args, ?)]
+
+      _ ->
+        # Default fallback: use JSON_EACH to handle JSON-encoded arrays or other complex types
+        [
+          expr(left, sources, query),
+          " IN (SELECT value FROM JSON_EACH(",
+          expr(right, sources, query),
+          ?),
+          ?)
+        ]
+    end
+  end
+
   # LIKE
   defp expr({:like, _, [left, right]}, sources, query) do
     [expr(left, sources, query), " LIKE ", expr(right, sources, query)]
@@ -1082,9 +1317,26 @@ defmodule Ecto.Adapters.LibSql.Connection do
     quote_name(name)
   end
 
-  # Type casting
+  # Type casting (pre-planning AST form)
   defp expr({:type, _, [arg, _type]}, sources, query) do
     expr(arg, sources, query)
+  end
+
+  # Type casting (post-planning Tagged struct form)
+  defp expr(%Ecto.Query.Tagged{value: value}, sources, query) do
+    expr(value, sources, query)
+  end
+
+  # SubQuery expression - generates inline SQL subquery
+  defp expr(%Ecto.SubQuery{query: query}, sources, parent_query) do
+    combinations =
+      Enum.map(query.combinations, fn {type, combination_query} ->
+        {type, put_in(combination_query.aliases[@parent_as], {parent_query, sources})}
+      end)
+
+    query = put_in(query.combinations, combinations)
+    query = put_in(query.aliases[@parent_as], {parent_query, sources})
+    [?(, all(query, subquery_as_prefix(sources)), ?)]
   end
 
   # Literal values (numbers, strings, etc.)
@@ -1148,6 +1400,53 @@ defmodule Ecto.Adapters.LibSql.Connection do
 
   defp returning(returning) do
     [" RETURNING " | intersperse_map(returning, ?,, &quote_name/1)]
+  end
+
+  # Generate RETURNING clause from query select (for update_all/delete_all).
+  # Returns empty list if no select clause is present.
+  defp returning(%{select: nil}, _sources), do: []
+
+  defp returning(%{select: %{fields: fields}} = query, sources) do
+    [" RETURNING " | returning_fields(fields, sources, query)]
+  end
+
+  # Format fields for RETURNING clause.
+  # SQLite's RETURNING clause doesn't support table aliases, so we use bare column names.
+  defp returning_fields([], _sources, _query), do: ["1"]
+
+  defp returning_fields(fields, sources, query) do
+    intersperse_map(fields, ", ", fn
+      {:&, _, [idx]} ->
+        # Selecting all fields from a source - list all schema fields.
+        {_source, _name, schema} = elem(sources, idx)
+
+        if schema do
+          Enum.map_join(schema.__schema__(:fields), ", ", &quote_name/1)
+        else
+          "*"
+        end
+
+      {key, value} when is_atom(key) ->
+        # Key-value pair (for maps) - return as "expr AS key".
+        # Use returning_expr to avoid table aliases.
+        [returning_expr(value, sources, query), " AS ", quote_name(key)]
+
+      value ->
+        returning_expr(value, sources, query)
+    end)
+  end
+
+  # Generate expressions for RETURNING clause without table aliases.
+  # SQLite doesn't support table aliases in RETURNING.
+  defp returning_expr({{:., _, [{:&, _, [_idx]}, field]}, _, []}, _sources, _query)
+       when is_atom(field) do
+    # Simple field reference like u.name - return just the quoted field name.
+    quote_name(field)
+  end
+
+  defp returning_expr(value, sources, query) do
+    # For other expressions, fall back to the normal expr function.
+    expr(value, sources, query)
   end
 
   defp intersperse_map(list, separator, mapper) do

@@ -28,6 +28,9 @@ use std::sync::{Arc, Mutex};
 /// Returns a statement ID on success, error on failure.
 #[rustler::nif(schedule = "DirtyIo")]
 pub fn prepare_statement(conn_id: &str, sql: &str) -> NifResult<String> {
+    // UTF-8 validation is guaranteed by Rust's &str type and Rustler's conversion,
+    // so we can rely on the type system rather than runtime checks.
+
     let client = {
         let conn_map = utils::safe_lock(&CONNECTION_REGISTRY, "prepare_statement conn_map")?;
         conn_map

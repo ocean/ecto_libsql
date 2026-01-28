@@ -201,6 +201,9 @@ pub fn execute_transactional_batch<'a>(
 /// statements that don't return rows or conditional statements not executed.
 #[rustler::nif(schedule = "DirtyIo")]
 pub fn execute_batch_native<'a>(env: Env<'a>, conn_id: &str, sql: &str) -> NifResult<Term<'a>> {
+    // UTF-8 validation is guaranteed by Rust's &str type and Rustler's conversion,
+    // so we can rely on the type system rather than runtime checks.
+
     let conn_map = safe_lock(&CONNECTION_REGISTRY, "execute_batch_native conn_map")?;
 
     if let Some(client) = conn_map.get(conn_id) {
