@@ -14,7 +14,17 @@ defmodule Ecto.Adapters.LibSql.MigrationTest do
   setup do
     # Start a fresh repo for each test with a unique database file.
     test_db = "z_ecto_libsql_test-migrations_#{:erlang.unique_integer([:positive])}.db"
-    {:ok, pid} = start_supervised({TestRepo, database: test_db})
+
+    # Increased timeouts for M2 Mac compatibility - SQLite file locking can be slower on Apple Silicon
+    {:ok, pid} =
+      start_supervised(
+        {TestRepo,
+         database: test_db,
+         pool_size: 10,
+         queue_target: 1000,
+         queue_interval: 2000,
+         timeout: 15_000}
+      )
 
     on_exit(fn ->
       # Stop the repo before cleaning up files.
