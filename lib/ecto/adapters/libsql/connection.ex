@@ -1317,9 +1317,14 @@ defmodule Ecto.Adapters.LibSql.Connection do
     quote_name(name)
   end
 
-  # Type casting
+  # Type casting (pre-planning AST form)
   defp expr({:type, _, [arg, _type]}, sources, query) do
     expr(arg, sources, query)
+  end
+
+  # Type casting (post-planning Tagged struct form)
+  defp expr(%Ecto.Query.Tagged{value: value}, sources, query) do
+    expr(value, sources, query)
   end
 
   # SubQuery expression - generates inline SQL subquery
