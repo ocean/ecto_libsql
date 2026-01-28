@@ -55,7 +55,10 @@
       "Bash(gh run view:*)",
       "Bash(gh pr checkout:*)",
       "mcp__acp__Bash",
-      "mcp__acp__Edit"
+      "mcp__acp__Edit",
+      "Bash(for:*)",
+      "Bash(do echo \"=== Run $i ===\")",
+      "Bash(done)"
     ],
     "deny": [],
     "ask": []
