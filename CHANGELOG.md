@@ -10,6 +10,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - **IN Clause with Ecto.Query.Tagged Structs** - Fixed issue #63 where `~w()` sigil word lists in IN clauses returned zero results due to Tagged struct wrapping. Now properly extracts list values from `Ecto.Query.Tagged` structs before generating IN clauses, enabling these patterns to work correctly.
+- **SubQuery Support in IN Expressions** - Fixed SubQuery expressions being incorrectly wrapped in `JSON_EACH()`, causing invalid SQL. Now properly generates inline subqueries like `WHERE id IN (SELECT s0.id FROM table AS s0 WHERE ...)`. Fixes compatibility with libraries like Oban that use subqueries in UPDATE...WHERE patterns. (Thanks [@nadilas](https://github.com/nadilas) for PR #66 !)
+- **Ecto.Query.Tagged Expression Handling** - Fixed type-cast fragments (e.g. `type(fragment(...), :integer)`) falling through to catch-all expression handler and generating incorrect parameter placeholders. Now properly handles `%Ecto.Query.Tagged{}` structs that Ecto's query planner creates from `{:type, _, [expr, type]}` AST nodes. Fixes parameter count mismatches with Hrana/Turso. (Thanks [@nadilas](https://github.com/nadilas) for PR #67 !)
 
 ## [0.8.8] - 2026-01-23
 
