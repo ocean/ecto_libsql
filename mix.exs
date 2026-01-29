@@ -68,7 +68,7 @@ defmodule EctoLibSql.MixProject do
     [
       name: "ecto_libsql",
       files:
-        ~w(lib priv .formatter.exs mix.exs README.md LICENSE CHANGELOG.md USAGE.md native checksum-*.exs),
+        ~w(lib priv .formatter.exs mix.exs README.md LICENSE CHANGELOG.md USAGE.md ECTO_MIGRATION_GUIDE.md SECURITY.md native checksum-*.exs),
       licenses: ["Apache-2.0"],
       links: %{
         "GitHub" => @source_url,

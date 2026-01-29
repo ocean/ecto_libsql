@@ -5,4 +5,4 @@ members = ["native/ecto_libsql"]
 exclude = ["native/ecto_libsql/fuzz"]
 
 [profile.release]
-lto = true
+lto = "thin"

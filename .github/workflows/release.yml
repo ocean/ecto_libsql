@@ -16,8 +16,6 @@ on:
 
 permissions:
   contents: write
-  id-token: write
-  attestations: write
 
 jobs:
   build_release:
@@ -43,7 +41,12 @@ jobs:
         shell: bash
         run: |
           # Extract version from mix.exs @version attribute
-          echo "PROJECT_VERSION=$(sed -n 's/^  @version "\(.*\)"/\1/p' mix.exs | head -n1)" >> $GITHUB_ENV
+          VERSION=$(sed -n 's/^[[:space:]]*@version "\(.*\)"/\1/p' mix.exs | head -n1)
+          if [ -z "$VERSION" ]; then
+            echo "::error::Failed to extract version from mix.exs"
+            exit 1
+          fi
+          echo "PROJECT_VERSION=$VERSION" >> $GITHUB_ENV
 
       - name: Install Rust toolchain
         uses: dtolnay/rust-toolchain@stable

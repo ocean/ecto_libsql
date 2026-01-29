@@ -45,6 +45,3 @@ z_ecto_libsql_test*
 # Implementation summaries and temporary docs
 TEST_AUDIT_REPORT.md
 TEST_COVERAGE_ISSUES_CREATED.md
-
-/.direnv/
-.envrc
