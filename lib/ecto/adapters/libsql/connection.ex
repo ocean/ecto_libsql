@@ -976,6 +976,8 @@ defmodule Ecto.Adapters.LibSql.Connection do
     ["SELECT ", select_fields(select, sources, query), ?\s]
   end
 
+  defp select_fields(%{fields: []}, _sources, _query), do: "1"
+
   defp select_fields(%{fields: fields}, sources, query) do
     intersperse_map(fields, ", ", fn
       {:&, _, [idx]} ->
