@@ -29,7 +29,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Extract project version
+      - name: Extract and validate project version
         shell: bash
         run: |
           # Extract version from mix.exs @version attribute
@@ -38,6 +38,20 @@ jobs:
             echo "::error::Failed to extract version from mix.exs"
             exit 1
           fi
+          
+          # Extract git tag from GITHUB_REF_NAME (e.g., "v0.8.10")
+          GIT_TAG="${GITHUB_REF_NAME}"
+          
+          # Validate that git tag matches mix.exs version
+          # Git tag should be v<version>, so strip the 'v' prefix for comparison
+          TAG_VERSION="${GIT_TAG#v}"
+          
+          if [ "$VERSION" != "$TAG_VERSION" ]; then
+            echo "::error::Version mismatch: mix.exs version is '$VERSION' but git tag is '$GIT_TAG' (without 'v': '$TAG_VERSION')"
+            exit 1
+          fi
+          
+          echo "✓ Version validation passed: mix.exs version '$VERSION' matches git tag '$GIT_TAG'"
           echo "PROJECT_VERSION=$VERSION" >> $GITHUB_ENV
 
       - name: Install Rust toolchain
