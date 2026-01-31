@@ -12,6 +12,7 @@ on:
 env:
   CARGO_TERM_COLOR: always
   MIX_ENV: test
+  ECTO_LIBSQL_BUILD: "true"
 
 jobs:
   rust-checks:
