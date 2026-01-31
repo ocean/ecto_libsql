@@ -2,16 +2,8 @@ name: Build Precompiled NIFs
 
 on:
   push:
-    branches:
-      - main
-    paths:
-      - "native/**"
-      - ".github/workflows/release.yml"
     tags:
       - "v*"
-  pull_request:
-    paths:
-      - ".github/workflows/release.yml"
   workflow_dispatch:
 
 permissions:
