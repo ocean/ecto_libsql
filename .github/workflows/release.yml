@@ -18,8 +18,8 @@ jobs:
       matrix:
         nif: ["2.15"]
         job:
-          - { target: aarch64-apple-darwin, os: macos-15 }
-          - { target: x86_64-apple-darwin, os: macos-15-intel }
+          - { target: aarch64-apple-darwin, os: macos-14 }
+          - { target: x86_64-apple-darwin, os: macos-15 }
           - { target: aarch64-unknown-linux-gnu, os: ubuntu-24.04, use-cross: true }
           - { target: aarch64-unknown-linux-musl, os: ubuntu-24.04, use-cross: true }
           - { target: x86_64-unknown-linux-gnu, os: ubuntu-24.04 }
@@ -69,15 +69,12 @@ jobs:
       - name: Build the project
         id: build-crate
         uses: philss/rustler-precompiled-action@v1.1.4
-        env:
-          CARGO_BUILD_TARGET: ${{ matrix.job.target }}
         with:
           project-name: ecto_libsql
           project-version: ${{ env.PROJECT_VERSION }}
           target: ${{ matrix.job.target }}
           nif-version: ${{ matrix.nif }}
           use-cross: ${{ matrix.job.use-cross }}
-          cross-version: "from-source"
           project-dir: "native/ecto_libsql"
 
       - name: Artifact upload
