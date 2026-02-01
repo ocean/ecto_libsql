@@ -1,0 +1,94 @@
+name: Build Precompiled NIFs
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build_release:
+    name: NIF ${{ matrix.nif }} - ${{ matrix.job.target }} (${{ matrix.job.os }})
+    runs-on: ${{ matrix.job.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        nif: ["2.15"]
+        job:
+          - { target: aarch64-apple-darwin, os: macos-15 }
+          - { target: x86_64-apple-darwin, os: macos-15-intel }
+          - { target: aarch64-unknown-linux-gnu, os: ubuntu-24.04, use-cross: true }
+          - { target: aarch64-unknown-linux-musl, os: ubuntu-24.04, use-cross: true }
+          - { target: x86_64-unknown-linux-gnu, os: ubuntu-24.04 }
+          - { target: x86_64-unknown-linux-musl, os: ubuntu-24.04, use-cross: true }
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Extract and validate project version
+        shell: bash
+        run: |
+          # Extract version from mix.exs @version attribute
+          VERSION=$(sed -n 's/^[[:space:]]*@version "\(.*\)"/\1/p' mix.exs | head -n1)
+          if [ -z "$VERSION" ]; then
+            echo "::error::Failed to extract version from mix.exs"
+            exit 1
+          fi
+          
+          # Check if this is a tag push or workflow_dispatch
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            # Extract git tag from GITHUB_REF_NAME (e.g., "v0.8.10")
+            GIT_TAG="${GITHUB_REF_NAME}"
+            
+            # Validate that git tag matches mix.exs version
+            # Git tag should be v<version>, so strip the 'v' prefix for comparison
+            TAG_VERSION="${GIT_TAG#v}"
+            
+            if [ "$VERSION" != "$TAG_VERSION" ]; then
+              echo "::error::Version mismatch: mix.exs version is '$VERSION' but git tag is '$GIT_TAG' (without 'v': '$TAG_VERSION')"
+              exit 1
+            fi
+            
+            echo "✓ Version validation passed: mix.exs version '$VERSION' matches git tag '$GIT_TAG'"
+          else
+            # workflow_dispatch or other non-tag trigger
+            echo "ℹ Using version from mix.exs: '$VERSION' (not a tag push)"
+          fi
+          
+          echo "PROJECT_VERSION=$VERSION" >> $GITHUB_ENV
+
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.job.target }}
+
+      - name: Build the project
+        id: build-crate
+        uses: philss/rustler-precompiled-action@v1.1.4
+        env:
+          CARGO_BUILD_TARGET: ${{ matrix.job.target }}
+        with:
+          project-name: ecto_libsql
+          project-version: ${{ env.PROJECT_VERSION }}
+          target: ${{ matrix.job.target }}
+          nif-version: ${{ matrix.nif }}
+          use-cross: ${{ matrix.job.use-cross }}
+          cross-version: "from-source"
+          project-dir: "native/ecto_libsql"
+
+      - name: Artifact upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ steps.build-crate.outputs.file-name }}
+          path: ${{ steps.build-crate.outputs.file-path }}
+
+      - name: Publish archives and packages
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            ${{ steps.build-crate.outputs.file-path }}
+        if: startsWith(github.ref, 'refs/tags/')

@@ -3,3 +3,6 @@ resolver = "2"
 
 members = ["native/ecto_libsql"]
 exclude = ["native/ecto_libsql/fuzz"]
+
+[profile.release]
+lto = "thin"

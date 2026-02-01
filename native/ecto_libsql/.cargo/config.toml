@@ -1,0 +1,20 @@
+# Cross-compilation configuration for rustler_precompiled NIF builds.
+#
+# macOS: Use dynamic lookup for Erlang NIF symbols (resolved at load time).
+# musl: Disable static CRT linking for compatibility with BEAM's dynamic loader.
+
+[target.'cfg(target_os = "macos")']
+rustflags = [
+  "-C", "link-arg=-undefined",
+  "-C", "link-arg=dynamic_lookup",
+]
+
+[target.x86_64-unknown-linux-musl]
+rustflags = [
+  "-C", "target-feature=-crt-static",
+]
+
+[target.aarch64-unknown-linux-musl]
+rustflags = [
+  "-C", "target-feature=-crt-static",
+]
