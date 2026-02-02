@@ -27,12 +27,12 @@ jobs:
       matrix:
         nif: ["2.15"]
         job:
-          - { target: aarch64-apple-darwin, os: macos-14, use-target: false }
-          - { target: x86_64-apple-darwin, os: macos-15, use-target: false }
-          - { target: aarch64-unknown-linux-gnu, os: ubuntu-24.04, use-cross: true, use-target: true }
-          - { target: aarch64-unknown-linux-musl, os: ubuntu-24.04, use-cross: true, use-target: true }
-          - { target: x86_64-unknown-linux-gnu, os: ubuntu-24.04, use-target: true }
-          - { target: x86_64-unknown-linux-musl, os: ubuntu-24.04, use-cross: true, use-target: true }
+          - { target: aarch64-apple-darwin, os: macos-14 }
+          - { target: x86_64-apple-darwin, os: macos-15 }
+          - { target: aarch64-unknown-linux-gnu, os: ubuntu-24.04, use-cross: true }
+          - { target: aarch64-unknown-linux-musl, os: ubuntu-24.04, use-cross: true }
+          - { target: x86_64-unknown-linux-gnu, os: ubuntu-24.04 }
+          - { target: x86_64-unknown-linux-musl, os: ubuntu-24.04, use-cross: true }
 
     steps:
       - name: Checkout code
@@ -81,10 +81,10 @@ jobs:
         with:
           project-name: ecto_libsql
           project-version: ${{ env.PROJECT_VERSION }}
-          target: ${{ matrix.job.use-target == true && matrix.job.target || '' }}
+          target: ${{ matrix.job.target }}
           nif-version: ${{ matrix.nif }}
-          use-cross: ${{ matrix.job.use-cross == true }}
-          project-dir: "native/ecto_libsql"
+          use-cross: ${{ matrix.job.use-cross && 'true' || '' }}
+          project-dir: "."
 
       - name: Artifact upload
         uses: actions/upload-artifact@v6
