@@ -48,7 +48,7 @@ defmodule EctoLibSql.Native do
     otp_app: :ecto_libsql,
     crate: "ecto_libsql",
     version: version,
-    base_url: "#{github_url}/releases/download/v#{version}",
+    base_url: "#{github_url}/releases/download/#{version}",
     targets: ~w(
       aarch64-apple-darwin
       aarch64-unknown-linux-gnu
