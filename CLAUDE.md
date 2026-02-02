@@ -624,13 +624,18 @@ git commit -m "feat: descriptive message"
 
 ### Release Process
 
-1. Update version in `mix.exs`
+1. Update version in `mix.exs` and `native/ecto_libsql/Cargo.toml`
 2. Update `CHANGELOG.md`
 3. Update `README.md` if needed
 4. Run full test suite
-5. Create release
+5. Merge to `main` and tag (e.g. `git tag 0.9.0 && git push origin 0.9.0`)
+6. Wait for the NIF build workflow to complete (builds 6 targets, attaches to GitHub release)
+7. Download checksums: `mix rustler_precompiled.download EctoLibSql.Native --all --print`
+   - If no checksum file exists yet: `ECTO_LIBSQL_BUILD=true mix rustler_precompiled.download EctoLibSql.Native --all --print`
+8. Commit the updated `checksum-Elixir.EctoLibSql.Native.exs` file
+9. Publish to Hex: `mix hex.publish`
 
-**Hex package includes**: `lib/`, `priv/`, `native/`, documentation files  
+**Hex package includes**: `lib/`, `priv/`, `native/`, `checksum-*.exs`, documentation files
 **Hex package excludes**: `test/`, `examples/`, build artifacts
 
 ---
