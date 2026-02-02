@@ -1,6 +1,6 @@
 [package]
 name = "ecto_libsql"
-version = "0.8.9"
+version = "0.9.0"
 authors = []
 edition = "2021"
 description = "Rust NIF (Native Implemented Function) for EctoLibSql - High-performance Ecto adapter for LibSQL/Turso databases"
