@@ -83,7 +83,7 @@ jobs:
           project-version: ${{ env.PROJECT_VERSION }}
           target: ${{ matrix.job.use-target == true && matrix.job.target || '' }}
           nif-version: ${{ matrix.nif }}
-          use-cross: ${{ matrix.job.use-cross || false }}
+          use-cross: ${{ matrix.job.use-cross == true }}
           project-dir: "native/ecto_libsql"
 
       - name: Artifact upload
