@@ -1,0 +1,7 @@
+# Cross-compilation configuration for the `cross` tool.
+# See: https://hexdocs.pm/rustler_precompiled/precompilation_guide.html
+
+[build.env]
+passthrough = [
+  "RUSTLER_NIF_VERSION"
+]
