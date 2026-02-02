@@ -5,6 +5,27 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.0] - 2026-02-02
+
+### Added
+
+- **Precompiled NIF Binaries** - Users no longer need Rust, cmake, or pkg-config installed. First compile drops from 5-10 minutes to seconds using prebuilt NIF downloads for 6 targets (2 macOS, 4 Linux). Force local compilation if required with `ECTO_LIBSQL_BUILD=true`. (Thanks [@ricardo-valero](https://github.com/ricardo-valero) for [PR #70](https://github.com/ocean/ecto_libsql/pull/70)!)
+- **GitHub Actions Release Workflow** - Automated NIF builds on tag push for all supported targets using `philss/rustler-precompiled-action`, with version validation against `mix.exs`
+
+### Fixed
+
+- **`Repo.exists?` Generates Valid SQL** - Fixed empty SELECT clause generating invalid SQL (`SELECT  FROM "users"` instead of `SELECT 1 FROM "users"`), causing syntax errors. (Thanks [@ricardo-valero](https://github.com/ricardo-valero) for [PR #69](https://github.com/ocean/ecto_libsql/pull/69)!)
+- **NIF Cross-Compilation Workflow** - Fixed multiple issues preventing successful cross-compilation in GitHub Actions:
+  - Fixed Cargo workspace target directory mismatch — build output goes to the workspace root `target/` directory, not the crate subdirectory
+  - Moved `.cargo/config.toml` to workspace root so musl `-crt-static` rustflags are found when building from workspace root
+  - Added `Cross.toml` for `RUSTLER_NIF_VERSION` environment passthrough to cross containers
+  - Consolidated macOS runners to macos-15 (Apple Silicon) for both architectures
+
+### Changed
+
+- **Dependency Updates** - Bumped `actions/checkout` to v6, `actions/upload-artifact` to v6, updated Cargo and Credo dependencies
+- **Workspace Configuration** - Added root-level `Cargo.toml` workspace with release LTO profile
+
 ## [0.8.9] - 2026-01-28
 
 ### Fixed

@@ -1,7 +1,7 @@
 defmodule EctoLibSql.MixProject do
   use Mix.Project
 
-  @version "0.8.9"
+  @version "0.9.0"
   @source_url "https://github.com/ocean/ecto_libsql"
   @dev? String.ends_with?(@version, "-dev")
   @force_build? System.get_env("ECTO_LIBSQL_BUILD") in ["1", "true"]
