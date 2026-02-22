@@ -270,6 +270,21 @@ mod should_use_query_tests {
         assert!(should_use_query("PRAGMA foreign_keys"));
     }
 
+    #[test]
+    fn test_not_pragma_if_part_of_word() {
+        // "PRAGMATIC" and similar should not match PRAGMA.
+        assert!(!should_use_query("PRAGMATIC table_name"));
+        assert!(!should_use_query("PRAGMATICS"));
+    }
+
+    #[test]
+    fn test_pragma_with_whitespace() {
+        // Leading whitespace before PRAGMA must be skipped correctly.
+        assert!(should_use_query("  PRAGMA foreign_keys"));
+        assert!(should_use_query("\tPRAGMA journal_mode"));
+        assert!(should_use_query("\n  PRAGMA wal_checkpoint(FULL)"));
+    }
+
     // ===== Edge Cases =====
 
     #[test]
