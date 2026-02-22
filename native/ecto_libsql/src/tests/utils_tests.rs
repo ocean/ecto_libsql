@@ -261,8 +261,13 @@ mod should_use_query_tests {
 
     #[test]
     fn test_pragma_statements() {
-        assert!(!should_use_query("PRAGMA table_info(users)"));
-        assert!(!should_use_query("PRAGMA foreign_keys = ON"));
+        // PRAGMA statements always use query() since they can return rows.
+        // E.g. PRAGMA wal_checkpoint(FULL) returns busy/log/checkpointed columns.
+        assert!(should_use_query("PRAGMA table_info(users)"));
+        assert!(should_use_query("PRAGMA foreign_keys = ON"));
+        assert!(should_use_query("PRAGMA wal_checkpoint(FULL)"));
+        assert!(should_use_query("pragma journal_mode"));
+        assert!(should_use_query("PRAGMA foreign_keys"));
     }
 
     // ===== Edge Cases =====
