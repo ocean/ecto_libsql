@@ -414,6 +414,22 @@ pub fn should_use_query(sql: &str) -> bool {
         return true;
     }
 
+    // Check if starts with PRAGMA (case-insensitive)
+    // PRAGMA statements may return rows (e.g. PRAGMA wal_checkpoint(FULL) returns 3 columns),
+    // so always route through query() to avoid "Execute returned rows" errors.
+    if len - start >= 6
+        && (bytes[start] == b'P' || bytes[start] == b'p')
+        && (bytes[start + 1] == b'R' || bytes[start + 1] == b'r')
+        && (bytes[start + 2] == b'A' || bytes[start + 2] == b'a')
+        && (bytes[start + 3] == b'G' || bytes[start + 3] == b'g')
+        && (bytes[start + 4] == b'M' || bytes[start + 4] == b'm')
+        && (bytes[start + 5] == b'A' || bytes[start + 5] == b'a')
+        // Verify it's followed by whitespace or end of string
+        && (start + 6 >= len || bytes[start + 6].is_ascii_whitespace())
+    {
+        return true;
+    }
+
     // Check if starts with SELECT (case-insensitive)
     if len - start >= 6
         && (bytes[start] == b'S' || bytes[start] == b's')

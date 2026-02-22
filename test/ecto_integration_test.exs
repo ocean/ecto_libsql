@@ -719,11 +719,11 @@ defmodule Ecto.Integration.EctoLibSqlTest do
     end
 
     setup do
-      # Drop index and table to ensure clean state
+      # Drop index and table to ensure clean state.
       Ecto.Adapters.SQL.query!(TestRepo, "DROP INDEX IF EXISTS locations_slug_parent_index")
       Ecto.Adapters.SQL.query!(TestRepo, "DROP TABLE IF EXISTS locations")
 
-      # Create table with composite unique index
+      # Create table with composite unique index.
       Ecto.Adapters.SQL.query!(TestRepo, """
       CREATE TABLE locations (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -739,6 +739,12 @@ defmodule Ecto.Integration.EctoLibSqlTest do
         TestRepo,
         "CREATE UNIQUE INDEX IF NOT EXISTS locations_slug_parent_index ON locations (slug, parent_slug)"
       )
+
+      # Force a WAL checkpoint to ensure the new index is fully visible to all
+      # connections before the test body runs. This is necessary on Linux where
+      # WAL mode can cause DDL changes to be invisible to concurrent connections
+      # until the WAL file is checkpointed.
+      Ecto.Adapters.SQL.query!(TestRepo, "PRAGMA wal_checkpoint(FULL)")
 
       on_exit(fn ->
         Ecto.Adapters.SQL.query!(TestRepo, "DROP INDEX IF EXISTS locations_slug_parent_index")
