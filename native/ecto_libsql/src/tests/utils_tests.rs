@@ -283,6 +283,10 @@ mod should_use_query_tests {
         assert!(should_use_query("  PRAGMA foreign_keys"));
         assert!(should_use_query("\tPRAGMA journal_mode"));
         assert!(should_use_query("\n  PRAGMA wal_checkpoint(FULL)"));
+        // Mixed-case with leading whitespace exercises both skip_whitespace_and_comments
+        // and the case-insensitive PRAGMA comparison end-to-end.
+        assert!(should_use_query("  PrAgMa journal_mode"));
+        assert!(should_use_query("\tpRaGmA wal_checkpoint(FULL)"));
     }
 
     // ===== Edge Cases =====
