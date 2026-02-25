@@ -12,51 +12,30 @@
 - **British/Australian English** for all code, comments, and documentation (except SQL keywords and compatibility requirements)
 - **⚠️ CRITICAL: ALWAYS check formatting BEFORE committing**:
   1. Run formatters: `mix format && cd native/ecto_libsql && cargo fmt`
-  2. Verify checks pass: `mix format --check-formatted && cargo fmt --check`
+  2. Verify checks pass: `mix format --check-formatted && cargo fmt --check``
   3. **Only then** commit: `git commit -m "..."`
-  - Formatting issues caught at check time, not after commit
-- **NEVER use `.unwrap()` in production Rust code** - use `safe_lock` helpers (see [Error Handling](#error-handling-patterns))
+- **NEVER use `.unwrap()` in production Rust code** — use `safe_lock` helpers (see [Error Handling](#error-handling-patterns))
 - **Tests MAY use `.unwrap()`** for simplicity
 
 ---
 
 ## Landing the Plane (Session Completion)
 
-**When ending a work session**, you MUST complete ALL steps below. Work is NOT complete until `git commit` succeeds.
+**MANDATORY WORKFLOW — work is NOT complete until `git commit` succeeds:**
 
-**MANDATORY WORKFLOW:**
-
-1. **File issues for remaining work** - Create Beads issues for anything that needs follow-up (see [Issue Tracking with Beads](#issue-tracking-with-beads))
-2. **Run quality gates** (if code changed) - Tests, linters, builds
-3. **Update issue status** - Close finished work, update in-progress items
-4. **COMMIT** - This is MANDATORY:
+1. **File issues for remaining work** — create Beads issues for anything needing follow-up
+2. **Run quality gates** (if code changed) — tests, linters, builds
+3. **Update issue status** — close finished work, update in-progress items
+4. **COMMIT**:
    ```bash
    git commit -m "Your commit message"
    bd sync
    ```
-5. **Clean up** - Clear stashes, prune remote branches
-6. **Verify** - All changes committed
-7. **Hand off** - Provide context for next session
+5. **Clean up** — clear stashes, prune remote branches
+6. **Verify** — all changes committed
+7. **Hand off** - provide context for next session
 
-**CRITICAL RULES:**
-- Work is NOT complete until `git commit` succeeds
-- If commit fails, resolve and retry until it succeeds
-
----
-
-## Table of Contents
-
-- [Project Overview](#project-overview)
-- [Architecture](#architecture)
-- [Code Structure](#code-structure)
-- [Development Workflow](#development-workflow)
-- [Issue Tracking with Beads](#issue-tracking-with-beads)
-- [Error Handling Patterns](#error-handling-patterns)
-- [Testing](#testing)
-- [Common Tasks](#common-tasks)
-- [Troubleshooting](#troubleshooting)
-- [Quick Reference](#quick-reference)
-- [Resources](#resources)
+**If commit fails, resolve and retry until it succeeds.**
 
 ---
 
@@ -64,13 +43,7 @@
 
 **EctoLibSql** is a production-ready Ecto adapter for LibSQL, implemented as a Rust NIF for high performance.
 
-### Features
-- Full Ecto support (schemas, migrations, queries, associations)
-- Three connection modes: Local SQLite, Remote Turso, Embedded replica
-- Vector search, encryption, prepared statements, batch operations
-- High-performance async/await with connection pooling
-
-### Connection Modes
+**Connection modes:**
 - **Local**: `database: "local.db"`
 - **Remote**: `uri: "libsql://..." + auth_token: "..."`
 - **Replica**: `database + uri + auth_token + sync: true`
@@ -97,93 +70,50 @@ Rust NIF (libsql-rs, connection registry, async runtime)
 
 ### Key Files
 
-**Elixir**:
-- `lib/ecto_libsql.ex` - DBConnection protocol
-- `lib/ecto_libsql/native.ex` - NIF wrappers
-- `lib/ecto_libsql/state.ex` - Connection state
-- `lib/ecto/adapters/libsql.ex` - Main adapter
-- `lib/ecto/adapters/libsql/connection.ex` - SQL generation
+**Elixir:**
+- `lib/ecto_libsql.ex` — DBConnection protocol
+- `lib/ecto_libsql/native.ex` — NIF wrappers
+- `lib/ecto_libsql/state.ex` — Connection state
+- `lib/ecto/adapters/libsql.ex` — Main adapter
+- `lib/ecto/adapters/libsql/connection.ex` — SQL generation
 
 **Rust** (`native/ecto_libsql/src/`):
-- `lib.rs` - Root module, NIF registration
-- `models.rs` - Core data structures (`LibSQLConn`, `CursorData`, `TransactionEntry`)
-- `constants.rs` - Global registries (connections, transactions, statements, cursors)
-- `utils.rs` - Safe locking, error handling, type conversions
-- `connection.rs` - Connection lifecycle
-- `query.rs` - Query execution
-- `transaction.rs` - Transaction management with ownership tracking
-- `savepoint.rs` - Nested transactions
-- `statement.rs` - Prepared statement caching
-- `batch.rs` - Batch operations
-- `cursor.rs` - Cursor streaming
-- `replication.rs` - Replica sync
-- `metadata.rs` - Metadata access
-- `decode.rs` - Value type conversions
-- `tests/` - Test modules
-
-**Tests**:
-- `test/*.exs` - Elixir tests (adapter, integration, migrations, error handling, Turso)
-- `native/ecto_libsql/src/tests/` - Rust tests (constants, utils, integration)
-
-**Documentation**:
-- `USAGE.md` - API reference for library users
-- `CLAUDE.md` - This file (development guide)
-- `README.md` - User documentation
-- `CHANGELOG.md` - Version history
-- `ECTO_MIGRATION_GUIDE.md` - Migrating from PostgreSQL/MySQL
-- `RUST_ERROR_HANDLING.md` - Error pattern reference
-- `TESTING.md` - Testing strategy
-
----
-
-## Code Structure
-
-### Elixir Modules
 
 | Module | Purpose |
 |--------|---------|
-| `EctoLibSql` | DBConnection protocol (lifecycle, transactions, queries, cursors) |
-| `EctoLibSql.Native` | Safe NIF wrappers (error handling, state management) |
-| `EctoLibSql.State` | Connection state (`:conn_id`, `:trx_id`, `:mode`, `:sync`) |
-| `Ecto.Adapters.LibSql` | Main adapter (storage ops, type loaders/dumpers, migrations) |
-| `Ecto.Adapters.LibSql.Connection` | SQL generation (queries, DDL, expressions, constraints) |
+| `lib.rs` | Root module, NIF registration |
+| `models.rs` | Core structs (`LibSQLConn`, `CursorData`, `TransactionEntry`) |
+| `constants.rs` | Global registries (connections, transactions, statements, cursors) |
+| `utils.rs` | Safe locking, error handling, row collection, type conversions |
+| `connection.rs` | Connection establishment, health checks, encryption |
+| `query.rs` | Query execution, auto-routing, replica sync |
+| `statement.rs` | Prepared statement caching, parameter/column introspection |
+| `transaction.rs` | Transaction management, ownership tracking, isolation levels |
+| `savepoint.rs` | Nested transactions (create, release, rollback) |
+| `batch.rs` | Batch operations (transactional/non-transactional) |
+| `cursor.rs` | Cursor streaming, pagination for large result sets |
+| `replication.rs` | Replica frame tracking, synchronisation control |
+| `metadata.rs` | Insert rowid, changes, autocommit status |
+| `decode.rs` | Value type conversions |
+| `tests/` | Test modules |
 
-### Rust Module Organisation
+**Tests:**
+- `test/*.exs` — Elixir tests (adapter, integration, migrations, error handling, Turso)
+- `native/ecto_libsql/src/tests/` — Rust tests (constants, utils, integration)
 
-14 focused modules, each with single responsibility:
+### Key Data Structures
 
-| Module | Lines | Purpose |
-|--------|-------|---------|
-| `lib.rs` | 29 | Root module, NIF registration, re-exports |
-| `models.rs` | 61 | Core structs (`LibSQLConn`, `CursorData`, `TransactionEntry`) |
-| `constants.rs` | 63 | Global registries (connections, transactions, statements, cursors) |
-| `utils.rs` | 400 | Safe locking, error handling, row collection, type conversions |
-| `connection.rs` | 332 | Connection establishment, health checks, encryption |
-| `query.rs` | 197 | Query execution, auto-routing, replica sync |
-| `statement.rs` | 324 | Prepared statement caching, parameter/column introspection |
-| `transaction.rs` | 436 | Transaction management, ownership tracking, isolation levels |
-| `savepoint.rs` | 135 | Nested transactions (create, release, rollback) |
-| `batch.rs` | 306 | Batch operations (transactional/non-transactional) |
-| `cursor.rs` | 328 | Cursor streaming, pagination for large result sets |
-| `replication.rs` | 205 | Replica frame tracking, synchronisation control |
-| `metadata.rs` | 151 | Insert rowid, changes, autocommit status |
-| `decode.rs` | 84 | Value type conversions (NULL, integer, text, blob, real) |
-
-**Key Data Structures**:
 ```rust
-// Connection resource
 pub struct LibSQLConn {
     pub db: libsql::Database,
     pub client: Arc<Mutex<libsql::Connection>>,
 }
 
-// Transaction with ownership tracking
 pub struct TransactionEntry {
-    pub conn_id: String,        // Which connection owns this transaction
+    pub conn_id: String,        // Which connection owns this transaction.
     pub transaction: Transaction,
 }
 
-// Cursor pagination state
 pub struct CursorData {
     pub columns: Vec<String>,
     pub rows: Vec<Vec<Value>>,
@@ -195,77 +125,66 @@ pub struct CursorData {
 
 ## Development Workflow
 
-### Setup
-
-```bash
-git clone <repo-url>
-cd ecto_libsql
-mix deps.get
-mix compile                        # Includes Rust NIF compilation
-mix test
-cd native/ecto_libsql && cargo test
-```
-
-### Development Cycle
-
-#### Branch Strategy
+### Branch Strategy
 
 **ALWAYS branch from `main`** for new work:
 
 ```bash
-git checkout main
-git pull origin main
+git checkout main && git pull origin main
 git checkout -b feature-descriptive-name   # or bugfix-descriptive-name
 ```
 
-**Branch naming**:
-- Features: `feature-<descriptive-name>`
-- Bug fixes: `bugfix-<descriptive-name>`
+### ⚠️ CRITICAL: Preserving Untracked Files
 
-#### ⚠️ CRITICAL: Preserving Untracked Files
-
-The repository often has untracked/uncommitted files (docs, notes, etc.) that must NOT be lost when switching branches. Git preserves untracked files across branch switches automatically, but:
 - **NEVER run `git clean`** without explicit user approval
 - **NEVER run `git checkout .`** or `git restore .` on the whole repo
 - **NEVER run `git reset --hard`** without explicit user approval
-- When switching branches, untracked files stay in place - this is expected
+- Untracked files stay in place across branch switches — this is expected
 
-#### Development Steps
+### PR Workflow
 
-1. Create feature/bugfix branch from `main` (see above)
-2. Make changes to Elixir or Rust code
-3. ALWAYS format: `mix format --check-formatted && cargo fmt`
-4. Run tests: `mix test && cargo test`
-5. Fix any issues from formatting or tests
-6. **Commit ONLY files you touched** - other untracked files stay as-is
-
-#### PR Workflow
-
-All changes go through PRs to `main` (for review bot checks):
+All changes go through PRs to `main`:
 
 ```bash
 git push -u origin feature-descriptive-name
 gh pr create --base main --title "feat: description" --body "..."
 ```
 
-After PR is merged, clean up:
+After merge:
 ```bash
-git checkout main
-git pull origin main
-git branch -d feature-descriptive-name     # Delete local branch
+git checkout main && git pull origin main
+git branch -d feature-descriptive-name
 ```
 
-#### Issue Tracking with Beads
+### Pre-Commit Checklist
+
+**STRICT ORDER — do NOT skip steps or reorder:**
+
+```bash
+# 1. Format code (must come FIRST)
+mix format && cd native/ecto_libsql && cargo fmt
+
+# 2. Run tests (catch logic errors)
+mix test && cd native/ecto_libsql && cargo test
+
+# 3. Verify formatting checks (MUST PASS before commit)
+mix format --check-formatted && cd native/ecto_libsql && cargo fmt --check
+
+# 4. Lint (optional but recommended)
+cd native/ecto_libsql && cargo clippy
+
+# 5. Only commit if all checks above passed
+git commit -m "feat: descriptive message"
+```
+
+**If ANY check fails, fix it and re-run before proceeding. Never commit with failing checks.**
+
+---
+
+## Issue Tracking with Beads
 
 This project uses **Beads** (`bd` command) for issue tracking across sessions. Beads persists work context in `.beads/issues.jsonl`.
 
-**When to use Beads vs TodoWrite:**
-- **Beads**: Multi-session work, dependencies between tasks, discovered work that needs tracking
-- **TodoWrite**: Simple single-session task execution
-
-When in doubt, prefer Beads — persistence you don't need beats lost context.
-
-**Essential commands:**
 ```bash
 # Finding work
 bd ready                           # Show issues ready to work (no blockers)
@@ -273,7 +192,7 @@ bd list --status=open              # All open issues
 bd show <id>                       # Detailed issue view with dependencies
 
 # Creating & updating (priority: 0-4, NOT "high"/"low")
-bd create --title="..." --type=task|bug|feature --priority=2
+bd create --title="..." --description="..." --type=task|bug|feature --priority=2
 bd update <id> --status=in_progress
 bd close <id>                      # Or: bd close <id1> <id2> ...
 
@@ -290,84 +209,32 @@ bd prime                           # Session recovery after compaction
 
 **Typical workflow:**
 ```bash
-# Starting work
-bd ready && bd show <id> && bd update <id> --status=in_progress
-
-# Completing work
-bd close <id1> <id2> ...           # Close completed issues
-bd sync --from-main                # Pull latest beads
-git add . && git commit -m "..."   # Commit changes
+bd ready
+bd show <id> && bd update <id> --status=in_progress
+# ... do work ...
+bd close <id1> <id2> ...
+bd sync --from-main
+git add . && git commit -m "..."
 ```
 
-#### Best Practices
+---
 
-- Check `bd ready` at session start to find available work
-- Update status as you work (in_progress → closed)
-- Create new issues with `bd create` when you discover tasks
-- Use descriptive titles and set appropriate priority/type
-- Always `bd sync` before ending session
+## Adding a New NIF Function
 
-### Adding a New NIF Function
+**Modern Rustler auto-detects all `#[rustler::nif]` functions — no manual registration needed.**
 
-**IMPORTANT**: Modern Rustler auto-detects all `#[rustler::nif]` functions. No manual registration needed.
-
-**Steps**:
-
-1. **Choose the right module**:
-   - Connection lifecycle → `connection.rs`
-   - Query execution → `query.rs`
-   - Transactions → `transaction.rs`
-   - Batch operations → `batch.rs`
-   - Statements → `statement.rs`
-   - Cursors → `cursor.rs`
-   - Replication → `replication.rs`
-   - Metadata → `metadata.rs`
-   - Savepoints → `savepoint.rs`
-   - Utilities → `utils.rs`
-
-2. **Define Rust NIF** (e.g., in `native/ecto_libsql/src/query.rs`):
-```rust
-/// Execute a custom operation.
-///
-/// # Returns
-/// - `{:ok, result}` - Success
-/// - `{:error, reason}` - Failure
-#[rustler::nif(schedule = "DirtyIo")]
-pub fn my_new_function(conn_id: &str, param: &str) -> NifResult<String> {
-    let conn_map = safe_lock(&CONNECTION_REGISTRY, "my_new_function")?;
-    let _conn = conn_map
-        .get(conn_id)
-        .ok_or_else(|| rustler::Error::Term(Box::new("Connection not found")))?;
-    
-    // Implementation
-    Ok("result".to_string())
-}
-```
-
-3. **Add Elixir wrapper** in `lib/ecto_libsql/native.ex`:
-```elixir
-# NIF stub
-def my_new_function(_conn, _param), do: :erlang.nif_error(:nif_not_loaded)
-
-# Safe wrapper using State
-def my_new_function_safe(%EctoLibSql.State{conn_id: conn_id} = _state, param) do
-  case my_new_function(conn_id, param) do
-    {:ok, result} -> {:ok, result}
-    {:error, reason} -> {:error, reason}
-  end
-end
-```
-
+1. **Choose the right module** — connection lifecycle → `connection.rs`, query execution → `query.rs`, transactions → `transaction.rs`, batch → `batch.rs`, statements → `statement.rs`, cursors → `cursor.rs`, replication → `replication.rs`, metadata → `metadata.rs`, savepoints → `savepoint.rs`
+2. **Define the Rust NIF** with `#[rustler::nif(schedule = "DirtyIo")]` — use `safe_lock` (never `.unwrap()`) — see [Error Handling](#error-handling-patterns)
+3. **Add Elixir wrapper** in `lib/ecto_libsql/native.ex` — NIF stub + safe wrapper using `EctoLibSql.State`
 4. **Add tests** in both Rust (`native/ecto_libsql/src/tests/`) and Elixir (`test/`)
-
 5. **Update documentation** in `USAGE.md` and `CHANGELOG.md`
 
-### Adding an Ecto Feature
+## Adding an Ecto Feature
 
 1. Update `lib/ecto/adapters/libsql/connection.ex` for SQL generation
 2. Update `lib/ecto/adapters/libsql.ex` for storage/type handling
 3. Add tests in `test/ecto_*_test.exs`
-4. Update README and USAGE.md
+4. Update `USAGE.md`
 
 ---
 
@@ -375,37 +242,26 @@ end
 
 ### Rust Patterns (CRITICAL!)
 
-**NEVER use `.unwrap()` in production code** - all 146 unwrap calls eliminated in v0.5.0 to prevent VM crashes.
-
-See `RUST_ERROR_HANDLING.md` for comprehensive patterns.
+**NEVER use `.unwrap()` in production code** — see `RUST_ERROR_HANDLING.md` for comprehensive patterns.
 
 #### Pattern 1: Lock a Registry
 ```rust
-✅ CORRECT
-let conn_map = safe_lock(&CONNECTION_REGISTRY, "function_name context")?;
-
-❌ WRONG - will panic!
-let conn_map = CONNECTION_REGISTRY.lock().unwrap();
+✅ let conn_map = safe_lock(&CONNECTION_REGISTRY, "function_name context")?;
+❌ let conn_map = CONNECTION_REGISTRY.lock().unwrap();
 ```
 
 #### Pattern 2: Lock Arc<Mutex<T>>
 ```rust
-✅ CORRECT
-let client_guard = safe_lock_arc(&client, "function_name client")?;
-
-❌ WRONG
-let result = client.lock().unwrap();
+✅ let client_guard = safe_lock_arc(&client, "function_name client")?;
+❌ let result = client.lock().unwrap();
 ```
 
 #### Pattern 3: Handle Options
 ```rust
-✅ CORRECT
-let conn = conn_map
+✅ let conn = conn_map
     .get(conn_id)
     .ok_or_else(|| rustler::Error::Term(Box::new("Connection not found")))?;
-
-❌ WRONG
-let conn = conn_map.get(conn_id).unwrap();
+❌ let conn = conn_map.get(conn_id).unwrap();
 ```
 
 #### Pattern 4: Async Error Conversion
@@ -422,7 +278,7 @@ TOKIO_RUNTIME.block_on(async {
 let conn_map = safe_lock(&CONNECTION_REGISTRY, "function")?;
 let client = conn_map.get(conn_id).cloned()
     .ok_or_else(|| rustler::Error::Term(Box::new("Connection not found")))?;
-drop(conn_map); // Release lock!
+drop(conn_map); // Release lock before async work!
 
 TOKIO_RUNTIME.block_on(async { /* async work */ })
 ```
@@ -430,13 +286,13 @@ TOKIO_RUNTIME.block_on(async { /* async work */ })
 ### Elixir Patterns
 
 ```elixir
-# Case match
+# Case match.
 case EctoLibSql.Native.query(state, sql, params) do
-  {:ok, _, result, new_state} -> # Handle success
-  {:error, reason} -> # Handle error
+  {:ok, _, result, new_state} -> handle_success(result)
+  {:error, reason} -> handle_error(reason)
 end
 
-# With clause
+# With clause.
 with {:ok, state} <- EctoLibSql.connect(opts),
      {:ok, _, result, state} <- EctoLibSql.handle_execute(sql, [], [], state) do
   :ok
@@ -457,52 +313,33 @@ cd native/ecto_libsql && cargo test         # All Rust tests
 mix test test/ecto_integration_test.exs     # Single file
 mix test test/file.exs:42 --trace           # Single test with trace
 mix test --exclude turso_remote             # Skip Turso tests
+cd native/ecto_libsql && cargo test -- --nocapture  # Rust output with stdout
+for i in {1..10}; do mix test test/file.exs:42; done # Flush out race conditions
 ```
-
-### Test Coverage Requirements
-
-- Happy path (successful operations)
-- Error cases (invalid IDs, missing resources, constraint violations)
-- Edge cases (NULL values, empty strings, large datasets)
-- Transaction rollback scenarios
-- Type conversions (Elixir ↔ SQLite)
-- Concurrent operations
 
 ### Test Variable Naming Conventions
 
-For state threading in tests, use consistent variable names and patterns:
+Use consistent variable names by scope:
 
-**Variable Naming by Scope**:
 ```elixir
 state      # Connection scope
-trx_state  # Transaction scope  
+trx_state  # Transaction scope
 cursor     # Cursor scope
 stmt_id    # Prepared statement ID scope
 ```
 
-**Error Handling Pattern**: 
-
-When an error operation returns updated state, you must decide if that state is needed next:
+**When an error operation returns updated state, decide if it's needed next:**
 
 ```elixir
-# ✅ If state IS needed for subsequent operations → Rebind
-result = EctoLibSql.handle_execute(sql, params, [], trx_state)
-assert {:error, _reason, trx_state} = result  # Rebind - reuse updated state
-:ok = EctoLibSql.Native.rollback_to_savepoint_by_name(trx_state, "sp1")
-
-# ✅ If state is NOT needed → Discard with underscore
-result = EctoLibSql.handle_execute(sql, params, [], trx_state)
-assert {:error, _reason, _state} = result  # Discard - not reused
-:ok = EctoLibSql.Native.rollback_to_savepoint_by_name(trx_state, "sp1")
-
-# ✅ For terminal operations → Use underscore variable name
-assert {:error, %EctoLibSql.Error{}, _conn} = EctoLibSql.handle_execute(...)
-```
-
-**Add clarifying comments** when rebinding state:
-```elixir
-# Rebind trx_state - error tuple contains updated transaction state needed for recovery
+# ✅ State IS needed → Rebind (add a clarifying comment)
+# Rebind trx_state - error tuple contains updated transaction state needed for recovery.
 assert {:error, _reason, trx_state} = result
+
+# ✅ State is NOT needed → Discard with underscore
+assert {:error, _reason, _state} = result
+
+# ✅ Terminal operation → Underscore variable name
+assert {:error, %EctoLibSql.Error{}, _conn} = EctoLibSql.handle_execute(...)
 ```
 
 See [TEST_STATE_VARIABLE_CONVENTIONS.md](TEST_STATE_VARIABLE_CONVENTIONS.md) for detailed guidance.
@@ -511,16 +348,13 @@ See [TEST_STATE_VARIABLE_CONVENTIONS.md](TEST_STATE_VARIABLE_CONVENTIONS.md) for
 
 ⚠️ **Cost Warning**: Creates real cloud databases. Only run when developing remote/replica functionality.
 
-**Setup**: Create `.env.local`:
+Create `.env.local`:
 ```
 TURSO_DB_URI="libsql://your-database.turso.io"
 TURSO_AUTH_TOKEN="your-token-here"
 ```
 
-**Run**:
-```bash
-export $(grep -v '^#' .env.local | xargs) && mix test test/turso_remote_test.exs
-```
+Run: `export $(grep -v '^#' .env.local | xargs) && mix test test/turso_remote_test.exs`
 
 Tests are skipped by default if credentials are missing.
 
@@ -530,26 +364,14 @@ Tests are skipped by default if credentials are missing.
 
 ### Add SQLite Function Support
 
-If function is native to SQLite, update `lib/ecto/adapters/libsql/connection.ex`:
-
+In `lib/ecto/adapters/libsql/connection.ex`:
 ```elixir
-defp expr({:random, _, []}, _sources, _query) do
-  "RANDOM()"
-end
-```
-
-Add test:
-```elixir
-test "generates RANDOM() function" do
-  query = from u in User, select: fragment("RANDOM()")
-  assert SQL.all(query) =~ "RANDOM()"
-end
+defp expr({:random, _, []}, _sources, _query), do: "RANDOM()"
 ```
 
 ### Fix Type Conversion Issues
 
-Update loaders/dumpers in `lib/ecto/adapters/libsql.ex`:
-
+In `lib/ecto/adapters/libsql.ex`:
 ```elixir
 def loaders(:boolean, type), do: [&bool_decode/1, type]
 defp bool_decode(0), do: {:ok, false}
@@ -562,16 +384,8 @@ defp bool_encode(true), do: {:ok, 1}
 
 ### Work with Transaction Ownership
 
-Transactions track their owning connection via `TransactionEntry`:
+Always validate that a transaction belongs to the requesting connection:
 
-```rust
-pub struct TransactionEntry {
-    pub conn_id: String,        // Connection that owns this transaction
-    pub transaction: Transaction,
-}
-```
-
-Always validate ownership:
 ```rust
 if entry.conn_id != conn_id {
     return Err(rustler::Error::Term(Box::new(
@@ -582,122 +396,9 @@ if entry.conn_id != conn_id {
 
 ### Mark Functions as Unsupported
 
-When a function cannot be implemented due to architectural constraints:
-
 1. Return `:unsupported` atom error in Rust
 2. Document clearly in Elixir wrapper with alternatives
 3. Add comprehensive tests asserting unsupported behaviour
-
-Example: `freeze_database` (see full pattern in original CLAUDE.md if needed)
-
-### Debug Failing Tests
-
-```bash
-mix test test/file.exs:123 --trace                  # Trace
-cd native/ecto_libsql && cargo test -- --nocapture  # Rust output
-mix clean && mix compile                            # Rebuild
-for i in {1..10}; do mix test test/file.exs:42; done # Race conditions
-```
-
-### Pre-Commit Checklist
-
-**STRICT ORDER (do NOT skip steps or reorder)**:
-
-```bash
-# 1. Format code (must come FIRST)
-mix format && cd native/ecto_libsql && cargo fmt
-
-# 2. Run tests (catch logic errors)
-mix test && cd native/ecto_libsql && cargo test
-
-# 3. Verify formatting checks (MUST PASS before commit)
-mix format --check-formatted && cd native/ecto_libsql && cargo fmt --check
-
-# 4. Lint checks (optional but recommended)
-cd native/ecto_libsql && cargo clippy
-
-# 5. Only commit if all checks above passed
-git commit -m "feat: descriptive message"
-```
-
-**⚠️ Critical**: If ANY check fails, fix it and re-run that check before proceeding. Never commit with failing checks.
-
-### Release Process
-
-1. Update version in `mix.exs` and `native/ecto_libsql/Cargo.toml`
-2. Update `CHANGELOG.md`
-3. Update `README.md` if needed
-4. Run full test suite
-5. Merge to `main` and tag (e.g. `git tag 0.9.0 && git push origin 0.9.0`)
-6. Wait for the NIF build workflow to complete (builds 6 targets, attaches to GitHub release)
-7. Download checksums: `mix rustler_precompiled.download EctoLibSql.Native --all --print`
-   - If no checksum file exists yet: `ECTO_LIBSQL_BUILD=true mix rustler_precompiled.download EctoLibSql.Native --all --print`
-8. Commit the updated `checksum-Elixir.EctoLibSql.Native.exs` file
-9. Publish to Hex: `mix hex.publish`
-
-**Hex package includes**: `lib/`, `priv/`, `native/`, `checksum-*.exs`, documentation files
-**Hex package excludes**: `test/`, `examples/`, build artifacts
-
----
-
-## Troubleshooting
-
-### Database Locked
-
-**Symptoms**: `** (EctoLibSql.Error) database is locked`
-
-**Solutions**:
-- Use proper transactions with timeout: `Repo.transaction(fn -> ... end, timeout: 15_000)`
-- Ensure connections are closed in try/after blocks
-- Use immediate transactions for writes: `begin(state, behavior: :immediate)`
-
-### Type Conversion Errors
-
-**Symptoms**: `** (Ecto.ChangeError) value does not match type`
-
-**Solutions**:
-- Verify schema types match database columns
-- Check custom types have loaders/dumpers
-- Use `cast/3` in changesets for automatic conversion
-
-### Migration Fails
-
-**Symptoms**: `** (Ecto.MigrationError) cannot alter column type`
-
-**Cause**: SQLite doesn't support ALTER COLUMN; SQLite < 3.35.0 doesn't support DROP COLUMN
-
-**Solution**: Use table recreation pattern (see `ECTO_MIGRATION_GUIDE.md`):
-1. Create new table with desired schema
-2. Copy data with transformation
-3. Drop old table
-4. Rename new table
-5. Recreate indexes
-
-### Turso Connection Fails
-
-**Symptoms**: `** (EctoLibSql.Error) connection failed: authentication error`
-
-**Solutions**:
-- Verify credentials: `turso db show <name>` and `turso db tokens create <name>`
-- Check URI includes `libsql://` prefix
-- Use replica mode for better error handling (local fallback)
-
-### Memory Leak Suspected
-
-**Solutions**:
-- Ensure cursors are deallocated (streams handle this automatically)
-- Close connections properly with try/after
-- Use connection pooling with appropriate limits
-
-### Vector Search Not Working
-
-**Symptoms**: `** (EctoLibSql.Error) no such function: vector`
-
-**Solutions**:
-- Verify LibSQL version in `native/ecto_libsql/Cargo.toml`
-- Use correct vector syntax: `EctoLibSql.Native.vector_type(128, :f32)`
-- Insert with `vector([...])` wrapper
-- Query with distance functions: `vector_distance_cos("column", vec)`
 
 ---
 
@@ -736,58 +437,24 @@ git commit -m "feat: descriptive message"
 | `:map` | TEXT | JSON |
 | `:date`, `:time`, `:*_datetime` | TEXT | ISO8601 format |
 
-### Essential Commands
-
-```bash
-# Format & checks (ALWAYS before commit)
-mix format --check-formatted
-cd native/ecto_libsql && cargo fmt
-
-# Tests
-mix test                                    # All Elixir
-cd native/ecto_libsql && cargo test         # All Rust
-mix test test/file.exs:42 --trace           # Specific with trace
-
-# Quality
-cd native/ecto_libsql && cargo clippy       # Lint
-
-# Docs
-mix docs                                    # Generate docs
-```
-
 ---
 
 ## Resources
 
 ### Internal Documentation
 
-- **[USAGE.md](USAGE.md)** - API reference for library users
-- **[README.md](README.md)** - User-facing documentation
-- **[CHANGELOG.md](CHANGELOG.md)** - Version history
-- **[ECTO_MIGRATION_GUIDE.md](ECTO_MIGRATION_GUIDE.md)** - Migrating from PostgreSQL/MySQL
-- **[RUST_ERROR_HANDLING.md](RUST_ERROR_HANDLING.md)** - Error pattern reference
-- **[TESTING.md](TESTING.md)** - Testing strategy and organisation
+- **[USAGE.md](USAGE.md)** — API reference for library users
+- **[README.md](README.md)** — User-facing documentation
+- **[CHANGELOG.md](CHANGELOG.md)** — Version history
+- **[ECTO_MIGRATION_GUIDE.md](ECTO_MIGRATION_GUIDE.md)** — Migrating from PostgreSQL/MySQL
+- **[RUST_ERROR_HANDLING.md](RUST_ERROR_HANDLING.md)** — Error pattern reference
+- **[TESTING.md](TESTING.md)** — Testing strategy and organisation
 
 ### External Documentation
 
-**LibSQL & Turso**:
-- [LibSQL Source](https://github.com/tursodatabase/libsql)
-- [LibSQL Docs](https://docs.turso.tech/libsql)
-- [Turso Rust SDK](https://docs.turso.tech/sdk/rust/quickstart)
-
-**Ecto**:
-- [Ecto Docs](https://hexdocs.pm/ecto/)
-- [Ecto.Query](https://hexdocs.pm/ecto/Ecto.Query.html)
-- [Ecto.Migration](https://hexdocs.pm/ecto_sql/Ecto.Migration.html)
-
-**Rust & NIFs**:
-- [Rustler Docs](https://github.com/rusterlium/rustler)
-- [Rust Book](https://doc.rust-lang.org/book/)
-- [Async Rust](https://rust-lang.github.io/async-book/)
-
-**SQLite**:
-- [SQLite Docs](https://www.sqlite.org/docs.html)
-- [SQLite Source](https://github.com/sqlite/sqlite)
+- [LibSQL Source](https://github.com/tursodatabase/libsql) | [LibSQL Docs](https://docs.turso.tech/libsql) | [Turso Rust SDK](https://docs.turso.tech/sdk/rust/quickstart)
+- [Ecto Docs](https://hexdocs.pm/ecto/) | [Ecto.Query](https://hexdocs.pm/ecto/Ecto.Query.html) | [Ecto.Migration](https://hexdocs.pm/ecto_sql/Ecto.Migration.html)
+- [Rustler Docs](https://github.com/rusterlium/rustler) | [SQLite Docs](https://www.sqlite.org/docs.html)
 
 ---
 
@@ -803,23 +470,4 @@ mix docs                                    # Generate docs
 
 ---
 
-## Summary
-
-**EctoLibSql** is a production-ready Ecto adapter for LibSQL/Turso with:
-- Full Ecto support (schemas, migrations, queries, associations)
-- Three connection modes (local, remote, replica)
-- Advanced features (vector search, encryption, streaming)
-- Zero panic risk (proper error handling throughout)
-- Extensive test coverage
-- Comprehensive documentation
-
-**Key Principle**: Safety first. All Rust code uses proper error handling to protect the BEAM VM. Errors are returned as tuples that can be supervised gracefully.
-
-**For AI Agents**: Follow critical rules (formatting, Rust error handling), use existing patterns, test thoroughly. This is production code.
-
----
-
-**Last Updated**: 2025-12-30  
-**Maintained By**: ocean  
-**License**: Apache 2.0  
-**Repository**: https://github.com/ocean/ecto_libsql
+**Last Updated**: 2026-02-26 | **License**: Apache 2.0 | **Repository**: https://github.com/ocean/ecto_libsql
