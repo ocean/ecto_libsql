@@ -721,4 +721,13 @@ mod should_use_query_tests {
         assert!(!should_use_query("ROLLBACK"));
         assert!(!should_use_query("SAVEPOINT sp1"));
     }
+
+    #[test]
+    fn test_pragma_bare_token() {
+        // Explicit assertion for bare "PRAGMA" token (exactly 6 characters).
+        // Documents the intent of the `start + 6 >= len` guard in should_use_query.
+        // When len is exactly 6 (after start), the condition `start + 6 >= len` is true,
+        // allowing bare PRAGMA to pass the boundary check.
+        assert!(should_use_query("PRAGMA"));
+    }
 }
