@@ -261,8 +261,32 @@ mod should_use_query_tests {
 
     #[test]
     fn test_pragma_statements() {
-        assert!(!should_use_query("PRAGMA table_info(users)"));
-        assert!(!should_use_query("PRAGMA foreign_keys = ON"));
+        // PRAGMA statements always use query() since they can return rows.
+        // E.g. PRAGMA wal_checkpoint(FULL) returns busy/log/checkpointed columns.
+        assert!(should_use_query("PRAGMA table_info(users)"));
+        assert!(should_use_query("PRAGMA foreign_keys = ON"));
+        assert!(should_use_query("PRAGMA wal_checkpoint(FULL)"));
+        assert!(should_use_query("pragma journal_mode"));
+        assert!(should_use_query("PRAGMA foreign_keys"));
+    }
+
+    #[test]
+    fn test_not_pragma_if_part_of_word() {
+        // "PRAGMATIC" and similar should not match PRAGMA.
+        assert!(!should_use_query("PRAGMATIC table_name"));
+        assert!(!should_use_query("PRAGMATICS"));
+    }
+
+    #[test]
+    fn test_pragma_with_whitespace() {
+        // Leading whitespace before PRAGMA must be skipped correctly.
+        assert!(should_use_query("  PRAGMA foreign_keys"));
+        assert!(should_use_query("\tPRAGMA journal_mode"));
+        assert!(should_use_query("\n  PRAGMA wal_checkpoint(FULL)"));
+        // Mixed-case with leading whitespace exercises both skip_whitespace_and_comments
+        // and the case-insensitive PRAGMA comparison end-to-end.
+        assert!(should_use_query("  PrAgMa journal_mode"));
+        assert!(should_use_query("\tpRaGmA wal_checkpoint(FULL)"));
     }
 
     // ===== Edge Cases =====
@@ -696,5 +720,14 @@ mod should_use_query_tests {
         assert!(!should_use_query("COMMIT"));
         assert!(!should_use_query("ROLLBACK"));
         assert!(!should_use_query("SAVEPOINT sp1"));
+    }
+
+    #[test]
+    fn test_pragma_bare_token() {
+        // Explicit assertion for bare "PRAGMA" token (exactly 6 characters).
+        // Documents the intent of the `start + 6 >= len` guard in should_use_query.
+        // When len is exactly 6 (after start), the condition `start + 6 >= len` is true,
+        // allowing bare PRAGMA to pass the boundary check.
+        assert!(should_use_query("PRAGMA"));
     }
 }

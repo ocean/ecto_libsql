@@ -360,7 +360,14 @@ fn skip_whitespace_and_comments(bytes: &[u8]) -> usize {
 
 /// Determines if a query should use query() or execute()
 ///
-/// Returns true if should use query() (SELECT or has RETURNING clause).
+/// Returns true if the statement should use `query()` rather than `execute()`.
+///
+/// Routes through `query()` when the statement may return rows:
+/// - `SELECT` — always returns rows
+/// - `WITH` — CTE; typically precedes a `SELECT`
+/// - `EXPLAIN` — always returns rows
+/// - `PRAGMA` — may return rows (e.g. `PRAGMA wal_checkpoint(FULL)`)
+/// - Any statement containing a `RETURNING` clause
 ///
 /// Performance optimisations:
 /// - Zero allocations (no to_uppercase())
@@ -410,6 +417,22 @@ pub fn should_use_query(sql: &str) -> bool {
         && (bytes[start + 6] == b'N' || bytes[start + 6] == b'n')
         // Verify it's followed by whitespace or end of string
         && (start + 7 >= len || bytes[start + 7].is_ascii_whitespace())
+    {
+        return true;
+    }
+
+    // Check if starts with PRAGMA (case-insensitive)
+    // PRAGMA statements may return rows (e.g. PRAGMA wal_checkpoint(FULL) returns 3 columns),
+    // so always route through query() to avoid "Execute returned rows" errors.
+    if len - start >= 6
+        && (bytes[start] == b'P' || bytes[start] == b'p')
+        && (bytes[start + 1] == b'R' || bytes[start + 1] == b'r')
+        && (bytes[start + 2] == b'A' || bytes[start + 2] == b'a')
+        && (bytes[start + 3] == b'G' || bytes[start + 3] == b'g')
+        && (bytes[start + 4] == b'M' || bytes[start + 4] == b'm')
+        && (bytes[start + 5] == b'A' || bytes[start + 5] == b'a')
+        // Verify it's followed by whitespace or end of string
+        && (start + 6 >= len || bytes[start + 6].is_ascii_whitespace())
     {
         return true;
     }

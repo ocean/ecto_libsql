@@ -93,6 +93,25 @@ defmodule Ecto.Integration.EctoLibSqlTest do
     )
     """)
 
+    # Create the locations table and composite unique index used by the
+    # on_conflict tests. Creating these once in setup_all avoids per-test
+    # DDL that can cause schema-visibility races in the connection pool.
+    Ecto.Adapters.SQL.query!(TestRepo, """
+    CREATE TABLE IF NOT EXISTS locations (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      slug TEXT NOT NULL,
+      parent_slug TEXT,
+      name TEXT NOT NULL,
+      inserted_at DATETIME,
+      updated_at DATETIME
+    )
+    """)
+
+    Ecto.Adapters.SQL.query!(
+      TestRepo,
+      "CREATE UNIQUE INDEX IF NOT EXISTS locations_slug_parent_index ON locations (slug, parent_slug)"
+    )
+
     on_exit(fn ->
       EctoLibSql.TestHelpers.cleanup_db_files(@test_db)
     end)
@@ -719,32 +738,9 @@ defmodule Ecto.Integration.EctoLibSqlTest do
     end
 
     setup do
-      # Drop index and table to ensure clean state
-      Ecto.Adapters.SQL.query!(TestRepo, "DROP INDEX IF EXISTS locations_slug_parent_index")
-      Ecto.Adapters.SQL.query!(TestRepo, "DROP TABLE IF EXISTS locations")
-
-      # Create table with composite unique index
-      Ecto.Adapters.SQL.query!(TestRepo, """
-      CREATE TABLE locations (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        slug TEXT NOT NULL,
-        parent_slug TEXT,
-        name TEXT NOT NULL,
-        inserted_at DATETIME,
-        updated_at DATETIME
-      )
-      """)
-
-      Ecto.Adapters.SQL.query!(
-        TestRepo,
-        "CREATE UNIQUE INDEX IF NOT EXISTS locations_slug_parent_index ON locations (slug, parent_slug)"
-      )
-
-      on_exit(fn ->
-        Ecto.Adapters.SQL.query!(TestRepo, "DROP INDEX IF EXISTS locations_slug_parent_index")
-        Ecto.Adapters.SQL.query!(TestRepo, "DROP TABLE IF EXISTS locations")
-      end)
-
+      # The locations table and its unique index are created once in setup_all.
+      # Just delete any rows left over from a previous test run.
+      Ecto.Adapters.SQL.query!(TestRepo, "DELETE FROM locations")
       :ok
     end
 
