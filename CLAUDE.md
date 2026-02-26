@@ -349,7 +349,7 @@ See [TEST_STATE_VARIABLE_CONVENTIONS.md](TEST_STATE_VARIABLE_CONVENTIONS.md) for
 ⚠️ **Cost Warning**: Creates real cloud databases. Only run when developing remote/replica functionality.
 
 Create `.env.local`:
-```
+```dotenv
 TURSO_DB_URI="libsql://your-database.turso.io"
 TURSO_AUTH_TOKEN="your-token-here"
 ```
