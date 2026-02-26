@@ -12,7 +12,7 @@
 - **British/Australian English** for all code, comments, and documentation (except SQL keywords and compatibility requirements)
 - **⚠️ CRITICAL: ALWAYS check formatting BEFORE committing**:
   1. Run formatters: `mix format && cd native/ecto_libsql && cargo fmt`
-  2. Verify checks pass: `mix format --check-formatted && cargo fmt --check``
+  2. Verify checks pass: `mix format --check-formatted && cargo fmt --check`
   3. **Only then** commit: `git commit -m "..."`
 - **NEVER use `.unwrap()` in production Rust code** — use `safe_lock` helpers (see [Error Handling](#error-handling-patterns))
 - **Tests MAY use `.unwrap()`** for simplicity
