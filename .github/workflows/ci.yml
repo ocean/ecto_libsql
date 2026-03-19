@@ -292,6 +292,7 @@ jobs:
   turso-remote-tests:
     name: Turso Remote Database Tests
     runs-on: ubuntu-latest
+    environment: test
     needs: [rust-checks, elixir-tests-latest, elixir-tests-compatibility]
     # Only run on PRs to main
     if: github.event_name == 'pull_request' && github.base_ref == 'main'
