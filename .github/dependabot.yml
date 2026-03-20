@@ -10,6 +10,7 @@ updates:
     directory: "/" # Location of package manifests
     schedule:
       interval: "weekly"
+    target-branch: "dev"
     cooldown:
       semver-major-days: 10
       semver-minor-days: 5
@@ -19,6 +20,7 @@ updates:
     directory: "/native/ecto_libsql/"
     schedule:
       interval: "weekly"
+    target-branch: "dev"
     cooldown:
       semver-major-days: 10
       semver-minor-days: 5
@@ -30,3 +32,4 @@ updates:
     directory: "/"
     schedule:
       interval: "monthly"
+    target-branch: "dev"
