@@ -15,6 +15,7 @@ updates:
       semver-major-days: 10
       semver-minor-days: 5
       semver-patch-days: 2
+      default-days: 7
   # Enable version checks and updates for Rust dependencies.
   - package-ecosystem: "cargo"
     directory: "/native/ecto_libsql/"
@@ -25,6 +26,7 @@ updates:
       semver-major-days: 10
       semver-minor-days: 5
       semver-patch-days: 2
+      default-days: 7
   # Enable version updates for GitHub Actions.
   - package-ecosystem: "github-actions"
     # Workflow files stored in the default location of `.github/workflows`
@@ -33,3 +35,5 @@ updates:
     schedule:
       interval: "monthly"
     target-branch: "dev"
+    cooldown:
+      default-days: 7

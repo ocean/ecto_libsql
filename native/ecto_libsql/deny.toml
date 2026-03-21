@@ -76,6 +76,9 @@ ignore = [
     # bincode is marked unmaintained but is a transitive dependency of libsql
     # We cannot update it until libsql updates their dependencies
     { id = "RUSTSEC-2025-0141", reason = "Transitive dependency of libsql, waiting for upstream update" },
+    # rustls-webpki 0.102.x has a CRL matching logic flaw (low severity, requires CA compromise)
+    # Fix requires rustls 0.23+ but libsql pins rustls 0.22.x — cannot update until upstream bumps
+    { id = "RUSTSEC-2026-0049", reason = "Transitive dependency of libsql via rustls 0.22, waiting for upstream update" },
 ]
 # If this is true, then cargo deny will use the git executable to fetch advisory database.
 # If this is false, then it uses a built-in git library.
