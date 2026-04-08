@@ -63,7 +63,10 @@
       "Bash(ECTO_LIBSQL_BUILD=true mix compile:*)",
       "Bash(ECTO_LIBSQL_BUILD=true mix run:*)",
       "Bash(ECTO_LIBSQL_BUILD=true mix test:*)",
-      "Bash(MIX_ENV=test ECTO_LIBSQL_BUILD=true mix compile:*)"
+      "Bash(MIX_ENV=test ECTO_LIBSQL_BUILD=true mix compile:*)",
+      "Bash(zizmor .github/workflows/ci.yml)",
+      "Bash(gh api:*)",
+      "WebFetch(domain:mise.jdx.dev)"
     ],
     "deny": [],
     "ask": []
