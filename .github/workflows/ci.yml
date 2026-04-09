@@ -112,7 +112,7 @@ jobs:
           echo "All fuzz tests passed!"
 
   elixir-tests-latest:
-    name: Elixir 1.19.0 / OTP 28.0 / ${{ matrix.os }}
+    name: Elixir 1.19.5 / OTP 28.0 / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: true
@@ -158,9 +158,9 @@ jobs:
           path: |
             deps
             _build
-          key: ${{ runner.os }}-mix-1.19.0-28.0-${{ hashFiles('mix.exs', '**/Cargo.toml') }}
+          key: ${{ runner.os }}-mix-1.19.5-28.0-${{ hashFiles('mix.exs', '**/Cargo.toml') }}
           restore-keys: |
-            ${{ runner.os }}-mix-1.19.0-28.0-
+            ${{ runner.os }}-mix-1.19.5-28.0-
 
       - name: Install Mix dependencies
         run: mix deps.get
