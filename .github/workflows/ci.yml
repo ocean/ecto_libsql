@@ -112,12 +112,14 @@ jobs:
           echo "All fuzz tests passed!"
 
   elixir-tests-latest:
-    name: Elixir 1.19.5 / OTP 28.0 / ${{ matrix.os }}
+    name: Elixir ${{ matrix.elixir }} / OTP ${{ matrix.erlang }} / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: true
       matrix:
         os: [ubuntu-latest, macos-latest]
+        elixir: ["1.19.5"]
+        erlang: ["28.0"]
 
     steps:
       - name: Checkout code
@@ -158,9 +160,9 @@ jobs:
           path: |
             deps
             _build
-          key: ${{ runner.os }}-mix-1.19.5-28.0-${{ hashFiles('mix.exs', '**/Cargo.toml') }}
+          key: ${{ runner.os }}-mix-${{ matrix.elixir }}-${{ matrix.erlang }}-${{ hashFiles('mix.exs', '**/Cargo.toml') }}
           restore-keys: |
-            ${{ runner.os }}-mix-1.19.5-28.0-
+            ${{ runner.os }}-mix-${{ matrix.elixir }}-${{ matrix.erlang }}-
 
       - name: Install Mix dependencies
         run: mix deps.get
@@ -184,13 +186,16 @@ jobs:
         run: mix test
 
   elixir-tests-compatibility:
-    name: Elixir 1.18.0 / OTP 27.0 / ${{ matrix.os }}
+    name: Elixir ${{ matrix.elixir }} / OTP ${{ matrix.erlang }} / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     needs: [elixir-tests-latest]
     strategy:
       fail-fast: true
       matrix:
         os: [ubuntu-latest, macos-latest]
+        elixir: ["1.18.0"]
+        erlang: ["27.0"]
+        elixir_otp: ["1.18.0-otp-27"]
 
     steps:
       - name: Checkout code
@@ -207,14 +212,14 @@ jobs:
         uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
         with:
           path: ~/.local/share/mise
-          key: mise-compat-${{ runner.os }}-${{ runner.arch }}-erlang-27.0-elixir-1.18.0
+          key: mise-compat-${{ runner.os }}-${{ runner.arch }}-erlang-${{ matrix.erlang }}-elixir-${{ matrix.elixir }}
           restore-keys: |
             mise-compat-${{ runner.os }}-${{ runner.arch }}-
 
       - name: Install Erlang and Elixir via mise
         run: |
-          mise install erlang@27.0 elixir@1.18.0-otp-27
-          mise use erlang@27.0 elixir@1.18.0-otp-27
+          mise install erlang@${{ matrix.erlang }} elixir@${{ matrix.elixir_otp }}
+          mise use erlang@${{ matrix.erlang }} elixir@${{ matrix.elixir_otp }}
           mise reshim
           echo "$HOME/.local/share/mise/shims" >> "$GITHUB_PATH"
 
@@ -232,9 +237,9 @@ jobs:
           path: |
             deps
             _build
-          key: ${{ runner.os }}-mix-1.18.0-27.0-${{ hashFiles('mix.exs', '**/Cargo.toml') }}
+          key: ${{ runner.os }}-mix-${{ matrix.elixir }}-${{ matrix.erlang }}-${{ hashFiles('mix.exs', '**/Cargo.toml') }}
           restore-keys: |
-            ${{ runner.os }}-mix-1.18.0-27.0-
+            ${{ runner.os }}-mix-${{ matrix.elixir }}-${{ matrix.erlang }}-
 
       - name: Install Mix dependencies
         run: mix deps.get
