@@ -22,7 +22,7 @@ The CI workflow triggers on tags matching `*.*.*`. The tag must match the versio
 gh release create X.Y.Z --title "vX.Y.Z" --draft --generate-notes
 ```
 
-This creates the tag and a draft release. The CI workflow fires and builds all 6 NIF targets, uploading each artifact to the release.
+This creates the tag and a draft release. The CI workflow fires and builds all 6 NIF targets, uploading each artefact to the release.
 
 ## 3. Wait for all CI jobs to finish
 
@@ -38,13 +38,13 @@ All 6 matrix jobs must succeed:
 
 ## 4. Regenerate the checksum file
 
-Once all artifacts are uploaded to the release:
+Once all artefacts are uploaded to the release:
 
 ```bash
 MIX_ENV=prod mix rustler_precompiled.download EctoLibSql.Native --all --ignore-unavailable
 ```
 
-This downloads every artifact from the GitHub release and regenerates `checksum-Elixir.EctoLibSql.Native.exs`. Verify the file has all 6 entries with fresh sha256 hashes.
+This downloads every artefact from the GitHub release and regenerates `checksum-Elixir.EctoLibSql.Native.exs`. Verify the file has all 6 entries with fresh sha256 hashes.
 
 ## 5. Commit and push the checksum
 
@@ -74,5 +74,5 @@ mix hex.publish
 
 - **Tag format**: Use `0.9.1` not `v0.9.1` — the `base_url` in `native.ex` is `releases/download/#{version}`, so the tag and version must match exactly.
 - **Checksum before publish**: Always regenerate and commit the checksum file *before* `mix hex.publish`. Without it, users get integrity errors when installing.
-- **`--ignore-unavailable`**: Safe to use during checksum generation — skips any targets that failed to build rather than erroring out.
+- **`--ignore-unavailable`**: Use with caution — only after confirming all 6 CI target builds have succeeded and all 6 release artefacts are present; otherwise it can mask missing binaries.
 - **Test run option**: The `workflow_dispatch` trigger on the release workflow has a `test_only` input that skips the `gh release upload` step, useful for testing the build matrix without creating a real release.
