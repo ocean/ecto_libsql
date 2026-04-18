@@ -186,14 +186,13 @@ jobs:
         run: mix test
 
   elixir-tests-compatibility:
-    name: Elixir ${{ matrix.elixir }} / OTP ${{ matrix.erlang }} / ${{ matrix.os }}
+    name: Elixir ${{ matrix.elixir_otp }} / OTP ${{ matrix.erlang }} / ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     needs: [elixir-tests-latest]
     strategy:
       fail-fast: true
       matrix:
         os: [ubuntu-latest, macos-latest]
-        elixir: ["1.18.0"]
         erlang: ["27.0"]
         elixir_otp: ["1.18.0-otp-27"]
 
@@ -212,7 +211,7 @@ jobs:
         uses: actions/cache@cdf6c1fa76f9f475f3d7449005a359c84ca0f306 # v5.0.3
         with:
           path: ~/.local/share/mise
-          key: mise-compat-${{ runner.os }}-${{ runner.arch }}-erlang-${{ matrix.erlang }}-elixir-${{ matrix.elixir }}
+          key: mise-compat-${{ runner.os }}-${{ runner.arch }}-erlang-${{ matrix.erlang }}-elixir-${{ matrix.elixir_otp }}-${{ hashFiles('mise.toml') }}
           restore-keys: |
             mise-compat-${{ runner.os }}-${{ runner.arch }}-
 
@@ -237,9 +236,9 @@ jobs:
           path: |
             deps
             _build
-          key: ${{ runner.os }}-mix-${{ matrix.elixir }}-${{ matrix.erlang }}-${{ hashFiles('mix.exs', '**/Cargo.toml') }}
+          key: ${{ runner.os }}-mix-${{ matrix.elixir_otp }}-${{ matrix.erlang }}-${{ hashFiles('mix.exs', '**/Cargo.toml') }}
           restore-keys: |
-            ${{ runner.os }}-mix-${{ matrix.elixir }}-${{ matrix.erlang }}-
+            ${{ runner.os }}-mix-${{ matrix.elixir_otp }}-${{ matrix.erlang }}-
 
       - name: Install Mix dependencies
         run: mix deps.get
