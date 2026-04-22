@@ -79,6 +79,12 @@ ignore = [
     # rustls-webpki 0.102.x has a CRL matching logic flaw (low severity, requires CA compromise)
     # Fix requires rustls 0.23+ but libsql pins rustls 0.22.x — cannot update until upstream bumps
     { id = "RUSTSEC-2026-0049", reason = "Transitive dependency of libsql via rustls 0.22, waiting for upstream update" },
+    # rustls-webpki 0.102.x URI name constraints incorrectly accepted
+    # Fix available in >=0.103.12 but libsql pins rustls 0.22.x which requires 0.102.x — waiting for upstream update
+    { id = "RUSTSEC-2026-0098", reason = "Transitive dependency of libsql via rustls 0.22, waiting for upstream update" },
+    # rustls-webpki 0.102.x wildcard DNS names bypass name constraints
+    # Fix available in >=0.103.12 but libsql pins rustls 0.22.x which requires 0.102.x — waiting for upstream update
+    { id = "RUSTSEC-2026-0099", reason = "Transitive dependency of libsql via rustls 0.22, waiting for upstream update" },
 ]
 # If this is true, then cargo deny will use the git executable to fetch advisory database.
 # If this is false, then it uses a built-in git library.

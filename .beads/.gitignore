@@ -2,6 +2,12 @@
 dolt/
 dolt-access.lock
 
+# Credential key (machine-specific secret, never commit)
+.beads-credential-key
+
+# Embedded Dolt runtime directory (auto-created, machine-specific)
+embeddeddolt/
+
 # Runtime files
 bd.sock
 bd.sock.startlock
