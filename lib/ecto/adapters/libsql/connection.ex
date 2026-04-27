@@ -754,13 +754,14 @@ defmodule Ecto.Adapters.LibSql.Connection do
 
   @impl true
   def insert(prefix, table, header, rows, on_conflict, returning, placeholders) do
+    counter_offset = length(placeholders) + 1
     fields = intersperse_map(header, ", ", &quote_name/1)
 
     values =
       if rows == [] do
         [" DEFAULT VALUES"]
       else
-        [" VALUES ", encode_values(rows)]
+        [" VALUES ", encode_insert_values(rows, counter_offset)]
       end
 
     [
@@ -776,12 +777,26 @@ defmodule Ecto.Adapters.LibSql.Connection do
     ]
   end
 
-  defp encode_values(rows) do
-    rows
-    |> Enum.map(fn row ->
-      ["(", intersperse_map(row, ", ", fn _ -> "?" end), ")"]
-    end)
-    |> Enum.intersperse(", ")
+  # Generate VALUES with numbered positional parameters (?1, ?2, ...).
+  # SQLite requires numbered parameters when the same statement contains
+  # multiple parameter groups (e.g., INSERT values + ON CONFLICT UPDATE).
+  # Bare `?` causes "near ?: syntax error" in upsert queries.
+  defp encode_insert_values(rows, counter) do
+    {encoded, _} =
+      Enum.map_reduce(rows, counter, fn row, acc ->
+        {params, new_acc} =
+          Enum.map_reduce(row, acc, fn
+            {:placeholder, placeholder_index}, c ->
+              {[?? | placeholder_index], c}
+
+            _, c ->
+              {[?? | Integer.to_string(c)], c + 1}
+          end)
+
+        {["(", Enum.intersperse(params, ", "), ")"], new_acc}
+      end)
+
+    Enum.intersperse(encoded, ", ")
   end
 
   # Helper for INSERT OR ... syntax (not used for now, keeping for SQLite REPLACE compatibility)
@@ -1166,9 +1181,11 @@ defmodule Ecto.Adapters.LibSql.Connection do
     [?(, expr(expr, sources, query), ?)]
   end
 
-  # Parameter placeholder
-  defp expr({:^, [], [_ix]}, _sources, _query) do
-    ~c"?"
+  # Parameter placeholder - use numbered parameters (?1, ?2, ...).
+  # SQLite requires numbered parameters when a statement has multiple
+  # parameter groups (e.g., INSERT values + ON CONFLICT UPDATE).
+  defp expr({:^, [], [ix]}, _sources, _query) do
+    [?? | Integer.to_string(ix + 1)]
   end
 
   # Qualified field reference: s0.field
@@ -1304,6 +1321,11 @@ defmodule Ecto.Adapters.LibSql.Connection do
 
   defp expr({:max, _, [arg]}, sources, query) do
     ["max(", expr(arg, sources, query), ?)]
+  end
+
+  # Identifier expression (used in fragment expressions like EXCLUDED."column_name")
+  defp expr({:identifier, _, [name]}, _sources, _query) do
+    quote_name(name)
   end
 
   # Fragment for raw SQL
