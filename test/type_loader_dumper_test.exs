@@ -346,7 +346,9 @@ defmodule EctoLibSql.TypeLoaderDumperTest do
           "SELECT float_field FROM all_types ORDER BY float_field"
         )
 
-      assert [[-2.71828], [0.0], [0.0], [3.14]] = result.rows
+      assert [[-2.71828], [z1], [z2], [3.14]] = result.rows
+      assert z1 == 0.0
+      assert z2 == 0.0
     end
 
     test "handles special float values" do
