@@ -404,7 +404,7 @@ fragment        = JSON.arrow_fragment("col", "key", :double_arrow)   # "col ->> 
 | `set` | ✅ | ✅ | Use JSON paths (`$.key`) |
 | `replace` | ❌ | ✅ | Use JSON paths (`$.key`) |
 | `insert` | ✅ | ❌ | Use JSON paths (`$.key`) |
-| `patch` | ✅ | ✅ | RFC 7396 - top-level object keys only; set key to `null` to remove |
+| `patch` | ✅ | ✅ | RFC 7396 merge patch for objects (recursive); set key to `null` to remove; arrays are replaced as whole values |
 
 JSONB binary format is ~5–10% smaller and faster to process. All JSON functions accept both text and JSONB transparently.
 
