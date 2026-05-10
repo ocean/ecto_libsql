@@ -980,12 +980,19 @@ defmodule Ecto.Adapters.LibSql.MigrationTest do
       table = %Table{name: :users, prefix: nil}
       columns = [{:add, :status, :string, [default: :unknown]}]
 
-      # Should not raise FunctionClauseError.
-      [sql] = Connection.execute_ddl({:create, table, columns})
+      import ExUnit.CaptureLog
 
-      # Unexpected atom should be treated as no default.
-      assert sql =~ ~r/"status".*TEXT/
-      refute sql =~ ~r/"status".*DEFAULT/
+      log =
+        capture_log(fn ->
+          # Should not raise FunctionClauseError.
+          [sql] = Connection.execute_ddl({:create, table, columns})
+
+          # Unexpected atom should be treated as no default.
+          assert sql =~ ~r/"status".*TEXT/
+          refute sql =~ ~r/"status".*DEFAULT/
+        end)
+
+      assert log =~ "Unsupported default value type in migration: :unknown"
     end
 
     test "handles map defaults (JSON encoding)" do

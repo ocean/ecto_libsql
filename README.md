@@ -4,6 +4,9 @@
 
 `ecto_libsql` is an (unofficial) Elixir [Ecto](https://github.com/elixir-ecto/ecto) database adapter for [LibSQL](https://github.com/tursodatabase/libsql) database files, and databases hosted on [Turso](https://turso.tech/), built with Rust NIFs. It supports local libSQL/SQLite files, remote replica with synchronisation, and remote only Turso databases.
 
+> [!NOTE]
+> **Upstream status:** [Turso is now closer to transitioning away from libSQL](https://turso.tech/blog/sync-benchmark) (their fork of SQLite) in favour of their new [Turso](https://turso.tech/turso) library - their full rewrite of SQLite in Rust. Activity on the [libSQL repository](https://github.com/tursodatabase/libsql) has slowed significantly as a result. We are monitoring the situation. `ecto_libsql` will continue to receive bug fixes and security updates, but is likely to transition to maintenance mode as the Elixir/Turso ecosystem matures. For those interested in using the new Turso library, [turso_ex](https://github.com/bytebottom/turso_ex) is an early-stage Elixir adapter currently under development.
+
 ## Installation
 
 Add `ecto_libsql` to your dependencies in `mix.exs`:
@@ -11,7 +14,7 @@ Add `ecto_libsql` to your dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:ecto_libsql, "~> 0.8.0"}
+    {:ecto_libsql, "~> 0.9.0"}
   ]
 end
 ```

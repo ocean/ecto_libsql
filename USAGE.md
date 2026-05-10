@@ -75,7 +75,7 @@
   auth_token: System.get_env("TURSO_AUTH_TOKEN")
 )
 
-# Remote Replica (recommended for production — local reads, synced writes)
+# Remote Replica (recommended for production - local reads, synced writes)
 {:ok, state} = EctoLibSql.connect(
   uri: "libsql://my-database.turso.io",
   auth_token: System.get_env("TURSO_AUTH_TOKEN"),
@@ -167,7 +167,7 @@ Named constraints (`ON CONFLICT ON CONSTRAINT name`) are not supported.
 SQLite supports three named parameter syntaxes. Pass a map instead of a list:
 
 ```elixir
-# :name, @name, or $name syntax — all equivalent.
+# :name, @name, or $name syntax - all equivalent.
 {:ok, _, _, state} = EctoLibSql.handle_execute(
   "SELECT * FROM users WHERE email = :email AND status = :status",
   %{"email" => "alice@example.com", "status" => "active"},
@@ -186,16 +186,16 @@ Positional `?` parameters still work unchanged. Do not mix named and positional 
 
 ### Prepared Statements
 
-Cached after first preparation — ~10–15x faster for repeated queries. Bindings are cleared automatically between executions via `stmt.reset()`.
+Cached after first preparation - ~10–15x faster for repeated queries. Bindings are cleared automatically between executions via `stmt.reset()`.
 
 ```elixir
 # Prepare and cache.
 {:ok, stmt_id} = EctoLibSql.Native.prepare(state, "SELECT * FROM users WHERE email = ?")
 
-# Execute SELECT — returns rows.
+# Execute SELECT - returns rows.
 {:ok, result} = EctoLibSql.Native.query_stmt(state, stmt_id, ["alice@example.com"])
 
-# Execute INSERT/UPDATE/DELETE — returns affected rows count.
+# Execute INSERT/UPDATE/DELETE - returns affected rows count.
 # SQL must be re-supplied (used for replica sync detection).
 {:ok, num_rows} = EctoLibSql.Native.execute_stmt(
   state, stmt_id,
@@ -226,10 +226,10 @@ statements = [
   {"INSERT INTO users (name, email) VALUES (?, ?)", ["Bob", "bob@example.com"]},
 ]
 
-# Non-transactional — each executes independently; failures don't affect others.
+# Non-transactional - each executes independently; failures don't affect others.
 {:ok, results} = EctoLibSql.Native.batch(state, statements)
 
-# Transactional — all-or-nothing.
+# Transactional - all-or-nothing.
 {:ok, results} = EctoLibSql.Native.batch_transactional(state, statements)
 
 # Raw SQL string (multiple statements separated by semicolons).
@@ -239,7 +239,7 @@ statements = [
 
 ### Cursor Streaming
 
-For large result sets. `Repo.stream/2` is **not supported** — use `DBConnection.stream/4` instead:
+For large result sets. `Repo.stream/2` is **not supported** - use `DBConnection.stream/4` instead:
 
 ```elixir
 stream = DBConnection.stream(
@@ -290,7 +290,7 @@ R*Tree is a SQLite virtual table for efficient multidimensional range queries (g
 - Not compatible with `:strict`, `:random_rowid`, or `:without_rowid`
 
 ```elixir
-# In a migration — Ecto's default id column + 2D bounds = 5 columns (odd ✓).
+# In a migration - Ecto's default id column + 2D bounds = 5 columns (odd ✓).
 create table(:geo_regions, options: [rtree: true]) do
   add :min_lat, :float
   add :max_lat, :float
@@ -366,7 +366,7 @@ If using `primary_key: false`, add an explicit `add :id, :integer, primary_key: 
 )
 ```
 
-Encryption key must be at least 32 characters. Use environment variables or a secret manager — never hard-code keys.
+Encryption key must be at least 32 characters. Use environment variables or a secret manager - never hard-code keys.
 
 ### JSON Helpers
 
@@ -404,7 +404,7 @@ fragment        = JSON.arrow_fragment("col", "key", :double_arrow)   # "col ->> 
 | `set` | ✅ | ✅ | Use JSON paths (`$.key`) |
 | `replace` | ❌ | ✅ | Use JSON paths (`$.key`) |
 | `insert` | ✅ | ❌ | Use JSON paths (`$.key`) |
-| `patch` | ✅ | ✅ | RFC 7396 — top-level object keys only; set key to `null` to remove |
+| `patch` | ✅ | ✅ | RFC 7396 merge patch for objects (recursive); set key to `null` to remove; arrays are replaced as whole values |
 
 JSONB binary format is ~5–10% smaller and faster to process. All JSON functions accept both text and JSONB transparently.
 
@@ -415,13 +415,13 @@ JSONB binary format is ~5–10% smaller and faster to process. All JSON function
 ### Configuration
 
 ```elixir
-# config/dev.exs — local
+# config/dev.exs - local
 config :my_app, MyApp.Repo,
   adapter: Ecto.Adapters.LibSql,
   database: "my_app_dev.db",
   pool_size: 5
 
-# config/runtime.exs — production (remote replica recommended)
+# config/runtime.exs - production (remote replica recommended)
 if config_env() == :prod do
   config :my_app, MyApp.Repo,
     adapter: Ecto.Adapters.LibSql,
@@ -512,7 +512,7 @@ alter table(:users) do
 end
 ```
 
-Changes apply only to **new or updated rows** — existing data is not revalidated. Not available in standard SQLite.
+Changes apply only to **new or updated rows** - existing data is not revalidated. Not available in standard SQLite.
 
 #### Generated / Computed Columns (SQLite 3.31+)
 
@@ -532,7 +532,7 @@ Constraints: cannot have DEFAULT values, cannot be PRIMARY KEY, expression must 
 
 ```elixir
 # mix phx.new my_app --database libsqlex
-# Or add to existing project — config as shown above.
+# Or add to existing project - config as shown above.
 
 # Standard Phoenix context pattern works unchanged.
 defmodule MyApp.Accounts do
@@ -570,7 +570,7 @@ The following Elixir types are **automatically encoded** when passed as top-leve
 **⚠️ Nested structures are NOT automatically encoded:**
 
 ```elixir
-# ❌ Fails — DateTime inside map is not auto-encoded.
+# ❌ Fails - DateTime inside map is not auto-encoded.
 SQL.query!(Repo, "INSERT INTO events (metadata) VALUES (?)", [
   %{"created_at" => DateTime.utc_now(), "data" => "value"}
 ])
@@ -584,11 +584,11 @@ Third-party date types (e.g. `Timex.DateTime`) must be converted to standard Eli
 
 ### Limitations and Known Issues
 
-#### `freeze_replica/1` — Not Supported
+#### `freeze_replica/1` - Not Supported
 
 `EctoLibSql.Native.freeze_replica/1` returns `{:error, :unsupported}`. Workaround: copy the replica `.db` file and configure your app to use it directly.
 
-#### `Repo.stream/2` — Not Supported
+#### `Repo.stream/2` - Not Supported
 
 Use `DBConnection.stream/4` with `max_rows:` instead (see [Cursor Streaming](#cursor-streaming)).
 
@@ -602,9 +602,9 @@ The following Ecto query features do not work due to SQLite limitations:
 | `exists()` with `parent_as()` | Complex nested query correlation unsupported |
 | `fragment(literal(...))` / `fragment(identifier(...))` | Not supported in SQLite fragments |
 | `ago(N, unit)` | Does not work with TEXT-based timestamps |
-| `{:array, _}` type | Not supported — use JSON or separate tables |
+| `{:array, _}` type | Not supported - use JSON or separate tables |
 | Mixed arithmetic (string + float) | SQLite returns TEXT instead of coercing to REAL |
-| Case-insensitive text comparison | TEXT is case-sensitive by default — use `COLLATE NOCASE` |
+| Case-insensitive text comparison | TEXT is case-sensitive by default - use `COLLATE NOCASE` |
 
 **Compatibility summary: ~74% of Ecto features pass (31/42 tests). All failures are SQLite limitations, not adapter bugs.**
 
@@ -624,7 +624,7 @@ The following Ecto query features do not work due to SQLite limitations:
 | `:naive_datetime` / `:utc_datetime` | `DATETIME` | ✅ ISO8601 |
 | `:*_usec` variants | `DATETIME` | ✅ ISO8601 with microseconds |
 | `:map` / `:json` | `TEXT` | ✅ JSON string |
-| `{:array, _}` | — | ❌ Not supported |
+| `{:array, _}` | - | ❌ Not supported |
 
 Use `@timestamps_opts [type: :utc_datetime_usec]` on schemas requiring microsecond precision.
 
@@ -733,8 +733,8 @@ For standard SQLite (without libSQL's `ALTER COLUMN`), use table recreation: cre
 | Function | Signature | Returns |
 |----------|-----------|---------|
 | `EctoLibSql.Native.vector/1` | `(list_of_numbers)` | `String.t()` |
-| `EctoLibSql.Native.vector_type/2` | `(dimensions, :f32 \| :f64)` | `String.t()` — e.g. `"F32_BLOB(1536)"` |
-| `EctoLibSql.Native.vector_distance_cos/2` | `(column, vector)` | `String.t()` — SQL expression |
+| `EctoLibSql.Native.vector_type/2` | `(dimensions, :f32 \| :f64)` | `String.t()` - e.g. `"F32_BLOB(1536)"` |
+| `EctoLibSql.Native.vector_distance_cos/2` | `(column, vector)` | `String.t()` - SQL expression |
 
 ### Connection Utilities
 
@@ -795,7 +795,7 @@ Verify credentials with `turso db show <name>` and `turso db tokens create <name
 
 ### Type mismatch on STRICT table
 
-Insert types must match exactly — SQLite won't coerce (e.g., passing `"30"` for an `INTEGER` column will fail).
+Insert types must match exactly - SQLite won't coerce (e.g., passing `"30"` for an `INTEGER` column will fail).
 
 ---
 

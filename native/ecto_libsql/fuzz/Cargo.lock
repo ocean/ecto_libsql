@@ -364,7 +364,7 @@ dependencies = [
 
 [[package]]
 name = "ecto_libsql"
-version = "0.9.0"
+version = "0.9.1"
 dependencies = [
  "bytes",
  "libsql",
