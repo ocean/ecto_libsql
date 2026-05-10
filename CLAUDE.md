@@ -14,25 +14,25 @@
   1. Run formatters: `mix format && cd native/ecto_libsql && cargo fmt`
   2. Verify checks pass: `mix format --check-formatted && cargo fmt --check`
   3. **Only then** commit: `git commit -m "..."`
-- **NEVER use `.unwrap()` in production Rust code** — use `safe_lock` helpers (see [Error Handling](#error-handling-patterns))
+- **NEVER use `.unwrap()` in production Rust code** - use `safe_lock` helpers (see [Error Handling](#error-handling-patterns))
 - **Tests MAY use `.unwrap()`** for simplicity
 
 ---
 
 ## Landing the Plane (Session Completion)
 
-**MANDATORY WORKFLOW — work is NOT complete until `git commit` succeeds:**
+**MANDATORY WORKFLOW - work is NOT complete until `git commit` succeeds:**
 
-1. **File issues for remaining work** — create Beads issues for anything needing follow-up
-2. **Run quality gates** (if code changed) — tests, linters, builds
-3. **Update issue status** — close finished work, update in-progress items
+1. **File issues for remaining work** - create Beads issues for anything needing follow-up
+2. **Run quality gates** (if code changed) - tests, linters, builds
+3. **Update issue status** - close finished work, update in-progress items
 4. **COMMIT**:
    ```bash
    git commit -m "Your commit message"
    bd sync
    ```
-5. **Clean up** — clear stashes, prune remote branches
-6. **Verify** — all changes committed
+5. **Clean up** - clear stashes, prune remote branches
+6. **Verify** - all changes committed
 7. **Hand off** - provide context for next session
 
 **If commit fails, resolve and retry until it succeeds.**
@@ -71,11 +71,11 @@ Rust NIF (libsql-rs, connection registry, async runtime)
 ### Key Files
 
 **Elixir:**
-- `lib/ecto_libsql.ex` — DBConnection protocol
-- `lib/ecto_libsql/native.ex` — NIF wrappers
-- `lib/ecto_libsql/state.ex` — Connection state
-- `lib/ecto/adapters/libsql.ex` — Main adapter
-- `lib/ecto/adapters/libsql/connection.ex` — SQL generation
+- `lib/ecto_libsql.ex` - DBConnection protocol
+- `lib/ecto_libsql/native.ex` - NIF wrappers
+- `lib/ecto_libsql/state.ex` - Connection state
+- `lib/ecto/adapters/libsql.ex` - Main adapter
+- `lib/ecto/adapters/libsql/connection.ex` - SQL generation
 
 **Rust** (`native/ecto_libsql/src/`):
 
@@ -98,8 +98,8 @@ Rust NIF (libsql-rs, connection registry, async runtime)
 | `tests/` | Test modules |
 
 **Tests:**
-- `test/*.exs` — Elixir tests (adapter, integration, migrations, error handling, Turso)
-- `native/ecto_libsql/src/tests/` — Rust tests (constants, utils, integration)
+- `test/*.exs` - Elixir tests (adapter, integration, migrations, error handling, Turso)
+- `native/ecto_libsql/src/tests/` - Rust tests (constants, utils, integration)
 
 ### Key Data Structures
 
@@ -139,7 +139,7 @@ git checkout -b feature-descriptive-name   # or bugfix-descriptive-name
 - **NEVER run `git clean`** without explicit user approval
 - **NEVER run `git checkout .`** or `git restore .` on the whole repo
 - **NEVER run `git reset --hard`** without explicit user approval
-- Untracked files stay in place across branch switches — this is expected
+- Untracked files stay in place across branch switches - this is expected
 
 ### PR Workflow
 
@@ -158,7 +158,7 @@ git branch -d feature-descriptive-name
 
 ### Pre-Commit Checklist
 
-**STRICT ORDER — do NOT skip steps or reorder:**
+**STRICT ORDER - do NOT skip steps or reorder:**
 
 ```bash
 # 1. Format code (must come FIRST)
@@ -221,11 +221,11 @@ git add . && git commit -m "..."
 
 ## Adding a New NIF Function
 
-**Modern Rustler auto-detects all `#[rustler::nif]` functions — no manual registration needed.**
+**Modern Rustler auto-detects all `#[rustler::nif]` functions - no manual registration needed.**
 
-1. **Choose the right module** — connection lifecycle → `connection.rs`, query execution → `query.rs`, transactions → `transaction.rs`, batch → `batch.rs`, statements → `statement.rs`, cursors → `cursor.rs`, replication → `replication.rs`, metadata → `metadata.rs`, savepoints → `savepoint.rs`
-2. **Define the Rust NIF** with `#[rustler::nif(schedule = "DirtyIo")]` — use `safe_lock` (never `.unwrap()`) — see [Error Handling](#error-handling-patterns)
-3. **Add Elixir wrapper** in `lib/ecto_libsql/native.ex` — NIF stub + safe wrapper using `EctoLibSql.State`
+1. **Choose the right module** - connection lifecycle → `connection.rs`, query execution → `query.rs`, transactions → `transaction.rs`, batch → `batch.rs`, statements → `statement.rs`, cursors → `cursor.rs`, replication → `replication.rs`, metadata → `metadata.rs`, savepoints → `savepoint.rs`
+2. **Define the Rust NIF** with `#[rustler::nif(schedule = "DirtyIo")]` - use `safe_lock` (never `.unwrap()`) - see [Error Handling](#error-handling-patterns)
+3. **Add Elixir wrapper** in `lib/ecto_libsql/native.ex` - NIF stub + safe wrapper using `EctoLibSql.State`
 4. **Add tests** in both Rust (`native/ecto_libsql/src/tests/`) and Elixir (`test/`)
 5. **Update documentation** in `USAGE.md` and `CHANGELOG.md`
 
@@ -242,7 +242,7 @@ git add . && git commit -m "..."
 
 ### Rust Patterns (CRITICAL!)
 
-**NEVER use `.unwrap()` in production code** — see `RUST_ERROR_HANDLING.md` for comprehensive patterns.
+**NEVER use `.unwrap()` in production code** - see `RUST_ERROR_HANDLING.md` for comprehensive patterns.
 
 #### Pattern 1: Lock a Registry
 ```rust
@@ -443,12 +443,12 @@ if entry.conn_id != conn_id {
 
 ### Internal Documentation
 
-- **[USAGE.md](USAGE.md)** — API reference for library users
-- **[README.md](README.md)** — User-facing documentation
-- **[CHANGELOG.md](CHANGELOG.md)** — Version history
-- **[ECTO_MIGRATION_GUIDE.md](ECTO_MIGRATION_GUIDE.md)** — Migrating from PostgreSQL/MySQL
-- **[RUST_ERROR_HANDLING.md](RUST_ERROR_HANDLING.md)** — Error pattern reference
-- **[TESTING.md](TESTING.md)** — Testing strategy and organisation
+- **[USAGE.md](USAGE.md)** - API reference for library users
+- **[README.md](README.md)** - User-facing documentation
+- **[CHANGELOG.md](CHANGELOG.md)** - Version history
+- **[ECTO_MIGRATION_GUIDE.md](ECTO_MIGRATION_GUIDE.md)** - Migrating from PostgreSQL/MySQL
+- **[RUST_ERROR_HANDLING.md](RUST_ERROR_HANDLING.md)** - Error pattern reference
+- **[TESTING.md](TESTING.md)** - Testing strategy and organisation
 
 ### External Documentation
 
