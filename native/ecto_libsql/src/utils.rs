@@ -363,10 +363,10 @@ fn skip_whitespace_and_comments(bytes: &[u8]) -> usize {
 /// Returns true if the statement should use `query()` rather than `execute()`.
 ///
 /// Routes through `query()` when the statement may return rows:
-/// - `SELECT` — always returns rows
-/// - `WITH` — CTE; typically precedes a `SELECT`
-/// - `EXPLAIN` — always returns rows
-/// - `PRAGMA` — may return rows (e.g. `PRAGMA wal_checkpoint(FULL)`)
+/// - `SELECT` - always returns rows
+/// - `WITH` - CTE; typically precedes a `SELECT`
+/// - `EXPLAIN` - always returns rows
+/// - `PRAGMA` - may return rows (e.g. `PRAGMA wal_checkpoint(FULL)`)
 /// - Any statement containing a `RETURNING` clause
 ///
 /// Performance optimisations:
