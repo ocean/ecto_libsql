@@ -16,7 +16,7 @@ git push
 
 ## 2. Create the GitHub release (triggers CI)
 
-The CI workflow triggers on tags matching `*.*.*`. The tag must match the version in `mix.exs` exactly — no `v` prefix, as the `base_url` in `native.ex` uses the raw version string.
+The CI workflow triggers on tags matching `*.*.*`. The tag must match the version in `mix.exs` exactly - no `v` prefix, as the `base_url` in `native.ex` uses the raw version string.
 
 ```bash
 gh release create X.Y.Z --title "vX.Y.Z" --draft --generate-notes
@@ -54,7 +54,7 @@ git commit -m "chore: update checksums for vX.Y.Z"
 git push
 ```
 
-This step is critical — the checksum file must be in the package so Hex.pm users can verify the downloaded NIFs.
+This step is critical - the checksum file must be in the package so Hex.pm users can verify the downloaded NIFs.
 
 ## 6. Publish the GitHub release
 
@@ -72,7 +72,7 @@ mix hex.publish
 
 ## Key Gotchas
 
-- **Tag format**: Use `0.9.1` not `v0.9.1` — the `base_url` in `native.ex` is `releases/download/#{version}`, so the tag and version must match exactly.
+- **Tag format**: Use `0.9.1` not `v0.9.1` - the `base_url` in `native.ex` is `releases/download/#{version}`, so the tag and version must match exactly.
 - **Checksum before publish**: Always regenerate and commit the checksum file *before* `mix hex.publish`. Without it, users get integrity errors when installing.
-- **`--ignore-unavailable`**: Use with caution — only after confirming all 6 CI target builds have succeeded and all 6 release artefacts are present; otherwise it can mask missing binaries.
+- **`--ignore-unavailable`**: Use with caution - only after confirming all 6 CI target builds have succeeded and all 6 release artefacts are present; otherwise it can mask missing binaries.
 - **Test run option**: The `workflow_dispatch` trigger on the release workflow has a `test_only` input that skips the `gh release upload` step, useful for testing the build matrix without creating a real release.
