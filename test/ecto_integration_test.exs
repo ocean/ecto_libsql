@@ -61,7 +61,7 @@ defmodule Ecto.Integration.EctoLibSqlTest do
 
   setup_all do
     # Start the test repo
-    {:ok, _} = TestRepo.start_link(database: @test_db)
+    {:ok, _} = TestRepo.start_link(database: @test_db, pool_size: 1)
 
     # Create tables
     Ecto.Adapters.SQL.query!(TestRepo, """
