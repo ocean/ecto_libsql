@@ -5,6 +5,22 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.9.1] - 2026-05-07
+
+### Fixed
+
+- **PRAGMA Statement Routing** - PRAGMA statements are now correctly routed through the `query()` path rather than the execute path, fixing incorrect behaviour when reading PRAGMA values (e.g. `PRAGMA journal_mode`, `PRAGMA synchronous`) via the Ecto adapter.
+
+### Changed
+
+- **Upstream Status Notice** - Added a note to the README and Hex documentation about Turso's transition away from libSQL toward their new Turso library (a full SQLite rewrite in Rust). `ecto_libsql` will continue to receive bug fixes and security updates; see the README for more context.
+- **Dependency Updates** - Bumped `db_connection` 2.9.0 → 2.10.0, `ecto` 3.13.5 → 3.13.6, `jason` 1.4.4 → 1.4.5, `rustler` 0.37.3 → 0.37.4, `libsql` crates 0.9.29 → 0.9.30, plus various transitive Rust dependency updates.
+- **CI Toolchain** - Replaced `erlef/setup-beam` with `mise` for Elixir/OTP version management; updated to current Elixir/OTP versions; applied `zizmor` GitHub Actions security hardening.
+
+### Security
+
+- Acknowledged three additional `rustls-webpki` 0.102.x advisories (RUSTSEC-2026-0049, RUSTSEC-2026-0098, RUSTSEC-2026-0099, RUSTSEC-2026-0104) in `cargo deny` - all are transitive via libsql's pinned `rustls 0.22.x` dependency and cannot be resolved until libsql updates upstream.
+
 ## [0.9.0] - 2026-02-02
 
 ### Added
@@ -16,7 +32,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`Repo.exists?` Generates Valid SQL** - Fixed empty SELECT clause generating invalid SQL (`SELECT  FROM "users"` instead of `SELECT 1 FROM "users"`), causing syntax errors. (Thanks [@ricardo-valero](https://github.com/ricardo-valero) for [PR #69](https://github.com/ocean/ecto_libsql/pull/69)!)
 - **NIF Cross-Compilation Workflow** - Fixed multiple issues preventing successful cross-compilation in GitHub Actions:
-  - Fixed Cargo workspace target directory mismatch — build output goes to the workspace root `target/` directory, not the crate subdirectory
+  - Fixed Cargo workspace target directory mismatch - build output goes to the workspace root `target/` directory, not the crate subdirectory
   - Moved `.cargo/config.toml` to workspace root so musl `-crt-static` rustflags are found when building from workspace root
   - Added `Cross.toml` for `RUSTLER_NIF_VERSION` environment passthrough to cross containers
   - Consolidated macOS runners to macos-15 (Apple Silicon) for both architectures
