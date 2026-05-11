@@ -632,6 +632,33 @@ defmodule Ecto.Adapters.LibSql.ConnectionTest do
 
       assert sql =~ ~s["id" IN (?2, ?3)]
     end
+
+    test "empty bound IN list generates always-false sentinel" do
+      # Simulates: where(query, [u], u.id in ^[])
+      # After Ecto planning, the empty list becomes {:^, _, [0, 0]}.
+      query = %Ecto.Query{
+        from: %Ecto.Query.FromExpr{source: {"users", nil}},
+        sources: {{"users", nil, nil}},
+        select: %Ecto.Query.SelectExpr{fields: [{:&, [], [0]}]},
+        wheres: [
+          %Ecto.Query.BooleanExpr{
+            op: :and,
+            expr:
+              {:in, [],
+               [
+                 {{:., [], [{:&, [], [0]}, :id]}, [], []},
+                 {:^, [], [0, 0]}
+               ]},
+            params: []
+          }
+        ]
+      }
+
+      sql = Connection.all(query) |> IO.iodata_to_binary()
+
+      # SQLite rejects IN () so the zero-length guard emits an always-false subquery.
+      assert sql =~ ~s["id" IN (SELECT NULL WHERE 1=0)]
+    end
   end
 
   describe "on_conflict insert" do
