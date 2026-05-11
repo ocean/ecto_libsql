@@ -934,6 +934,76 @@ defmodule Ecto.Integration.EctoLibSqlTest do
     end
   end
 
+  describe "upsert via Repo.insert with on_conflict" do
+    # These tests exercise the bug fixed in PR #95: upsert queries were generating
+    # invalid SQL ("near ?: syntax error") because the adapter used bare ? placeholders
+    # instead of the numbered ?1, ?2, ... form that SQLite requires when a statement
+    # contains multiple parameter groups (INSERT values + ON CONFLICT UPDATE).
+
+    test "Repo.insert with on_conflict: :replace_all upserts an existing record" do
+      {:ok, _user} =
+        TestRepo.insert(%User{name: "Alice", email: "alice@example.com"},
+          on_conflict: :replace_all,
+          conflict_target: :email
+        )
+
+      {:ok, updated} =
+        TestRepo.insert(%User{name: "Alice Updated", email: "alice@example.com"},
+          on_conflict: :replace_all,
+          conflict_target: :email
+        )
+
+      # The email is the conflict target - name should reflect the upserted value.
+      assert updated.email == "alice@example.com"
+      assert TestRepo.aggregate(User, :count, :id) == 1
+    end
+
+    test "Repo.insert with on_conflict: :nothing leaves existing record unchanged" do
+      {:ok, original} =
+        TestRepo.insert(%User{name: "Bob", email: "bob@example.com"})
+
+      {:ok, _ignored} =
+        TestRepo.insert(%User{name: "Bob Changed", email: "bob@example.com"},
+          on_conflict: :nothing,
+          conflict_target: :email
+        )
+
+      reloaded = TestRepo.get_by!(User, email: "bob@example.com")
+      assert reloaded.id == original.id
+      assert reloaded.name == "Bob"
+    end
+
+    test "Repo.insert with on_conflict: {:replace, fields} updates only specified fields" do
+      {:ok, original} =
+        TestRepo.insert(%User{name: "Charlie", email: "charlie@example.com", age: 25})
+
+      {:ok, _result} =
+        TestRepo.insert(%User{name: "Charlie New Name", email: "charlie@example.com", age: 99},
+          on_conflict: {:replace, [:name]},
+          conflict_target: :email
+        )
+
+      reloaded = TestRepo.get_by!(User, email: "charlie@example.com")
+      # Name should be updated, age should remain unchanged.
+      assert reloaded.id == original.id
+      assert reloaded.name == "Charlie New Name"
+      assert reloaded.age == 25
+    end
+
+    test "Repo.insert with on_conflict: :replace_all inserts a new record when no conflict" do
+      assert TestRepo.aggregate(User, :count, :id) == 0
+
+      {:ok, user} =
+        TestRepo.insert(%User{name: "Dave", email: "dave@example.com"},
+          on_conflict: :replace_all,
+          conflict_target: :email
+        )
+
+      assert user.id != nil
+      assert TestRepo.aggregate(User, :count, :id) == 1
+    end
+  end
+
   # Helper function to extract errors from changeset
   defp errors_on(changeset) do
     Ecto.Changeset.traverse_errors(changeset, fn {msg, opts} ->

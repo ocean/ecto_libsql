@@ -1263,8 +1263,18 @@ defmodule Ecto.Adapters.LibSql.Connection do
     [expr(left, sources, query), " IN (", args, ?)]
   end
 
-  defp expr({:in, _, [left, {:^, _, [_, length]}]}, sources, query) do
-    args = Enum.intersperse(List.duplicate(??, length), ?,)
+  defp expr({:in, _, [left, {:^, _, [_start_ix, 0]}]}, sources, query) do
+    # Empty IN list - SQLite does not accept IN (), so use always-false predicate.
+    [expr(left, sources, query), " IN (SELECT NULL WHERE 1=0)"]
+  end
+
+  defp expr({:in, _, [left, {:^, _, [start_ix, length]}]}, sources, query) do
+    args =
+      Enum.map(start_ix..(start_ix + length - 1)//1, fn ix ->
+        [?? | Integer.to_string(ix + 1)]
+      end)
+      |> Enum.intersperse(", ")
+
     [expr(left, sources, query), " IN (", args, ?)]
   end
 
