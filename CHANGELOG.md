@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Upsert `ON CONFLICT DO UPDATE` SQL Generation** - Fixed two bugs that caused `"near ?: syntax error"` on any `INSERT ... ON CONFLICT DO UPDATE` query, breaking all upsert operations including Ash Framework's `upsert?` actions. (Thanks [@AlanMcCann](https://github.com/AlanMcCann) for [PR #95](https://github.com/ocean/ecto_libsql/pull/95)!)
+  - Missing `:identifier` expression handler: Ecto generates `ON CONFLICT UPDATE` clauses using `{:identifier, _, ["column_name"]}` fragment expressions. Without a matching `expr/3` clause these fell through to the catch-all, producing invalid SQL such as `SET "col" = EXCLUDED.?`.
+  - Bare `?` parameter placeholders: SQLite requires numbered positional parameters (`?1`, `?2`, …) when a statement contains multiple parameter groups (INSERT values + ON CONFLICT UPDATE). The adapter now uses numbered parameters throughout, consistent with the `ecto_sqlite3` adapter.
+  - `IN` clause with bound list parameters was also left using bare `?` placeholders. The `IN (?, ?, ?)` handler now generates `IN (?1, ?2, ?3)` with correct start-index offsets, matching the numbering scheme used everywhere else.
+  - Empty `IN` list edge case (`where: field in ^[]`) is handled explicitly with `IN (SELECT NULL WHERE 1=0)` since SQLite rejects `IN ()`.
+
 - **PRAGMA Statement Routing** - PRAGMA statements are now correctly routed through the `query()` path rather than the execute path, fixing incorrect behaviour when reading PRAGMA values (e.g. `PRAGMA journal_mode`, `PRAGMA synchronous`) via the Ecto adapter.
 
 ### Changed
