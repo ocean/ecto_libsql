@@ -947,14 +947,16 @@ defmodule Ecto.Integration.EctoLibSqlTest do
           conflict_target: :email
         )
 
-      {:ok, updated} =
+      {:ok, _updated} =
         TestRepo.insert(%User{name: "Alice Updated", email: "alice@example.com"},
           on_conflict: :replace_all,
           conflict_target: :email
         )
 
-      # The email is the conflict target - name should reflect the upserted value.
-      assert updated.email == "alice@example.com"
+      # Fetch from the DB to confirm the change was actually persisted, not just
+      # reflected in the returned struct.
+      reloaded = TestRepo.get_by!(User, email: "alice@example.com")
+      assert reloaded.name == "Alice Updated"
       assert TestRepo.aggregate(User, :count, :id) == 1
     end
 
