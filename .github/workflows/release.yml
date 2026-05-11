@@ -92,7 +92,7 @@ jobs:
 
       - name: Build the project
         id: build-crate
-        uses: philss/rustler-precompiled-action@853ac56183f29a080304df3ff8a194b5bbdc24cc # v1.1.4
+        uses: philss/rustler-precompiled-action@67ed0cc2d6a423e4c4cd9ad651dcc6c90f802cdb # v1.1.5
         with:
           project-name: ecto_libsql
           project-version: ${{ env.PROJECT_VERSION }}
