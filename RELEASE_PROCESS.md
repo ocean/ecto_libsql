@@ -22,7 +22,9 @@ The CI workflow triggers on tags matching `*.*.*`. The tag must match the versio
 gh release create X.Y.Z --title "vX.Y.Z" --draft --generate-notes
 ```
 
-This creates the tag and a draft release. The CI workflow fires and builds all 6 NIF targets, uploading each artefact to the release.
+This creates the tag and a draft release simultaneously. `gh release create --draft` pushes the tag immediately (draft only controls public visibility), which fires the CI `on: push: tags:` trigger. CI builds all 6 NIF targets and uploads each artefact to the draft release via `gh release upload`.
+
+**Order matters**: the draft release must be created *before* (or at the same time as) the tag. If you push the tag separately first, CI fires but fails at the upload step because no release exists yet to attach artefacts to.
 
 ## 3. Wait for all CI jobs to finish
 
