@@ -2213,7 +2213,7 @@ defmodule EctoLibSql.Native do
     consuming connections
   - **Timeline**: Uncertain - marked for future refactoring
 
-  See CLAUDE.md for technical details on why this is not currently supported.
+  See the [architecture notes](https://github.com/ocean/ecto_libsql/blob/main/CLAUDE.md) for technical details on why this is not currently supported.
 
   """
   def freeze_replica(%EctoLibSql.State{conn_id: conn_id} = _state) when is_binary(conn_id) do
