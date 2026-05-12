@@ -41,7 +41,7 @@ All 6 matrix jobs must succeed:
 Once all artefacts are uploaded to the release:
 
 ```bash
-MIX_ENV=prod mix rustler_precompiled.download EctoLibSql.Native --all --ignore-unavailable
+MIX_ENV=prod mix rustler_precompiled.download EctoLibSql.Native --all --ignore-unavailable --no-config
 ```
 
 This downloads every artefact from the GitHub release and regenerates `checksum-Elixir.EctoLibSql.Native.exs`. Verify the file has all 6 entries with fresh sha256 hashes.
