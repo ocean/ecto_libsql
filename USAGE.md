@@ -1,7 +1,7 @@
 # ecto_libsql - Developer Guide (Application Usage)
 
 > **Purpose**: Guide for AI agents helping developers **USE** ecto_libsql in their applications.
-> For **developing/maintaining the library itself**, see [CLAUDE.md](CLAUDE.md).
+> For **developing/maintaining the library itself**, see [CLAUDE.md](https://github.com/ocean/ecto_libsql/blob/main/CLAUDE.md).
 
 ## Table of Contents
 

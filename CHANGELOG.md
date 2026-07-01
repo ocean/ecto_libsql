@@ -9,6 +9,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Upsert `ON CONFLICT DO UPDATE` SQL Generation** - Fixed two bugs that caused `"near ?: syntax error"` on any `INSERT ... ON CONFLICT DO UPDATE` query, breaking all upsert operations including Ash Framework's `upsert?` actions. (Thanks [@AlanMcCann](https://github.com/AlanMcCann) for [PR #95](https://github.com/ocean/ecto_libsql/pull/95)!)
+  - Missing `:identifier` expression handler: Ecto generates `ON CONFLICT UPDATE` clauses using `{:identifier, _, ["column_name"]}` fragment expressions. Without a matching `expr/3` clause these fell through to the catch-all, producing invalid SQL such as `SET "col" = EXCLUDED.?`.
+  - Bare `?` parameter placeholders: SQLite requires numbered positional parameters (`?1`, `?2`, …) when a statement contains multiple parameter groups (INSERT values + ON CONFLICT UPDATE). The adapter now uses numbered parameters throughout, consistent with the `ecto_sqlite3` adapter.
+  - `IN` clause with bound list parameters was also left using bare `?` placeholders. The `IN (?, ?, ?)` handler now generates `IN (?1, ?2, ?3)` with correct start-index offsets, matching the numbering scheme used everywhere else.
+  - Empty `IN` list edge case (`where: field in ^[]`) is handled explicitly with `IN (SELECT NULL WHERE 1=0)` since SQLite rejects `IN ()`.
+
 - **PRAGMA Statement Routing** - PRAGMA statements are now correctly routed through the `query()` path rather than the execute path, fixing incorrect behaviour when reading PRAGMA values (e.g. `PRAGMA journal_mode`, `PRAGMA synchronous`) via the Ecto adapter.
 
 ### Changed
@@ -46,9 +52,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **IN Clause with Ecto.Query.Tagged Structs** - Fixed issue #63 where `~w()` sigil word lists in IN clauses returned zero results due to Tagged struct wrapping. Now properly extracts list values from `Ecto.Query.Tagged` structs before generating IN clauses, enabling these patterns to work correctly.
+- **IN Clause with Tagged Structs** - Fixed issue #63 where `~w()` sigil word lists in IN clauses returned zero results due to Ecto's internal Tagged struct wrapping. Now properly extracts list values from Tagged structs before generating IN clauses, enabling these patterns to work correctly.
 - **SubQuery Support in IN Expressions** - Fixed SubQuery expressions being incorrectly wrapped in `JSON_EACH()`, causing invalid SQL. Now properly generates inline subqueries like `WHERE id IN (SELECT s0.id FROM table AS s0 WHERE ...)`. Fixes compatibility with libraries like Oban that use subqueries in UPDATE...WHERE patterns. (Thanks [@nadilas](https://github.com/nadilas) for PR #66 !)
-- **Ecto.Query.Tagged Expression Handling** - Fixed type-cast fragments (e.g. `type(fragment(...), :integer)`) falling through to catch-all expression handler and generating incorrect parameter placeholders. Now properly handles `%Ecto.Query.Tagged{}` structs that Ecto's query planner creates from `{:type, _, [expr, type]}` AST nodes. Fixes parameter count mismatches with Hrana/Turso. (Thanks [@nadilas](https://github.com/nadilas) for PR #67 !)
+- **Tagged Expression Handling** - Fixed type-cast fragments (e.g. `type(fragment(...), :integer)`) falling through to catch-all expression handler and generating incorrect parameter placeholders. Now properly handles Ecto's internal Tagged structs that the query planner creates from `{:type, _, [expr, type]}` AST nodes. Fixes parameter count mismatches with Hrana/Turso. (Thanks [@nadilas](https://github.com/nadilas) for PR #67 !)
 
 ## [0.8.8] - 2026-01-23
 

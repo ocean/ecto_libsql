@@ -579,6 +579,88 @@ defmodule Ecto.Adapters.LibSql.ConnectionTest do
     end
   end
 
+  describe "IN clause parameter numbering" do
+    test "generates numbered parameters for bound IN list" do
+      # Simulates: where(query, [u], u.id in ^[1, 2, 3])
+      # {:^, _, [start_ix, length]} where start_ix=0, length=3.
+      query = %Ecto.Query{
+        from: %Ecto.Query.FromExpr{source: {"users", nil}},
+        sources: {{"users", nil, nil}},
+        select: %Ecto.Query.SelectExpr{fields: [{:&, [], [0]}]},
+        wheres: [
+          %Ecto.Query.BooleanExpr{
+            op: :and,
+            expr:
+              {:in, [],
+               [
+                 {{:., [], [{:&, [], [0]}, :id]}, [], []},
+                 {:^, [], [0, 3]}
+               ]},
+            params: []
+          }
+        ]
+      }
+
+      sql = Connection.all(query) |> IO.iodata_to_binary()
+
+      # All three IN parameters must be numbered (?1, ?2, ?3), not bare ?.
+      assert sql =~ ~s["id" IN (?1, ?2, ?3)]
+    end
+
+    test "IN parameter numbering is consistent with non-zero start index" do
+      # Simulates a query where previous bound params occupy ?1.
+      # start_ix=1, length=2 → should produce ?2, ?3.
+      query = %Ecto.Query{
+        from: %Ecto.Query.FromExpr{source: {"users", nil}},
+        sources: {{"users", nil, nil}},
+        select: %Ecto.Query.SelectExpr{fields: [{:&, [], [0]}]},
+        wheres: [
+          %Ecto.Query.BooleanExpr{
+            op: :and,
+            expr:
+              {:in, [],
+               [
+                 {{:., [], [{:&, [], [0]}, :id]}, [], []},
+                 {:^, [], [1, 2]}
+               ]},
+            params: []
+          }
+        ]
+      }
+
+      sql = Connection.all(query) |> IO.iodata_to_binary()
+
+      assert sql =~ ~s["id" IN (?2, ?3)]
+    end
+
+    test "empty bound IN list generates always-false sentinel" do
+      # Simulates: where(query, [u], u.id in ^[])
+      # After Ecto planning, the empty list becomes {:^, _, [0, 0]}.
+      query = %Ecto.Query{
+        from: %Ecto.Query.FromExpr{source: {"users", nil}},
+        sources: {{"users", nil, nil}},
+        select: %Ecto.Query.SelectExpr{fields: [{:&, [], [0]}]},
+        wheres: [
+          %Ecto.Query.BooleanExpr{
+            op: :and,
+            expr:
+              {:in, [],
+               [
+                 {{:., [], [{:&, [], [0]}, :id]}, [], []},
+                 {:^, [], [0, 0]}
+               ]},
+            params: []
+          }
+        ]
+      }
+
+      sql = Connection.all(query) |> IO.iodata_to_binary()
+
+      # SQLite rejects IN () so the zero-length guard emits an always-false subquery.
+      assert sql =~ ~s["id" IN (SELECT NULL WHERE 1=0)]
+    end
+  end
+
   describe "on_conflict insert" do
     test "generates INSERT with ON CONFLICT DO NOTHING (no target)" do
       sql =
@@ -595,7 +677,7 @@ defmodule Ecto.Adapters.LibSql.ConnectionTest do
 
       assert sql =~ ~s[INSERT INTO "users"]
       assert sql =~ ~s[("name", "email")]
-      assert sql =~ "VALUES (?, ?)"
+      assert sql =~ "VALUES (?1, ?2)"
       assert sql =~ "ON CONFLICT DO NOTHING"
     end
 
@@ -614,7 +696,7 @@ defmodule Ecto.Adapters.LibSql.ConnectionTest do
 
       assert sql =~ ~s[INSERT INTO "users"]
       assert sql =~ ~s[("name", "email")]
-      assert sql =~ "VALUES (?, ?)"
+      assert sql =~ "VALUES (?1, ?2)"
       assert sql =~ ~s[ON CONFLICT ("email") DO NOTHING]
     end
 
@@ -633,7 +715,7 @@ defmodule Ecto.Adapters.LibSql.ConnectionTest do
 
       assert sql =~ ~s[INSERT INTO "locations"]
       assert sql =~ ~s[("slug", "parent_slug", "name")]
-      assert sql =~ "VALUES (?, ?, ?)"
+      assert sql =~ "VALUES (?1, ?2, ?3)"
       assert sql =~ ~s[ON CONFLICT ("slug", "parent_slug") DO NOTHING]
     end
 
@@ -652,7 +734,7 @@ defmodule Ecto.Adapters.LibSql.ConnectionTest do
 
       assert sql =~ ~s[INSERT INTO "users"]
       assert sql =~ ~s[("name", "email")]
-      assert sql =~ "VALUES (?, ?)"
+      assert sql =~ "VALUES (?1, ?2)"
       assert sql =~ ~s[ON CONFLICT ("email") DO UPDATE SET]
       assert sql =~ ~s["name" = excluded."name"]
       assert sql =~ ~s["email" = excluded."email"]
@@ -673,7 +755,7 @@ defmodule Ecto.Adapters.LibSql.ConnectionTest do
 
       assert sql =~ ~s[INSERT INTO "users"]
       assert sql =~ ~s[("name", "email", "updated_at")]
-      assert sql =~ "VALUES (?, ?, ?)"
+      assert sql =~ "VALUES (?1, ?2, ?3)"
       assert sql =~ ~s[ON CONFLICT ("email") DO UPDATE SET]
       assert sql =~ ~s["name" = excluded."name"]
       assert sql =~ ~s["updated_at" = excluded."updated_at"]
@@ -687,7 +769,7 @@ defmodule Ecto.Adapters.LibSql.ConnectionTest do
 
       assert sql =~ ~s[INSERT INTO "users"]
       assert sql =~ ~s[("name", "email")]
-      assert sql =~ "VALUES (?, ?)"
+      assert sql =~ "VALUES (?1, ?2)"
       refute sql =~ "ON CONFLICT"
     end
 
@@ -706,7 +788,7 @@ defmodule Ecto.Adapters.LibSql.ConnectionTest do
 
       assert sql =~ ~s[INSERT INTO "users"]
       assert sql =~ ~s[("name", "email")]
-      assert sql =~ "VALUES (?, ?)"
+      assert sql =~ "VALUES (?1, ?2)"
       refute sql =~ "ON CONFLICT"
     end
 
@@ -737,7 +819,7 @@ defmodule Ecto.Adapters.LibSql.ConnectionTest do
 
       assert sql =~ ~s[INSERT INTO "users"]
       assert sql =~ ~s[("name", "email")]
-      assert sql =~ "VALUES (?, ?)"
+      assert sql =~ "VALUES (?1, ?2)"
       assert sql =~ ~s[ON CONFLICT ("email") DO UPDATE SET]
       assert sql =~ ~s["name" = 'updated_name']
     end
