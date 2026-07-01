@@ -69,6 +69,7 @@
     "deny": [],
     "ask": []
   },
+  "autoMemoryEnabled": true,
   "enableAllProjectMcpServers": true,
   "enabledMcpjsonServers": [],
   "hooks": {
