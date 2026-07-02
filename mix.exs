@@ -57,7 +57,7 @@ defmodule EctoLibSql.MixProject do
       {:ecto_sql, "~> 3.11"},
       {:ex_doc, "~> 0.31", only: :dev, runtime: false},
       {:jason, "~> 1.4"},
-      {:rustler, "~> 0.37.1", optional: not (@dev? or @force_build?)},
+      {:rustler, "~> 0.38", optional: not (@dev? or @force_build?)},
       {:rustler_precompiled, "~> 0.8"},
       {:sobelow, "~> 0.13", only: [:dev, :test], runtime: false},
       {:stream_data, "~> 1.0", only: [:dev, :test]}

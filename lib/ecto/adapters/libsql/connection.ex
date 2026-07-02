@@ -753,7 +753,7 @@ defmodule Ecto.Adapters.LibSql.Connection do
   end
 
   @impl true
-  def insert(prefix, table, header, rows, on_conflict, returning, placeholders) do
+  def insert(prefix, table, header, rows, on_conflict, returning, placeholders, _opts \\ []) do
     counter_offset = length(placeholders) + 1
     fields = intersperse_map(header, ", ", &quote_name/1)
 
@@ -845,8 +845,6 @@ defmodule Ecto.Adapters.LibSql.Connection do
 
   # Fallback for other on_conflict values (including plain :raise, etc.)
   defp on_conflict(_on_conflict, _header, _placeholders), do: []
-
-  defp conflict_target([]), do: []
 
   defp conflict_target(targets) do
     ["(", intersperse_map(targets, ", ", &quote_name/1), ") "]
