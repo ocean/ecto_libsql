@@ -719,6 +719,56 @@ defmodule TursoRemoteTest do
   end
 
   describe "embedded replica with sync" do
+    test "a fresh replica sees existing remote rows without a manual sync", %{table_name: table} do
+      # Regression test for #118. LibSQL pushes local writes to the primary on its own,
+      # but it never pulls remote changes unless sync() is called, so before the initial
+      # sync was added to connect/1 a freshly opened replica read from an empty local
+      # file and returned nothing here.
+      {:ok, remote_state} = EctoLibSql.connect(uri: @turso_uri, auth_token: @turso_token)
+
+      {:ok, _, _, remote_state} =
+        EctoLibSql.handle_execute(
+          "CREATE TABLE IF NOT EXISTS #{table} (id INTEGER PRIMARY KEY, value TEXT)",
+          [],
+          [],
+          remote_state
+        )
+
+      {:ok, _, _, remote_state} =
+        EctoLibSql.handle_execute(
+          "INSERT INTO #{table} (id, value) VALUES (?, ?)",
+          [1, "written_before_replica_existed"],
+          [],
+          remote_state
+        )
+
+      EctoLibSql.disconnect([], remote_state)
+
+      local_db = "z_ecto_libsql_test-initial_sync_#{:erlang.unique_integer([:positive])}.db"
+      on_exit(fn -> cleanup_local_db(local_db) end)
+
+      {:ok, replica_state} =
+        EctoLibSql.connect(
+          database: local_db,
+          uri: @turso_uri,
+          auth_token: @turso_token,
+          sync: true
+        )
+
+      # Read immediately, with no intervening EctoLibSql.Native.sync/1 call.
+      {:ok, _, result, replica_state} =
+        EctoLibSql.handle_execute(
+          "SELECT value FROM #{table} WHERE id = ?",
+          [1],
+          [],
+          replica_state
+        )
+
+      assert result.rows == [["written_before_replica_existed"]]
+
+      EctoLibSql.disconnect([], replica_state)
+    end
+
     test "automatic sync from local to remote", %{table_name: table} do
       # Create unique local database file for this test
       local_db = "z_ecto_libsql_test-replica_#{:erlang.unique_integer([:positive])}.db"
