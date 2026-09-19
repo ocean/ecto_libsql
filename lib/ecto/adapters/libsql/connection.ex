@@ -1218,8 +1218,7 @@ defmodule Ecto.Adapters.LibSql.Connection do
   end
 
   # Ecto plans a negative literal as unary minus, so `ago(14, "day")` arrives as
-  # `{:datetime_add, _, [_, {:-, _, [14]}, "day"]}` once the query is cached. Without
-  # this clause the count falls through to the catch-all "?" and the interval is lost.
+  # `{:datetime_add, _, [_, {:-, _, [14]}, "day"]}` once the query is cached.
   defp expr({:-, _, [arg]}, sources, query) do
     [?-, ?(, expr(arg, sources, query), ?)]
   end
@@ -1253,11 +1252,8 @@ defmodule Ecto.Adapters.LibSql.Connection do
     [expr(left, sources, query), " >= ", expr(right, sources, query)]
   end
 
-  # Arithmetic. Without these an expression like `where: s.count + 1 > 5` falls
-  # through to the catch-all at the bottom of expr/3 and is emitted as a bare "?",
-  # which binds to nothing: the query becomes `WHERE (? > 5)` and quietly matches
-  # no rows, and `select: s.count + 1` returns nil. Parenthesised so precedence
-  # survives nesting.
+  # Parenthesised so precedence survives nesting: `(s.count + 2) * 2` has to keep
+  # its grouping rather than being reassociated.
   defp expr({op, _, [left, right]}, sources, query) when op in [:+, :-, :*, :/] do
     [
       ?(,
@@ -1408,17 +1404,12 @@ defmodule Ecto.Adapters.LibSql.Connection do
   defp expr(false, _sources, _query), do: "0"
   defp expr(nil, _sources, _query), do: "NULL"
 
-  # `ago/2` and `from_now/2` lower to these. Without a clause they fall through to
-  # the catch-all below, which emits a bare "?" - so the interval is dropped, only
-  # the datetime parameter binds, and the comparison silently degrades to
-  # `column > now()`. Every expiry window built on `ago/2` then matches nothing
-  # older than the current second.
+  # `ago/2` and `from_now/2` lower to these.
   #
-  # Timestamps are stored by `datetime_encode/1` as `DateTime.to_iso8601/1`, so the
-  # result has to be formatted the same way to compare correctly as text. The two
-  # formats agree to the second; a value carrying sub-second precision, or a naive
-  # column with no "Z", can therefore land on the wrong side of a bound only when it
-  # ties the cutoff to the exact second.
+  # `datetime_encode/1` stores timestamps via `DateTime.to_iso8601/1`, so the cutoff
+  # is rendered the same way to compare correctly as text. The two formats agree to
+  # the second, so a value carrying sub-second precision can land on the wrong side
+  # of a bound when it ties the cutoff to that exact second - see issue #128.
   defp expr({:datetime_add, _, [datetime, count, interval]}, sources, query) do
     [
       "strftime('%Y-%m-%dT%H:%M:%SZ', ",
@@ -1439,7 +1430,11 @@ defmodule Ecto.Adapters.LibSql.Connection do
     ]
   end
 
-  # Default fallback for unsupported expressions
+  # Fallback for expressions no clause above handles. It emits a placeholder that
+  # nothing binds to, so an unhandled expression produces a silently wrong result
+  # rather than an error: `where: s.count + 1 > 5` would become `WHERE (? > 5)` and
+  # match nothing. New expression types therefore need their own clause rather than
+  # being left to reach this one.
   defp expr(_expr, _sources, _query) do
     "?"
   end

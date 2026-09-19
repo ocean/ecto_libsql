@@ -1,15 +1,14 @@
 defmodule EctoLibSql.EctoDatetimeIntervalTest do
   @moduledoc """
   Coverage for `ago/2` and `from_now/2`, which Ecto lowers to `datetime_add` and
-  `date_add`.
+  `date_add`: window boundaries, each supported unit, interpolated counts, and
+  `date_add` against a date column.
 
-  Neither had an `expr/3` clause, so both fell through to the catch-all that emits a
-  bare "?" and the interval was dropped: `inserted_at > ago(14, "day")` became
-  `inserted_at > ?` bound to the current time. Nothing raised - Ecto plans the
-  parameters regardless of how many placeholders the adapter emits, and SQLite
-  ignores an unreferenced one - so the comparison silently degraded to
-  `column > now()` and rejected anything older than the current second while never
-  enforcing the interval at all.
+  An interval reaching `expr/3`'s fallback clause is dropped rather than rejected,
+  leaving `column > now()`: Ecto plans the parameters regardless of how many
+  placeholders the adapter emits, and SQLite ignores an unreferenced one, so nothing
+  raises. These therefore assert on which rows come back, and that the interval
+  reaches the SQL at all.
   """
   use ExUnit.Case, async: false
 
