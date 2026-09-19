@@ -1230,26 +1230,32 @@ defmodule Ecto.Adapters.LibSql.Connection do
 
   # Comparison operations
   defp expr({:==, _, [left, right]}, sources, query) do
+    reject_unsupported_datetime_precision!(left, right, sources)
     [expr(left, sources, query), " = ", expr(right, sources, query)]
   end
 
   defp expr({:!=, _, [left, right]}, sources, query) do
+    reject_unsupported_datetime_precision!(left, right, sources)
     [expr(left, sources, query), " != ", expr(right, sources, query)]
   end
 
   defp expr({:<, _, [left, right]}, sources, query) do
+    reject_unsupported_datetime_precision!(left, right, sources)
     [expr(left, sources, query), " < ", expr(right, sources, query)]
   end
 
   defp expr({:>, _, [left, right]}, sources, query) do
+    reject_unsupported_datetime_precision!(left, right, sources)
     [expr(left, sources, query), " > ", expr(right, sources, query)]
   end
 
   defp expr({:<=, _, [left, right]}, sources, query) do
+    reject_unsupported_datetime_precision!(left, right, sources)
     [expr(left, sources, query), " <= ", expr(right, sources, query)]
   end
 
   defp expr({:>=, _, [left, right]}, sources, query) do
+    reject_unsupported_datetime_precision!(left, right, sources)
     [expr(left, sources, query), " >= ", expr(right, sources, query)]
   end
 
@@ -1462,6 +1468,54 @@ defmodule Ecto.Adapters.LibSql.Connection do
 
     ["CAST(", amount, " AS TEXT) || ' ", unit, ?']
   end
+
+  # SQLite's date and time functions work to millisecond precision - they round a
+  # microsecond input at parse time, so `strftime('%f', '...01.000900Z')` is
+  # `01.001`. A cutoff produced by datetime_add/date_add therefore cannot represent
+  # the microseconds a *_usec column stores, and a row landing inside the cutoff
+  # second compares on the wrong side of it. No SQLite date function avoids this,
+  # julianday/1 included, so the comparison is rejected rather than answered
+  # incorrectly. Second-precision columns are exact and unaffected. See issue #128.
+  @usec_datetime_types [:utc_datetime_usec, :naive_datetime_usec]
+
+  defp reject_unsupported_datetime_precision!(left, right, sources) do
+    if datetime_shift?(left) or datetime_shift?(right) do
+      Enum.each([left, right], fn side ->
+        type = field_type(side, sources)
+
+        if type in @usec_datetime_types do
+          raise ArgumentError, """
+          cannot compare a #{inspect(type)} column against ago/2 or from_now/2.
+
+          SQLite's date and time functions parse to millisecond precision, so the \
+          cutoff cannot carry the microseconds this column stores and rows inside \
+          the cutoff second would be filtered incorrectly.
+
+          Use :utc_datetime or :naive_datetime for columns compared this way, or \
+          compute the cutoff in Elixir and compare against it directly.
+          """
+        end
+      end)
+    end
+  end
+
+  defp datetime_shift?({op, _, _}) when op in [:datetime_add, :date_add], do: true
+  defp datetime_shift?(_other), do: false
+
+  defp field_type({{:., _, [{:&, _, [idx]}, field]}, _, []}, sources)
+       when is_atom(field) and is_tuple(sources) and tuple_size(sources) > idx do
+    case elem(sources, idx) do
+      {_source, _name, schema} when is_atom(schema) and not is_nil(schema) ->
+        if Code.ensure_loaded?(schema) and function_exported?(schema, :__schema__, 2) do
+          schema.__schema__(:type, field)
+        end
+
+      _other ->
+        nil
+    end
+  end
+
+  defp field_type(_expr, _sources), do: nil
 
   defp combination(%{combinations: []}, _as_prefix), do: []
 
