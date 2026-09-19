@@ -358,8 +358,14 @@ defmodule EctoLibSql do
       # Releasing a savepoint leaves the enclosing transaction open, so the
       # state - trx_id included - carries through untouched.
       case EctoLibSql.Native.release_savepoint_by_name(state, @savepoint) do
-        :ok -> {:ok, %EctoLibSql.Result{}, state}
-        {:error, reason} -> {:error, savepoint_error(reason), state}
+        :ok ->
+          {:ok, %EctoLibSql.Result{}, state}
+
+        # A failed RELEASE leaves the savepoint stack indeterminate with the
+        # enclosing transaction still open, so the connection cannot safely be
+        # reused. Disconnect, as the non-savepoint branch below already does.
+        {:error, reason} ->
+          {:disconnect, savepoint_error(reason), state}
       end
     else
       case EctoLibSql.Native.commit(
@@ -390,7 +396,11 @@ defmodule EctoLibSql do
            :ok <- EctoLibSql.Native.release_savepoint_by_name(state, @savepoint) do
         {:ok, %EctoLibSql.Result{}, state}
       else
-        {:error, reason} -> {:error, savepoint_error(reason), state}
+        # Either step failing leaves the savepoint stack indeterminate: a failed
+        # ROLLBACK TO says nothing about what was undone, and a failed RELEASE
+        # leaves the savepoint live so the next one of the same name nests inside
+        # it. Neither is safe to hand back to the pool.
+        {:error, reason} -> {:disconnect, savepoint_error(reason), state}
       end
     else
       case EctoLibSql.Native.rollback(state) do
