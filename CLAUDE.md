@@ -317,6 +317,27 @@ cd native/ecto_libsql && cargo test -- --nocapture  # Rust output with stdout
 for i in {1..10}; do mix test test/file.exs:42; done # Flush out race conditions
 ```
 
+### ⚠️ `mix test` does NOT exercise your Rust changes
+
+The NIF is loaded via `RustlerPrecompiled`, so `mix test` uses the **downloaded** artefact
+for the current version and silently ignores edits under `native/ecto_libsql/src`. Rust
+changes can appear fully green while never having been loaded. To test them for real:
+
+```bash
+export ECTO_LIBSQL_BUILD=1          # force a source build
+MIX_ENV=test mix compile --force    # --force required; plain `mix compile` no-ops
+ERL_FLAGS="+sssdio 8192" mix test   # debug builds need a larger dirty-IO stack
+```
+
+- `--force` is required: without a changed Elixir file Mix skips the crate build entirely.
+- `_build/dev` and `_build/test` hold separate NIFs - rebuild for the env you are using.
+- `ERL_FLAGS="+sssdio 8192"` avoids a `SIGBUS` (exit 138) VM abort. `native.ex` selects
+  `mode: :debug` for dev/test and debug-built libSQL overflows the default dirty-IO
+  scheduler stack, usually on the first remote connection, so it looks unrelated.
+
+Check for `Compiling crate ecto_libsql` in the output; `Copying NIF from cache` means you
+are still on the precompiled artefact. See [TESTING.md](TESTING.md) for detail.
+
 ### Test Variable Naming Conventions
 
 Use consistent variable names by scope:

@@ -62,6 +62,10 @@ pub fn connect(opts: Term, mode: Term) -> NifResult<String> {
     let remote_encryption_key = map
         .get("remote_encryption_key")
         .and_then(|t| t.decode::<String>().ok());
+    let sync_enabled = map
+        .get("sync")
+        .and_then(|t| t.decode::<bool>().ok())
+        .unwrap_or(false);
 
     // Wrap the entire connection process with a timeout using the global runtime.
     TOKIO_RUNTIME.block_on(async {
@@ -135,6 +139,16 @@ pub fn connect(opts: Term, mode: Term) -> NifResult<String> {
                 }
             }
             .map_err(|e| rustler::Error::Term(Box::new(format!("Failed to build DB: {e}"))))?;
+
+            // Pull the current state of the primary before serving any reads. LibSQL pushes
+            // writes to the primary on its own, but it never pulls remote changes unless
+            // sync() is called, so without this a freshly opened replica reads from an empty
+            // or stale local file.
+            if mode_enum == Mode::RemoteReplica && sync_enabled {
+                db.sync().await.map_err(|e| {
+                    rustler::Error::Term(Box::new(format!("Failed initial sync: {e}")))
+                })?;
+            }
 
             let conn = db
                 .connect()

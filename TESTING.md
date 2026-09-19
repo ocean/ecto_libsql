@@ -362,6 +362,47 @@ test tests::registry_tests::test_uuid_generation ... ok
 test result: ok. 19 passed; 0 failed; 0 ignored
 ```
 
+### ⚠️ Exercising Rust changes from the Elixir suite
+
+`cargo test` covers the Rust in isolation, but `mix test` does **not** pick up your Rust
+changes by default. `EctoLibSql.Native` is built on `RustlerPrecompiled`, so the NIF is
+downloaded from the release artefacts for the current version, and an edit to
+`native/ecto_libsql/src` is silently ignored. A change can look completely green locally
+while never having been loaded.
+
+To run the Elixir suite against locally built Rust:
+
+```bash
+export ECTO_LIBSQL_BUILD=1          # force a source build instead of the precompiled NIF
+MIX_ENV=test mix compile --force    # --force is required; plain `mix compile` no-ops
+ERL_FLAGS="+sssdio 8192" mix test
+```
+
+Three things to watch:
+
+- **`--force` is not optional.** Setting `ECTO_LIBSQL_BUILD` alone is not enough, because
+  Mix sees no changed Elixir files and skips the compile that triggers the crate build.
+- **Each `MIX_ENV` has its own NIF.** `_build/dev` and `_build/test` hold separate copies,
+  so building for one leaves the other stale. Rebuild for the env you are about to use.
+- **`ERL_FLAGS="+sssdio 8192"` is needed for local builds.** `lib/ecto_libsql/native.ex`
+  selects `mode: :debug` for `:dev` and `:test`, and debug-built libSQL overflows the
+  default dirty-IO scheduler stack, aborting the VM with `SIGBUS` (exit 138) - typically
+  on the first remote connection, which makes it look like an unrelated failure. These
+  NIFs run with `schedule = "DirtyIo"`, so `+sssdio` is the stack size that matters. The
+  precompiled artefacts are release builds and do not need this.
+
+Confirm you are actually running your own build - this line means the crate compiled:
+
+```
+Compiling crate ecto_libsql in debug mode (native/ecto_libsql)
+```
+
+whereas this line means you are still on the precompiled NIF:
+
+```
+[debug] Copying NIF from cache and extracting to .../libecto_libsql-vX.Y.Z-....so
+```
+
 ### Elixir Tests
 
 ```bash

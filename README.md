@@ -363,9 +363,11 @@ EctoLibSql.handle_execute("SELECT * FROM users", [], [], state)
 ```
 
 **How automatic sync works:**
-- Initial sync happens when you first connect
-- Changes are synced automatically in the background
-- You don't need to call `sync/1` in most applications
+- An initial sync runs when you first connect, so the replica starts from the current
+  state of the primary rather than an empty or stale local file
+- Your own writes are pushed to the primary automatically as you make them
+- Remote changes made *after* you connect are **not** pulled in the background - call
+  `sync/1` when you need to observe them
 
 #### Manual Sync Control
 

@@ -5,7 +5,15 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.9.1] - 2026-05-07
+## [Unreleased]
+
+### Fixed
+
+- **Embedded Replica Initial Sync** - `connect/1` now performs an initial sync before serving any reads when an embedded replica is opened with `sync: true`. LibSQL pushes local writes to the primary on its own, but it never pulls remote changes unless `sync/1` is called, so a freshly opened replica read from an empty or stale local file - contradicting the README's claim that initial sync happens when you first connect. (Reported in [#118](https://github.com/ocean/ecto_libsql/issues/118))
+
+### Changed
+
+- **Replica Sync Documentation** - Corrected the README's description of automatic sync. Remote changes made *after* you connect are not pulled in the background; `sync/1` is still required to observe them.
 
 ### Fixed
 
