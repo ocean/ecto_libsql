@@ -1253,6 +1253,23 @@ defmodule Ecto.Adapters.LibSql.Connection do
     [expr(left, sources, query), " >= ", expr(right, sources, query)]
   end
 
+  # Arithmetic. Without these an expression like `where: s.count + 1 > 5` falls
+  # through to the catch-all at the bottom of expr/3 and is emitted as a bare "?",
+  # which binds to nothing: the query becomes `WHERE (? > 5)` and quietly matches
+  # no rows, and `select: s.count + 1` returns nil. Parenthesised so precedence
+  # survives nesting.
+  defp expr({op, _, [left, right]}, sources, query) when op in [:+, :-, :*, :/] do
+    [
+      ?(,
+      expr(left, sources, query),
+      ?\s,
+      Atom.to_string(op),
+      ?\s,
+      expr(right, sources, query),
+      ?)
+    ]
+  end
+
   # Boolean logic
   defp expr({:and, _, [left, right]}, sources, query) do
     [?(, expr(left, sources, query), " AND ", expr(right, sources, query), ?)]
