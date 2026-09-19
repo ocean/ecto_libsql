@@ -5,10 +5,10 @@ defmodule EctoLibSql.EctoSandboxSavepointTest do
 
   The sandbox holds one transaction open for the duration of each test and rolls it
   back afterwards, so every `Repo.transaction/1` in application code runs nested and
-  is issued by DBConnection with `mode: :savepoint`. Without SAVEPOINT support in
-  `handle_begin/2` that mode is discarded, a plain BEGIN is issued inside the open
-  transaction, and the test fails with "cannot start a transaction within a
-  transaction" - meaning no transactional application code can be tested at all.
+  is issued with `mode: :savepoint`. If that mode is not honoured in `handle_begin/2`
+  a plain BEGIN is issued inside the open transaction and SQLite rejects it with
+  "cannot start a transaction within a transaction", which would leave no
+  transactional application code testable at all.
   """
   use ExUnit.Case, async: false
 

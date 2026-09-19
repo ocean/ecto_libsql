@@ -1,11 +1,12 @@
 defmodule EctoLibSql.EctoArithmeticTest do
   @moduledoc """
-  Coverage for arithmetic in query expressions.
+  Coverage for `+`, `-`, `*` and `/` in query expressions: filtering on a computed
+  value, arithmetic in `select`, nested precedence, interpolated operands and
+  column-to-column arithmetic.
 
-  `expr/3` had no clause for `+`, `-`, `*` or `/`, so any arithmetic fell through to
-  the catch-all that emits a bare "?". Nothing bound to that placeholder, so
-  `where: s.count + 1 > 5` became `WHERE (? > 5)` and matched nothing, while
-  `select: s.count + 1` returned nil. Neither raised.
+  Arithmetic reaching `expr/3`'s fallback clause is emitted as a bare "?" that binds
+  to nothing, which yields a wrong answer rather than an error. These therefore
+  assert on the values returned, not only on the SQL generated.
   """
   use ExUnit.Case, async: false
 
