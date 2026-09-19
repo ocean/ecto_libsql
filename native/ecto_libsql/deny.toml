@@ -88,6 +88,10 @@ ignore = [
     # rustls-webpki 0.102.x reachable panic in CRL parsing via empty BIT STRING in IssuingDistributionPoint
     # Fix available in >=0.103.13 but libsql pins rustls 0.22.x which requires 0.102.x - waiting for upstream update
     { id = "RUSTSEC-2026-0104", reason = "Transitive dependency of libsql via rustls 0.22, waiting for upstream update" },
+    # h2 0.3.x queues empty DATA frames without limit (low severity, affects unbounded peers)
+    # Fix only exists in h2 >=0.4.16, but hyper 0.14 (via tonic 0.11) requires h2 0.3.x and
+    # 0.3.27 is the final 0.3.x release, so `cargo update -p h2` cannot resolve this
+    { id = "RUSTSEC-2026-0258", reason = "Transitive dependency of libsql via hyper 0.14/tonic 0.11, waiting for upstream update" },
 ]
 # If this is true, then cargo deny will use the git executable to fetch advisory database.
 # If this is false, then it uses a built-in git library.

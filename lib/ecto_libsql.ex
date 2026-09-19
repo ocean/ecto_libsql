@@ -302,6 +302,12 @@ defmodule EctoLibSql do
     |> Enum.map(fn [_full, name] -> name end)
   end
 
+  # DBConnection drives nested transactions with `mode: :savepoint`. SQLite allows
+  # duplicate savepoint names and resolves RELEASE/ROLLBACK TO against the most
+  # recent match, so one fixed name nests correctly - the same approach postgrex
+  # takes with "postgrex_savepoint".
+  @savepoint "ecto_libsql_savepoint"
+
   @impl true
   @doc """
   Begins a new database transaction.
@@ -309,10 +315,29 @@ defmodule EctoLibSql do
   The transaction behaviour (deferred/immediate/exclusive) can be controlled
   via options passed to the Native module.
   """
-  def handle_begin(_opts, state) do
-    case EctoLibSql.Native.begin(state) do
-      {:ok, new_state} -> {:ok, :begin, new_state}
-      {:error, reason} -> {:error, reason, state}
+  def handle_begin(opts, state) do
+    # `:mode` is overloaded here: DBConnection sets `:transaction` or `:savepoint`,
+    # while this adapter's own API uses it for the libSQL transaction mode
+    # (`:deferred`, `:immediate`, `:exclusive`, `:read_only`). Only `:savepoint` is
+    # intercepted; everything else, including an absent mode, begins as before so
+    # the transaction modes keep working.
+    case {Keyword.get(opts, :mode), state.trx_id} do
+      {:savepoint, trx_id} when is_binary(trx_id) ->
+        case EctoLibSql.Native.create_savepoint(state, @savepoint) do
+          :ok -> {:ok, %EctoLibSql.Result{}, state}
+          {:error, reason} -> {:error, savepoint_error(reason), state}
+        end
+
+      {:savepoint, nil} ->
+        # A savepoint outside a transaction is not something SQLite can honour.
+        # Report status and let DBConnection decide rather than emitting bad SQL.
+        {:idle, state}
+
+      _other ->
+        case EctoLibSql.Native.begin(state) do
+          {:ok, new_state} -> {:ok, :begin, new_state}
+          {:error, reason} -> {:error, reason, state}
+        end
     end
   end
 
@@ -328,15 +353,24 @@ defmodule EctoLibSql do
   The state must contain a valid transaction ID. For embedded replicas with
   auto-sync enabled, this will also trigger a sync to the remote database.
   """
-  def handle_commit(_opts, state) do
-    case EctoLibSql.Native.commit(
-           %EctoLibSql.State{conn_id: conn_id, trx_id: _trx_id, mode: mode} = state
-         ) do
-      {:ok, _} ->
-        {:ok, %EctoLibSql.Result{}, %EctoLibSql.State{conn_id: conn_id, mode: mode}}
+  def handle_commit(opts, state) do
+    if Keyword.get(opts, :mode, :transaction) == :savepoint do
+      # Releasing a savepoint leaves the enclosing transaction open, so the
+      # state - trx_id included - carries through untouched.
+      case EctoLibSql.Native.release_savepoint_by_name(state, @savepoint) do
+        :ok -> {:ok, %EctoLibSql.Result{}, state}
+        {:error, reason} -> {:error, savepoint_error(reason), state}
+      end
+    else
+      case EctoLibSql.Native.commit(
+             %EctoLibSql.State{conn_id: conn_id, trx_id: _trx_id, mode: mode} = state
+           ) do
+        {:ok, _} ->
+          {:ok, %EctoLibSql.Result{}, %EctoLibSql.State{conn_id: conn_id, mode: mode}}
 
-      {:error, reason} ->
-        {:disconnect, reason, state}
+        {:error, reason} ->
+          {:disconnect, reason, state}
+      end
     end
   end
 
@@ -347,15 +381,31 @@ defmodule EctoLibSql do
   Discards all changes made within the transaction and returns the connection
   to autocommit mode.
   """
-  def handle_rollback(_opts, %EctoLibSql.State{conn_id: conn_id, trx_id: _trx_id} = state) do
-    case EctoLibSql.Native.rollback(state) do
-      {:ok, _} ->
-        {:ok, %EctoLibSql.Result{}, %EctoLibSql.State{conn_id: conn_id, trx_id: nil}}
+  def handle_rollback(opts, %EctoLibSql.State{conn_id: conn_id, trx_id: _trx_id} = state) do
+    if Keyword.get(opts, :mode, :transaction) == :savepoint do
+      # ROLLBACK TO leaves the savepoint itself active (SQLite keeps it so it can
+      # be rolled back to again), so it has to be released explicitly afterwards
+      # or the next savepoint of the same name nests inside this one.
+      with :ok <- EctoLibSql.Native.rollback_to_savepoint_by_name(state, @savepoint),
+           :ok <- EctoLibSql.Native.release_savepoint_by_name(state, @savepoint) do
+        {:ok, %EctoLibSql.Result{}, state}
+      else
+        {:error, reason} -> {:error, savepoint_error(reason), state}
+      end
+    else
+      case EctoLibSql.Native.rollback(state) do
+        {:ok, _} ->
+          {:ok, %EctoLibSql.Result{}, %EctoLibSql.State{conn_id: conn_id, trx_id: nil}}
 
-      {:error, reason} ->
-        {:disconnect, reason, state}
+        {:error, reason} ->
+          {:disconnect, reason, state}
+      end
     end
   end
+
+  defp savepoint_error(reason) when is_binary(reason), do: %RuntimeError{message: reason}
+  defp savepoint_error(%{__exception__: true} = reason), do: reason
+  defp savepoint_error(reason), do: %RuntimeError{message: inspect(reason)}
 
   @impl true
   @doc """

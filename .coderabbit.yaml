@@ -1,0 +1,15 @@
+# yaml-language-server: $schema=https://coderabbit.ai/integrations/schema.v2.json
+
+# Inherit everything configured in the CodeRabbit organisation UI. Without this,
+# a repository-level config silently replaces those settings with schema defaults
+# rather than adding to them (`inheritance` defaults to false).
+inheritance: true
+
+reviews:
+  auto_review:
+    # Active development lands on `dev`, not the default branch, so without `dev`
+    # listed here CodeRabbit skips every PR with "auto reviews are disabled on
+    # base/target branches other than the default branch" and only reviews the
+    # occasional `dev` -> `main` release PR.
+    base_branches:
+      - ^dev$

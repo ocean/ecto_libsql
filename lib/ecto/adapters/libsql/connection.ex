@@ -1217,6 +1217,13 @@ defmodule Ecto.Adapters.LibSql.Connection do
     [expr(arg, sources, query) | " IS NULL"]
   end
 
+  # Ecto plans a negative literal as unary minus, so `ago(14, "day")` arrives as
+  # `{:datetime_add, _, [_, {:-, _, [14]}, "day"]}` once the query is cached. Without
+  # this clause the count falls through to the catch-all "?" and the interval is lost.
+  defp expr({:-, _, [arg]}, sources, query) do
+    [?-, ?(, expr(arg, sources, query), ?)]
+  end
+
   defp expr({:not, _, [arg]}, sources, query) do
     ["NOT (", expr(arg, sources, query), ?)]
   end
@@ -1244,6 +1251,23 @@ defmodule Ecto.Adapters.LibSql.Connection do
 
   defp expr({:>=, _, [left, right]}, sources, query) do
     [expr(left, sources, query), " >= ", expr(right, sources, query)]
+  end
+
+  # Arithmetic. Without these an expression like `where: s.count + 1 > 5` falls
+  # through to the catch-all at the bottom of expr/3 and is emitted as a bare "?",
+  # which binds to nothing: the query becomes `WHERE (? > 5)` and quietly matches
+  # no rows, and `select: s.count + 1` returns nil. Parenthesised so precedence
+  # survives nesting.
+  defp expr({op, _, [left, right]}, sources, query) when op in [:+, :-, :*, :/] do
+    [
+      ?(,
+      expr(left, sources, query),
+      ?\s,
+      Atom.to_string(op),
+      ?\s,
+      expr(right, sources, query),
+      ?)
+    ]
   end
 
   # Boolean logic
@@ -1384,9 +1408,59 @@ defmodule Ecto.Adapters.LibSql.Connection do
   defp expr(false, _sources, _query), do: "0"
   defp expr(nil, _sources, _query), do: "NULL"
 
+  # `ago/2` and `from_now/2` lower to these. Without a clause they fall through to
+  # the catch-all below, which emits a bare "?" - so the interval is dropped, only
+  # the datetime parameter binds, and the comparison silently degrades to
+  # `column > now()`. Every expiry window built on `ago/2` then matches nothing
+  # older than the current second.
+  #
+  # Timestamps are stored by `datetime_encode/1` as `DateTime.to_iso8601/1`, so the
+  # result has to be formatted the same way to compare correctly as text. The two
+  # formats agree to the second; a value carrying sub-second precision, or a naive
+  # column with no "Z", can therefore land on the wrong side of a bound only when it
+  # ties the cutoff to the exact second.
+  defp expr({:datetime_add, _, [datetime, count, interval]}, sources, query) do
+    [
+      "strftime('%Y-%m-%dT%H:%M:%SZ', ",
+      expr(datetime, sources, query),
+      ", ",
+      interval_modifier(count, interval, sources, query),
+      ?)
+    ]
+  end
+
+  defp expr({:date_add, _, [date, count, interval]}, sources, query) do
+    [
+      "date(",
+      expr(date, sources, query),
+      ", ",
+      interval_modifier(count, interval, sources, query),
+      ?)
+    ]
+  end
+
   # Default fallback for unsupported expressions
   defp expr(_expr, _sources, _query) do
     "?"
+  end
+
+  # Builds a SQLite time modifier such as '-14 days'. The count stays an expression
+  # rather than being interpolated, so an interpolated `ago(^n, "day")` still binds
+  # as a parameter. SQLite has no week/millisecond/microsecond modifiers, so those
+  # are converted to ones it does have - it accepts a fractional count.
+  defp interval_modifier(count, interval, sources, query) do
+    value = expr(count, sources, query)
+
+    {amount, unit} =
+      case interval do
+        "week" -> {[?(, value, ") * 7"], "days"}
+        "millisecond" -> {[?(, value, ") / 1000.0"], "seconds"}
+        "microsecond" -> {[?(, value, ") / 1000000.0"], "seconds"}
+        unit when unit in ~w(year month day hour minute second) -> {value, unit <> "s"}
+        other -> raise ArgumentError, "unsupported interval for libSQL: #{inspect(other)}"
+      end
+
+    ["CAST(", amount, " AS TEXT) || ' ", unit, ?']
   end
 
   defp combination(%{combinations: []}, _as_prefix), do: []
