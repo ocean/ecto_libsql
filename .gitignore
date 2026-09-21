@@ -49,3 +49,6 @@ TEST_COVERAGE_ISSUES_CREATED.md
 # Dolt database files (added by bd init)
 .dolt/
 *.db
+
+# Local exploration/testing artifacts (git-ignored).
+/.artifacts/
