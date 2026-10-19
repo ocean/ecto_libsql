@@ -34,6 +34,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - Updated `decimal` 3.1.1 → 3.2.0 in the lockfile (EEF-CVE-2026-97853). This only affects this repository's own builds - downstream projects resolve their own `decimal` version.
 - Updated `anyhow` to 1.0.104 (RUSTSEC-2026-0190 fixed in 1.0.103).
+- Acknowledged RUSTSEC-2026-0346 and RUSTSEC-2026-0349 (`rustls` 0.22.x) in `cargo deny` - transitive via libsql's `hyper-rustls` 0.25, fixed only in `rustls` 0.23.46+, so they cannot be resolved until libsql updates upstream.
 - Acknowledged RUSTSEC-2026-0258 (`h2` 0.3.x empty DATA frames) in `cargo deny` - transitive via libsql's `hyper` 0.14/`tonic` 0.11, and the fix only exists in `h2` 0.4.x, so it cannot be resolved until libsql updates upstream.
 
 ## [0.9.1] - 2026-05-07
