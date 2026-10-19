@@ -92,6 +92,14 @@ ignore = [
     # Fix only exists in h2 >=0.4.16, but hyper 0.14 (via tonic 0.11) requires h2 0.3.x and
     # 0.3.27 is the final 0.3.x release, so `cargo update -p h2` cannot resolve this
     { id = "RUSTSEC-2026-0258", reason = "Transitive dependency of libsql via hyper 0.14/tonic 0.11, waiting for upstream update" },
+    # rustls 0.22.x derived `Debug` on client session values exposes TLS secrets; only reachable through a
+    # custom ClientSessionStore that logs values, which neither ecto_libsql nor libsql provides
+    # Fix available in >=0.23.46 but libsql pins rustls 0.22.x via hyper-rustls 0.25 - waiting for upstream update
+    { id = "RUSTSEC-2026-0346", reason = "Transitive dependency of libsql via hyper-rustls 0.25, waiting for upstream update" },
+    # rustls 0.22.x records the server-selected key exchange group before authentication, allowing a
+    # network attacker to steer later handshakes away from the hybrid post-quantum group
+    # Fix available in >=0.23.46 but libsql pins rustls 0.22.x via hyper-rustls 0.25 - waiting for upstream update
+    { id = "RUSTSEC-2026-0349", reason = "Transitive dependency of libsql via hyper-rustls 0.25, waiting for upstream update" },
 ]
 # If this is true, then cargo deny will use the git executable to fetch advisory database.
 # If this is false, then it uses a built-in git library.
