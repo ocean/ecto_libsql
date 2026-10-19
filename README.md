@@ -14,7 +14,7 @@ Add `ecto_libsql` to your dependencies in `mix.exs`:
 ```elixir
 def deps do
   [
-    {:ecto_libsql, "~> 0.9.0"}
+    {:ecto_libsql, "~> 0.10.0"}
   ]
 end
 ```

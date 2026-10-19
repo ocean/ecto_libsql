@@ -7,13 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.10.0] - 2026-10-20
+
+### Added
+
+- **Nested Transactions via Savepoints** - `handle_begin/2`, `handle_commit/2` and `handle_rollback/2` now honour DBConnection's `mode: :savepoint`, so a `Repo.transaction/1` inside an open transaction creates a savepoint instead of failing with `cannot start a transaction within a transaction`. This makes application code that uses transactions testable under `Ecto.Adapters.SQL.Sandbox` (e.g. a `phx.gen.auth` test suite). The adapter's own libSQL transaction modes (`:deferred`, `:immediate`, `:exclusive`, `:read_only`) are unaffected. (Thanks [@BeagleSoftwareUK](https://github.com/BeagleSoftwareUK) for [PR #122](https://github.com/ocean/ecto_libsql/pull/122)!)
+- **`datetime_add/3` and `date_add/3` Support** - `ago/2`, `from_now/2`, `datetime_add/3` and `date_add/3` now generate correct SQL. Week, millisecond and microsecond intervals are converted to modifiers SQLite supports, and interpolated counts (`ago(^n, "day")`) are bound as parameters. (Thanks [@BeagleSoftwareUK](https://github.com/BeagleSoftwareUK) for [PR #123](https://github.com/ocean/ecto_libsql/pull/123)!)
+- **Arithmetic Operators** - `+`, `-`, `*` and `/` are now supported in query expressions (e.g. `where: s.count + 1 > 5`, `select: s.count * 2`), parenthesised so precedence survives nesting. (Thanks [@BeagleSoftwareUK](https://github.com/BeagleSoftwareUK) for [PR #124](https://github.com/ocean/ecto_libsql/pull/124)!)
+
 ### Fixed
 
+- **`ago/2` Silently Ignored Its Interval** - `ago/2` and `from_now/2` previously fell through to a bare `?` placeholder, so `where: t.inserted_at > ago(14, "day")` compared against the current time and the interval never applied. Expiry checks built on this (e.g. session token validity windows) rejected live rows while never enforcing the window.
+- **Arithmetic and Unary Minus Rendered as `?`** - Arithmetic expressions and negated values were emitted as an unbound `?`, returning wrong results rather than raising. Unary minus is now rendered correctly.
 - **Embedded Replica Initial Sync** - `connect/1` now performs an initial sync before serving any reads when an embedded replica is opened with `sync: true`. LibSQL pushes local writes to the primary on its own, but it never pulls remote changes unless `sync/1` is called, so a freshly opened replica read from an empty or stale local file - contradicting the README's claim that initial sync happens when you first connect. (Reported in [#118](https://github.com/ocean/ecto_libsql/issues/118))
+- **Savepoint Failure Leaves Connection in Pool** - A failed `RELEASE` or `ROLLBACK TO` now disconnects the connection instead of returning it to the pool with an indeterminate transaction state.
 
 ### Changed
 
+- **Breaking: `ago/2`/`from_now/2` Comparisons Against Microsecond Columns Now Raise** - Comparing a `:utc_datetime_usec` or `:naive_datetime_usec` field against `ago/2`, `from_now/2`, `datetime_add/3` or `date_add/3` in a schema query now raises `ArgumentError` instead of returning subtly wrong results. SQLite's date functions only work to millisecond precision, so the cutoff cannot be compared correctly against stored microsecond values. Ordinary comparisons against bound values on these columns, and all comparisons on second-precision columns (`:utc_datetime`, `:naive_datetime`, `:date`), are unaffected. Workaround: compute the cutoff in Elixir and bind it, e.g. `where: t.inserted_at > ^DateTime.add(DateTime.utc_now(), -14, :day)`. (Closes [#128](https://github.com/ocean/ecto_libsql/issues/128))
 - **Replica Sync Documentation** - Corrected the README's description of automatic sync. Remote changes made *after* you connect are not pulled in the background; `sync/1` is still required to observe them.
+- **Dependency Updates** - Bumped `rustler` 0.37 → 0.38, `rustler_precompiled` 0.9.0 → 0.10.0, `ecto` → 3.14.2, `ecto_sql` → 3.14.0 (with the `insert/8` callback adapted for ecto_sql 3.14), `db_connection` → 2.10.2, `tokio` → 1.53.1, `uuid` → 1.26.1, `bytes` → 1.12.1, plus various dev and transitive dependency updates.
+- **CI Toolchain** - Updated CI to Erlang/OTP 29 and Elixir 1.20; bumped GitHub Actions (`checkout` v7, `cache` v6, `zizmor-action` 0.6).
+- **Hex Package Contents** - The Hex package now includes only the Rust sources, `Cargo.toml` and `deny.toml` from `native/`, rather than the whole directory.
+
+### Security
+
+- Updated `decimal` 3.1.1 → 3.2.0 in the lockfile (EEF-CVE-2026-97853). This only affects this repository's own builds - downstream projects resolve their own `decimal` version.
+- Updated `anyhow` to 1.0.104 (RUSTSEC-2026-0190 fixed in 1.0.103).
+- Acknowledged RUSTSEC-2026-0258 (`h2` 0.3.x empty DATA frames) in `cargo deny` - transitive via libsql's `hyper` 0.14/`tonic` 0.11, and the fix only exists in `h2` 0.4.x, so it cannot be resolved until libsql updates upstream.
+
+## [0.9.1] - 2026-05-07
 
 ### Fixed
 
