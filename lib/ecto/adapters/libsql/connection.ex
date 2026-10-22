@@ -1384,9 +1384,12 @@ defmodule Ecto.Adapters.LibSql.Connection do
   defp expr(false, _sources, _query), do: "0"
   defp expr(nil, _sources, _query), do: "NULL"
 
-  # Default fallback for unsupported expressions
-  defp expr(_expr, _sources, _query) do
-    "?"
+  # Unsupported expressions raise: rendering them as a placeholder would bind
+  # the next parameter in their place and silently change the query.
+  defp expr(expr, _sources, query) do
+    raise Ecto.QueryError,
+      query: query,
+      message: "unsupported expression #{inspect(expr)}"
   end
 
   defp combination(%{combinations: []}, _as_prefix), do: []

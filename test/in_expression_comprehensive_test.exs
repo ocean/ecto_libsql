@@ -507,4 +507,14 @@ defmodule EctoLibSql.InExpressionComprehensiveTest do
       assert "item3" in result
     end
   end
+
+  describe "unsupported expressions" do
+    test "raise instead of being rendered as a \"?\" placeholder" do
+      query = from(t in "test_items", where: ilike(t.name, "job%"), select: t.name)
+
+      assert_raise Ecto.QueryError, ~r/unsupported expression/, fn ->
+        Ecto.Adapters.SQL.to_sql(:all, TestRepo, query)
+      end
+    end
+  end
 end
