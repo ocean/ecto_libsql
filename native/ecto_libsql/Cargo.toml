@@ -16,7 +16,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 libsql = { version = "0.9.29", features = ["encryption", "replication"] }
-rustler = { version = "0.38", default-features = false, features = ["derive", "nif_version_2_15"] }
+rustler = { version = "0.39", default-features = false, features = ["derive", "nif_version_2_15"] }
 tokio = "1.53.1"
 uuid = "1.26.1"
 bytes = "1.12.1"
