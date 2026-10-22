@@ -672,6 +672,15 @@ defmodule Ecto.Adapters.LibSql.Connection do
   defp quote_table(nil, name), do: quote_name(name)
   defp quote_table(prefix, name), do: quote_name(prefix) <> "." <> quote_name(name)
 
+  # Index and sources of the query named `as`, looked up through the parents
+  # of a subquery.
+  defp get_parent_sources_ix(query, as) do
+    case query.aliases[@parent_as] do
+      {%{aliases: %{^as => ix}}, sources} -> {ix, sources}
+      {%{} = parent, _sources} -> get_parent_sources_ix(parent, as)
+    end
+  end
+
   defp quote_name(name) when is_atom(name), do: quote_name(Atom.to_string(name))
 
   defp quote_name(name) do
@@ -1190,6 +1199,15 @@ defmodule Ecto.Adapters.LibSql.Connection do
   defp expr({{:., _, [{:&, _, [idx]}, field]}, _, []}, sources, _query)
        when is_atom(field) or is_binary(field) do
     {_, name} = get_source(nil, sources, idx)
+    [name, ?. | quote_name(field)]
+  end
+
+  # Field of a parent query named with `as:`, in a correlated subquery:
+  # parent_as(:user).id -> s0.id
+  defp expr({{:., _, [{:parent_as, _, [as]}, field]}, _, []}, _sources, query)
+       when is_atom(field) or is_binary(field) do
+    {ix, sources} = get_parent_sources_ix(query, as)
+    {_, name, _} = elem(sources, ix)
     [name, ?. | quote_name(field)]
   end
 

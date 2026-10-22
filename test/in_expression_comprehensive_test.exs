@@ -507,4 +507,35 @@ defmodule EctoLibSql.InExpressionComprehensiveTest do
       assert "item3" in result
     end
   end
+
+  describe "parent_as/1 - correlated subqueries" do
+    test "IN clause with a subquery referring to the parent query" do
+      Ecto.Adapters.SQL.query!(TestRepo, """
+      INSERT INTO test_items (id, state, name, inserted_at, updated_at)
+      VALUES (1, 'scheduled', 'job1', datetime('now'), datetime('now')),
+             (2, 'completed', 'job2', datetime('now'), datetime('now'))
+      """)
+
+      Ecto.Adapters.SQL.query!(TestRepo, """
+      INSERT INTO archived_items (item_id, state, name, inserted_at, updated_at)
+      VALUES (1, 'archived', 'job1_archived', datetime('now'), datetime('now'))
+      """)
+
+      # BEFORE FIX: parent_as/1 fell through to the catch-all expr clause,
+      # generating "?" in place of t.id: the next parameter was bound to it.
+      archived =
+        from(a in "archived_items",
+          where: a.item_id == parent_as(:item).id and a.state == ^"archived",
+          select: a.item_id
+        )
+
+      query =
+        from(t in "test_items", as: :item, where: t.id in subquery(archived), select: t.name)
+
+      {sql, _params} = Ecto.Adapters.SQL.to_sql(:all, TestRepo, query)
+      assert sql =~ ~r/\."item_id" = s0\."id"/
+
+      assert TestRepo.all(query) == ["job1"]
+    end
+  end
 end

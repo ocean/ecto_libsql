@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **Correlated Subqueries with `parent_as/1`** - The `parent_as/1` field references that correlate a subquery to its parent query had no `expr/3` clause and fell through to the catch-all, which rendered them as a bare `?` placeholder: the next bound parameter stood in for the field, silently changing the query. They are now translated to the parent query's source, as in the `ecto_sqlite3` adapter.
+
 ## [0.9.1] - 2026-05-07
 
 ### Fixed
