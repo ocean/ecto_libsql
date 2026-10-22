@@ -1359,6 +1359,11 @@ defmodule Ecto.Adapters.LibSql.Connection do
     expr(value, sources, query)
   end
 
+  # EXISTS subquery: exists(subquery) -> exists(SELECT ...)
+  defp expr({:exists, _, [subquery]}, sources, query) do
+    ["exists", expr(subquery, sources, query)]
+  end
+
   # SubQuery expression - generates inline SQL subquery
   defp expr(%Ecto.SubQuery{query: query}, sources, parent_query) do
     combinations =

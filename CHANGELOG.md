@@ -5,6 +5,12 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.0.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Fixed
+
+- **`exists/1` Subqueries** - `exists(subquery)` had no `expr/3` clause and fell through to the catch-all, which rendered it as a bare `?` placeholder. The next bound parameter then stood in for the whole condition, so the filter silently matched every row or none depending on its value (for example, the policies Ash Framework expresses with `exists(...)` let every actor through). It is now translated to `exists(SELECT ...)`, as in the `ecto_sqlite3` adapter.
+
 ## [0.9.1] - 2026-05-07
 
 ### Fixed

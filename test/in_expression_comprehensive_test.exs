@@ -507,4 +507,61 @@ defmodule EctoLibSql.InExpressionComprehensiveTest do
       assert "item3" in result
     end
   end
+
+  describe "exists/1" do
+    test "keeps every row when the subquery matches, none otherwise" do
+      Ecto.Adapters.SQL.query!(TestRepo, """
+      INSERT INTO test_items (id, state, name, inserted_at, updated_at)
+      VALUES (1, 'scheduled', 'job1', datetime('now'), datetime('now')),
+             (2, 'completed', 'job2', datetime('now'), datetime('now'))
+      """)
+
+      Ecto.Adapters.SQL.query!(TestRepo, """
+      INSERT INTO archived_items (item_id, state, name, inserted_at, updated_at)
+      VALUES (1, 'archived', 'job1_archived', datetime('now'), datetime('now'))
+      """)
+
+      # BEFORE FIX: exists/1 fell through to the catch-all expr clause, so the
+      # whole condition became "WHERE (?)": the parameter bound in its place
+      # matched every row or none depending on its value.
+      query = fn state ->
+        from(t in "test_items",
+          where: exists(from(a in "archived_items", where: a.state == ^state, select: 1)),
+          select: t.name,
+          order_by: t.name
+        )
+      end
+
+      {sql, _params} = Ecto.Adapters.SQL.to_sql(:all, TestRepo, query.("archived"))
+      assert sql =~ "WHERE (exists(SELECT "
+
+      assert TestRepo.all(query.("archived")) == ["job1", "job2"]
+      # "1" alone would have been read as true.
+      assert TestRepo.all(query.("1")) == []
+    end
+
+    test "negated" do
+      Ecto.Adapters.SQL.query!(TestRepo, """
+      INSERT INTO test_items (id, state, name, inserted_at, updated_at)
+      VALUES (1, 'scheduled', 'job1', datetime('now'), datetime('now')),
+             (2, 'completed', 'job2', datetime('now'), datetime('now'))
+      """)
+
+      Ecto.Adapters.SQL.query!(TestRepo, """
+      INSERT INTO archived_items (item_id, state, name, inserted_at, updated_at)
+      VALUES (1, 'archived', 'job1_archived', datetime('now'), datetime('now'))
+      """)
+
+      query = fn state ->
+        from(t in "test_items",
+          where: not exists(from(a in "archived_items", where: a.state == ^state, select: 1)),
+          select: t.name,
+          order_by: t.name
+        )
+      end
+
+      assert TestRepo.all(query.("archived")) == []
+      assert TestRepo.all(query.("deleted")) == ["job1", "job2"]
+    end
+  end
 end
